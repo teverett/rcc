@@ -327,9 +327,29 @@ class Pdp7Codegen : public Backend {
     bool currentFunctionIsLeaf_ = false;
 
     // A Local/Param's static cell when `currentFunctionIsLeaf_` - keyed
-    // on `id` (unique within this file's IR) rather than `sourceName`,
-    // since nothing outside this function ever references one by name.
-    static std::string leafLabel(const ir::Slot *slot) { return "LF" + std::to_string(slot->id); }
+    // on `id` (unique only within *this file's* IR - IRBuilder's own
+    // slot-id counter restarts at 0 for every separately compiled
+    // file under `--format=coff`) prefixed with `curFunctionLabel_`
+    // (`"FN_" + fn->sourceName`, already required to be globally
+    // unique program-wide - GenericLinker::merge's own duplicate-
+    // symbol check enforces it for every `isGlobalName` symbol, which
+    // a real function's own label always is). Without that prefix,
+    // two functions in different files whose own id counters happen
+    // to assign the same number to an unrelated local collide on the
+    // exact same linker-resolved address: `isGlobalName` doesn't
+    // recognize a bare "LF<n>" label as cross-file-visible, so
+    // GenericLinker::merge's own duplicate check never fires for it,
+    // and its "last definition wins" global symbol table silently
+    // aliases both functions' own "unrelated" cells onto one shared
+    // word - a real, previously-undiscovered miscompile this prefix
+    // closes, not merely a theoretical one: see
+    // ../../../../UnixV0-C/docs/known-bugs.md's entry for the real
+    // kernel bug this was first isolated from (`alloc()`/`write()`
+    // corrupting an on-disk inode, five `@nonrecursive` frames deep -
+    // `sys/s6.c`'s own `iput()` and `sys/alloc.c`'s own `alloc()`
+    // turned out to share a numerically-colliding "LF3"/"LF0" label
+    // across their own separately-compiled objects).
+    std::string leafLabel(const ir::Slot *slot) const { return curFunctionLabel_ + "_LF" + std::to_string(slot->id); }
 
     // True iff `fn`/`body` qualify for the leaf fast path above.
     static bool computeIsLeaf(const ir::Function *fn, const ir::Stmt *body);
