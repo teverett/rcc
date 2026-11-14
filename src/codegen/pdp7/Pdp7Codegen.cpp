@@ -78,6 +78,26 @@ bool stmtRulesOutLeaf(const ir::Stmt *s, bool allowCalls) {
     if (stmtRulesOutLeaf(s->postStmt.get(), allowCalls)) return true;
     return false;
 }
+
+// Whether `s` (or anything it contains) makes a call anywhere, with none
+// of stmtRulesOutLeaf()'s other disqualifiers - used to decide
+// `currentFunctionCallsSafe_` (see Pdp7Codegen.h's per-slot 'register'
+// extension of the leaf fast path), which needs this reentrancy check on
+// its own, independent of whether the function also happens to have a
+// wide/array/struct slot that rules out the full leaf path.
+bool stmtHasCall(const ir::Stmt *s) {
+    if (!s) return false;
+    if (exprMakesCall(s->cond.get())) return true;
+    if (exprMakesCall(s->initOrReturnOrExpr.get())) return true;
+    for (const auto &c : s->body) {
+        if (stmtHasCall(c.get())) return true;
+    }
+    if (stmtHasCall(s->thenStmt.get())) return true;
+    if (stmtHasCall(s->elseStmt.get())) return true;
+    if (stmtHasCall(s->loopBody.get())) return true;
+    if (stmtHasCall(s->postStmt.get())) return true;
+    return false;
+}
 }  // namespace
 
 bool Pdp7Codegen::computeIsLeaf(const ir::Function *fn, const ir::Stmt *body) {
@@ -85,6 +105,15 @@ bool Pdp7Codegen::computeIsLeaf(const ir::Function *fn, const ir::Stmt *body) {
         if (p->arraySize > 0 || slotIsWide(p) || p->type.base == BaseType::Struct) return false;
     }
     return !stmtRulesOutLeaf(body, fn->isNonRecursive);
+}
+
+// See Pdp7Codegen.h's per-slot 'register'/'const' extension of the leaf
+// fast path. Never true when `currentFunctionIsLeaf_` already is - the
+// two share the same cell/label, just reached via different conditions.
+bool Pdp7Codegen::usesStaticCell(const ir::Slot *slot) const {
+    return !currentFunctionIsLeaf_ && currentFunctionCallsSafe_ && (slot->isRegister || slot->isConst) &&
+           (slot->kind == ir::SlotKind::Local || slot->kind == ir::SlotKind::Param) &&
+           slot->arraySize == 0 && !slotIsWide(slot) && slot->type.base != BaseType::Struct;
 }
 
 std::string Pdp7Codegen::allocTemp() { return "T" + std::to_string(tempCounter_++); }
@@ -293,6 +322,12 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
     // method that treats a Local/Param differently reads this same
     // flag, set once here for whichever function is being generated.
     currentFunctionIsLeaf_ = computeIsLeaf(fn.func, fn.body.get());
+    // See Pdp7Codegen.h's per-slot 'register' extension: the same
+    // reentrancy guarantee the leaf path itself relies on, computed
+    // independently of whether some other slot also rules out the full
+    // leaf path.
+    currentFunctionCallsSafe_ =
+        currentFunctionIsLeaf_ || !stmtHasCall(fn.body.get()) || fn.func->isNonRecursive;
     if (currentFunctionIsLeaf_) {
         emitLeafParamBinding(fn.func);
         genStmt(*fn.body);
@@ -301,6 +336,20 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
         emitLeafReturn(/*hasValue=*/false);
     } else {
         emitPrologue(fn.func);
+        // A qualifying 'register'/'const' Param's cell starts empty -
+        // copy its real value in once, from its actual frame address
+        // (emitFrameSlotAddress(), bypassing usesStaticCell()'s own
+        // redirect), before any other code (which now reads/writes the
+        // cell exclusively) runs.
+        for (ir::Slot *p : fn.func->params) {
+            if (!usesStaticCell(p)) continue;
+            trailer_.push_back(leafLabel(p) + ": 0");
+            emitFrameSlotAddress(p);
+            code_ << "   dac __addr\n";
+            code_ << "   lac __addr i\n";
+            narrowAC(p->type);
+            code_ << "   dac " << leafLabel(p) << "\n";
+        }
         genStmt(*fn.body);
         emitEpilogueAndReturn(/*hasValue=*/false, Type{});
     }
@@ -391,6 +440,13 @@ void Pdp7Codegen::emitLeafReturn(bool hasValue) {
     code_ << "   jmp i " << curFunctionLabel_ << "\n";
 }
 
+void Pdp7Codegen::emitFrameSlotAddress(const ir::Slot *slot) {
+    long offset = (slot->kind == ir::SlotKind::Param) ? static_cast<long>(slot->frameOffset)
+                                                       : -localBaseOffset(slot);
+    code_ << "   lac __fp\n";
+    code_ << "   tad " << literalLabel(offset) << "\n";
+}
+
 void Pdp7Codegen::emitLoadSlotAddress(const ir::Slot *slot) {
     // `law <symbol>` loads AC with its own raw encoded instruction word
     // (0760000 | address), not a decoded address - masking to the low
@@ -402,15 +458,12 @@ void Pdp7Codegen::emitLoadSlotAddress(const ir::Slot *slot) {
         code_ << "   and " << literalLabel(kAddressFieldLimit - 1) << "\n";
         return;
     }
-    if (currentFunctionIsLeaf_) {
+    if (currentFunctionIsLeaf_ || usesStaticCell(slot)) {
         code_ << "   law " << leafLabel(slot) << "\n";
         code_ << "   and " << literalLabel(kAddressFieldLimit - 1) << "\n";
         return;
     }
-    long offset = (slot->kind == ir::SlotKind::Param) ? static_cast<long>(slot->frameOffset)
-                                                       : -localBaseOffset(slot);
-    code_ << "   lac __fp\n";
-    code_ << "   tad " << literalLabel(offset) << "\n";
+    emitFrameSlotAddress(slot);
 }
 
 void Pdp7Codegen::emitLoadSlot(const ir::Slot *slot) {
@@ -419,7 +472,7 @@ void Pdp7Codegen::emitLoadSlot(const ir::Slot *slot) {
         narrowAC(slot->type);
         return;
     }
-    if (currentFunctionIsLeaf_) {
+    if (currentFunctionIsLeaf_ || usesStaticCell(slot)) {
         code_ << "   lac " << leafLabel(slot) << "\n";
         narrowAC(slot->type);
         return;
@@ -435,7 +488,7 @@ void Pdp7Codegen::emitStoreSlot(const ir::Slot *slot) {
         code_ << "   dac " << label(slot) << "\n";
         return;
     }
-    if (currentFunctionIsLeaf_) {
+    if (currentFunctionIsLeaf_ || usesStaticCell(slot)) {
         code_ << "   dac " << leafLabel(slot) << "\n";
         return;
     }
@@ -1151,7 +1204,7 @@ void Pdp7Codegen::genStmt(const ir::Stmt &s) {
                 // uninitialized scalar's cell needs no store here -
                 // same as a non-leaf's frame slot, which simply isn't
                 // written until something actually assigns it.
-                if (currentFunctionIsLeaf_) {
+                if (currentFunctionIsLeaf_ || usesStaticCell(s.declSlot)) {
                     trailer_.push_back(leafLabel(s.declSlot) + ": 0");
                 }
                 if (s.initOrReturnOrExpr) {
@@ -1393,7 +1446,7 @@ std::optional<std::string> Pdp7Codegen::simpleCell(const ir::Expr &e) {
     const ir::Slot *slot = e.slot;
     if (!isPointer(slot->type) && slot->type.base == BaseType::Char) return std::nullopt;  // needs narrowAC()
     if (slot->kind == ir::SlotKind::Global) return label(slot);
-    if (currentFunctionIsLeaf_) return leafLabel(slot);
+    if (currentFunctionIsLeaf_ || usesStaticCell(slot)) return leafLabel(slot);
     return std::nullopt;
 }
 

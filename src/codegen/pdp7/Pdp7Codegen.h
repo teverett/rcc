@@ -322,7 +322,8 @@ class Pdp7Codegen : public Backend {
     //
     // `currentFunctionIsLeaf_` is set once per function in
     // genFunction(); every method that treats a Local/Param
-    // differently just reads it.
+    // differently just reads it. See also the per-slot 'register'/
+    // 'const' extension of this same mechanism, just below.
     bool currentFunctionIsLeaf_ = false;
 
     // A Local/Param's static cell when `currentFunctionIsLeaf_` - keyed
@@ -332,6 +333,56 @@ class Pdp7Codegen : public Backend {
 
     // True iff `fn`/`body` qualify for the leaf fast path above.
     static bool computeIsLeaf(const ir::Function *fn, const ir::Stmt *body);
+
+    // --- Per-slot 'register'/'const' extension of the leaf fast path -----
+    //
+    // The leaf fast path above is all-or-nothing per function: one wide/
+    // array/struct Local anywhere, or one call without `@nonrecursive`,
+    // falls the WHOLE function back to frame-relative addressing for
+    // EVERY Local/Param, even an otherwise-simple scalar one.
+    // `usesStaticCell()` grants the same cheap, no-reload storage to one
+    // such slot independently of the others in the same function, under
+    // the exact same reentrancy guarantee the leaf path itself relies on
+    // (no call anywhere in the function, or `@nonrecursive`):
+    // `currentFunctionCallsSafe_`, set once per function alongside
+    // `currentFunctionIsLeaf_`. The storage-shape exclusions (wide/array/
+    // struct) still apply per-slot, same reason as the leaf path's own
+    // (see above) - a single static cell can't represent any of those.
+    //
+    // Two independent, unrelated reasons make a slot eligible once that
+    // reentrancy guarantee holds:
+    //   - `register` (Slot::isRegister, see IR.h): the programmer's own
+    //     hint that this is exactly the kind of frequently-touched
+    //     scalar worth the cheapest storage available - the only thing
+    //     this backend has to offer it, having no general-purpose
+    //     register file of its own (see this file's class comment).
+    //   - `const` (Slot::isConst): never written after its declaration
+    //     (enforced at IR-build time - see IRBuilder.cpp's
+    //     rejectConstWrite()), so - precisely because reentrancy is
+    //     already guaranteed - its one static cell never needs to hold
+    //     more than one activation's value at a time, the same
+    //     "single value for this call" property a `register` slot gets
+    //     only by the programmer's explicit say-so.
+    //
+    // A qualifying slot reuses `leafLabel()`/its cell exactly as a leaf
+    // function's own slots do (the two cases are mutually exclusive per
+    // slot - this is only ever consulted when `currentFunctionIsLeaf_` is
+    // already false), so every load/store site that already branches on
+    // `currentFunctionIsLeaf_` just widens that one condition; see
+    // emitLoadSlotAddress()/emitLoadSlot()/emitStoreSlot()/simpleCell().
+    // A qualifying Param's cell is populated once, from its real frame
+    // address, right after emitPrologue() in genFunction() - see
+    // emitFrameSlotAddress(), the one place that still needs the slot's
+    // real frame address regardless of this extension.
+    bool currentFunctionCallsSafe_ = false;
+    bool usesStaticCell(const ir::Slot *slot) const;
+
+    // The frame-relative address of a Local/Param, ignoring any static
+    // cell it might otherwise use - factored out of emitLoadSlotAddress()
+    // so a qualifying Param's one-time entry copy (genFunction()) can
+    // still reach its real frame address once, before every later access
+    // redirects to its cell instead.
+    void emitFrameSlotAddress(const ir::Slot *slot);
 
     // The leaf equivalent of emitPrologue(): Params were pushed by the
     // caller in reverse order, so Param 0 is on top; popping them off
