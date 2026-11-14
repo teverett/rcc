@@ -300,10 +300,25 @@ class Pdp7Codegen : public Backend {
     // --- Leaf fast path ---------------------------------------------------
     //
     // A function that makes no call (`Call`/`CallPtr`) anywhere in its
-    // body, and declares no Local/Param array, can never be re-entered
-    // while running, so it's safe to skip the per-call frame and give
-    // each Param/Local one fixed static storage cell instead - this
-    // skips most of the frame's code-size cost per function.
+    // body, and declares no wide/array/struct Local/Param, can never be
+    // re-entered while running, so it's safe to skip the per-call frame
+    // and give each Param/Local one fixed static storage cell instead -
+    // this skips most of the frame's code-size cost per function.
+    //
+    // A function the programmer declared `@nonrecursive`
+    // (ir::Function::isNonRecursive) gets this same treatment even
+    // though it DOES call out - that assertion is exactly "no activation
+    // of this function is ever concurrent with another," the one thing
+    // the call-free case otherwise guarantees on its own.
+    // IRBuilder.cpp's own checkNonRecursiveFunctions() rejects same-file
+    // direct/indirect recursion back into such a function at compile
+    // time, but can't see past this file (an `extern` callee, or an
+    // indirect call through a computed address, is an unprovable dead
+    // end) - see docs/language.md's "Non-recursion" section for the
+    // exact contract this leaves to the programmer. The wide/array/
+    // struct exclusions still apply either way, unconditionally: they're
+    // about what a slot's single static cell can represent, not about
+    // reentrancy.
     //
     // `currentFunctionIsLeaf_` is set once per function in
     // genFunction(); every method that treats a Local/Param

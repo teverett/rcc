@@ -926,7 +926,7 @@ Program buildProgram(CParser::ProgramContext *ctx) {
             if (!local->block()) continue;  // same-file forward declaration only, nothing to generate
 
             FunctionDecl fn;
-            fn.name = local->IDENT()->getText();
+            fn.name = local->IDENT(0)->getText();
             fn.line = local->getStart()->getLine();
             fn.isStatic = local->stat != nullptr;
             buildReturnType(local->returnTypeSpec(), fn.returnType, fn.isVoid);
@@ -934,6 +934,13 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                 for (auto *p : pl->param()) {
                     fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr});
                 }
+            }
+            if (local->tag) {
+                if (local->tag->getText() != "nonrecursive") {
+                    err(local, "unknown function attribute '@" + local->tag->getText() +
+                                    "' - the only one recognized is '@nonrecursive'");
+                }
+                fn.isNonRecursive = true;
             }
             if (local->addr) {
                 fn.hasAddress = true;

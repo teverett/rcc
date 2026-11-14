@@ -5,6 +5,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 #include "../StructLayout.h"
 
@@ -14,6 +16,97 @@ namespace {
 
 [[noreturn]] void err(int line, const std::string &msg) {
     throw std::runtime_error("line " + std::to_string(line) + ": " + msg);
+}
+
+// Every direct `Call` target reachable from `e`, with the line of the
+// call site - `CallPtr`'s own callee is a runtime-computed address, not
+// traceable here, so it contributes nothing (a dead end for
+// checkNonRecursiveFunctions() below, not an error).
+void collectCallsInExpr(const ir::Expr *e, std::vector<std::pair<ir::Function *, int>> &out) {
+    if (!e) return;
+    if (e->kind == ir::ExprKind::Call && e->func) out.push_back({e->func, e->line});
+    collectCallsInExpr(e->lhs.get(), out);
+    collectCallsInExpr(e->rhs.get(), out);
+    collectCallsInExpr(e->elseExpr.get(), out);
+    for (const auto &a : e->args) collectCallsInExpr(a.get(), out);
+}
+
+void collectCallsInStmt(const ir::Stmt *s, std::vector<std::pair<ir::Function *, int>> &out) {
+    if (!s) return;
+    switch (s->kind) {
+        case ir::StmtKind::Block:
+            for (const auto &c : s->body) collectCallsInStmt(c.get(), out);
+            return;
+        case ir::StmtKind::If:
+            collectCallsInExpr(s->cond.get(), out);
+            collectCallsInStmt(s->thenStmt.get(), out);
+            collectCallsInStmt(s->elseStmt.get(), out);
+            return;
+        case ir::StmtKind::While:
+            collectCallsInExpr(s->cond.get(), out);
+            collectCallsInStmt(s->loopBody.get(), out);
+            collectCallsInStmt(s->postStmt.get(), out);
+            return;
+        case ir::StmtKind::Return:
+        case ir::StmtKind::LocalDecl:
+        case ir::StmtKind::ExprStmt:
+            collectCallsInExpr(s->initOrReturnOrExpr.get(), out);
+            return;
+        case ir::StmtKind::Break:
+        case ir::StmtKind::Continue:
+        case ir::StmtKind::Empty:
+        case ir::StmtKind::Asm:
+        case ir::StmtKind::Label:
+        case ir::StmtKind::Goto:
+            return;
+    }
+}
+
+// DFS from `start` over same-file calls only, erroring the moment one
+// leads back to `start` itself. A callee with no body in this compile
+// (an `extern` function another file defines) is a dead end, the same
+// honest "can't see past this file" limitation docs/language.md's own
+// "Non-recursion" section names - it's the programmer's assertion to get
+// right for that case, not something this check can verify.
+void findCycleBackTo(const ir::Function *start, const ir::Function *cur,
+                      const std::unordered_map<const ir::Function *, const ir::Stmt *> &bodyOf,
+                      std::vector<const ir::Function *> &path, std::unordered_set<const ir::Function *> &visited) {
+    auto it = bodyOf.find(cur);
+    if (it == bodyOf.end()) return;
+    std::vector<std::pair<ir::Function *, int>> calls;
+    collectCallsInStmt(it->second, calls);
+    for (const auto &[callee, line] : calls) {
+        if (callee == start) {
+            std::string chain = start->sourceName;
+            for (const ir::Function *p : path) chain += " -> " + p->sourceName;
+            chain += " -> " + start->sourceName;
+            err(line, "'" + start->sourceName +
+                          "' is declared '@nonrecursive' but its own call graph in this file leads back to "
+                          "itself (" +
+                          chain +
+                          ") - a function asserting this can't also call back into itself, directly or "
+                          "indirectly");
+        }
+        if (visited.insert(callee).second) {
+            path.push_back(callee);
+            findCycleBackTo(start, callee, bodyOf, path, visited);
+            path.pop_back();
+        }
+    }
+}
+
+// For every '@nonrecursive' function, confirms its own same-file call
+// graph never leads back to itself. See findCycleBackTo()'s own comment
+// for exactly what this can and can't see.
+void checkNonRecursiveFunctions(const ir::Program &prog) {
+    std::unordered_map<const ir::Function *, const ir::Stmt *> bodyOf;
+    for (const auto &fb : prog.functionBodies) bodyOf[fb.func] = fb.body.get();
+    for (const auto &fb : prog.functionBodies) {
+        if (!fb.func->isNonRecursive) continue;
+        std::vector<const ir::Function *> path;
+        std::unordered_set<const ir::Function *> visited{fb.func};
+        findCycleBackTo(fb.func, fb.func, bodyOf, path, visited);
+    }
 }
 
 std::string typeText(Type t) {
@@ -170,6 +263,7 @@ class Builder {
             fb.line = fn.line;
             prog_.functionBodies.push_back(std::move(fb));
         }
+        checkNonRecursiveFunctions(prog_);
         return std::move(prog_);
     }
 
@@ -322,6 +416,7 @@ class Builder {
             irFn->hasAddress = fn.hasAddress;
             irFn->address = fn.address;
             irFn->isStatic = fn.isStatic;
+            irFn->isNonRecursive = fn.isNonRecursive;
             if (fn.isStatic) irFn->sourceName = mangleStaticName(fn.sourceFile, fn.name);
             // Params start past a two-native-int reservation for the saved
             // frame pointer/return address. Each param occupies at least one

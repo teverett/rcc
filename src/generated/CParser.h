@@ -341,15 +341,18 @@ public:
     LocalFunctionDeclContext(FunctionDeclContext *ctx);
 
     antlr4::Token *stat = nullptr;
+    antlr4::Token *tag = nullptr;
     antlr4::Token *addr = nullptr;
     ReturnTypeSpecContext *returnTypeSpec();
-    antlr4::tree::TerminalNode *IDENT();
+    std::vector<antlr4::tree::TerminalNode *> IDENT();
+    antlr4::tree::TerminalNode* IDENT(size_t i);
     antlr4::tree::TerminalNode *LPAREN();
     antlr4::tree::TerminalNode *RPAREN();
     BlockContext *block();
     antlr4::tree::TerminalNode *SEMI();
     ParamListContext *paramList();
-    antlr4::tree::TerminalNode *AT();
+    std::vector<antlr4::tree::TerminalNode *> AT();
+    antlr4::tree::TerminalNode* AT(size_t i);
     antlr4::tree::TerminalNode *STATIC_KW();
     antlr4::tree::TerminalNode *NUMBER();
 

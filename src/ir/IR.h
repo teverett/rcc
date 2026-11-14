@@ -143,6 +143,15 @@ struct Function {
     // 'static': internal linkage, same as Slot::isStatic.
     bool isStatic = false;
 
+    // '@nonrecursive': the programmer's assertion that this function is
+    // never active twice at once - see AST.h's own comment and
+    // docs/language.md's "Non-recursion" section. A backend may use this
+    // to grant locals/params storage that only one activation can ever
+    // need at a time, instead of storage scoped to a real call frame -
+    // Pdp7Codegen.cpp's "Leaf fast path" does, for a function that would
+    // otherwise be disqualified only by containing a call.
+    bool isNonRecursive = false;
+
     // Local-variable frame size in bytes: highest Local frameOffset plus that
     // local's size, minus the reserved-int offset frameOffset is counted
     // from; 0 if no locals. Excludes params, which live in the caller's

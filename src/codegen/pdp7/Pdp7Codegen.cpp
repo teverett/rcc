@@ -41,7 +41,14 @@ bool slotIsWide(const ir::Slot *s) {
     return !isPointer(s->type) && (s->type.base == BaseType::Long || s->type.base == BaseType::LongLong);
 }
 
-bool stmtRulesOutLeaf(const ir::Stmt *s) {
+// `allowCalls` is true only for a function declared `@nonrecursive`
+// (ir::Function::isNonRecursive) - the programmer's own assertion that
+// no activation of it is ever concurrent with another, which is exactly
+// what the leaf scheme's single static cell per slot otherwise requires
+// a real call-free leaf to guarantee on its own. The storage-shape
+// disqualifiers below apply regardless: they're about what a slot's
+// own static cell can represent, not about reentrancy.
+bool stmtRulesOutLeaf(const ir::Stmt *s, bool allowCalls) {
     if (!s) return false;
     // A struct Local also disqualifies the leaf path: its member
     // accesses lower to real address arithmetic (&local + byte
@@ -58,15 +65,17 @@ bool stmtRulesOutLeaf(const ir::Stmt *s) {
     // bare-expression statements, which already go through
     // emitLoadSlot()/emitStoreSlot(); it never names `__fp`/`__sp`
     // directly, so it needs no special exclusion here.
-    if (exprMakesCall(s->cond.get())) return true;
-    if (exprMakesCall(s->initOrReturnOrExpr.get())) return true;
-    for (const auto &c : s->body) {
-        if (stmtRulesOutLeaf(c.get())) return true;
+    if (!allowCalls) {
+        if (exprMakesCall(s->cond.get())) return true;
+        if (exprMakesCall(s->initOrReturnOrExpr.get())) return true;
     }
-    if (stmtRulesOutLeaf(s->thenStmt.get())) return true;
-    if (stmtRulesOutLeaf(s->elseStmt.get())) return true;
-    if (stmtRulesOutLeaf(s->loopBody.get())) return true;
-    if (stmtRulesOutLeaf(s->postStmt.get())) return true;
+    for (const auto &c : s->body) {
+        if (stmtRulesOutLeaf(c.get(), allowCalls)) return true;
+    }
+    if (stmtRulesOutLeaf(s->thenStmt.get(), allowCalls)) return true;
+    if (stmtRulesOutLeaf(s->elseStmt.get(), allowCalls)) return true;
+    if (stmtRulesOutLeaf(s->loopBody.get(), allowCalls)) return true;
+    if (stmtRulesOutLeaf(s->postStmt.get(), allowCalls)) return true;
     return false;
 }
 }  // namespace
@@ -75,7 +84,7 @@ bool Pdp7Codegen::computeIsLeaf(const ir::Function *fn, const ir::Stmt *body) {
     for (const ir::Slot *p : fn->params) {
         if (p->arraySize > 0 || slotIsWide(p) || p->type.base == BaseType::Struct) return false;
     }
-    return !stmtRulesOutLeaf(body);
+    return !stmtRulesOutLeaf(body, fn->isNonRecursive);
 }
 
 std::string Pdp7Codegen::allocTemp() { return "T" + std::to_string(tempCounter_++); }

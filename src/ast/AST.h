@@ -156,6 +156,13 @@ struct FunctionDecl {
 
     bool isExternDecl = false;  // 'extern': defined in another file
     bool isStatic = false;      // 'static': internal linkage, not externally resolvable
+
+    // '@nonrecursive': the programmer's assertion that this function is
+    // never active twice at once (no direct/indirect recursion, no
+    // reentry while already running) - see docs/language.md's
+    // "Non-recursion" section and IRBuilder.cpp's own same-file call-graph
+    // check of it.
+    bool isNonRecursive = false;
 };
 
 struct GlobalVar {

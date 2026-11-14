@@ -128,9 +128,16 @@ enumMember
 // function in this file, but never becomes an extern placeholder another
 // file's 'extern' declaration can resolve against - see docs/language.md's
 // "Static declarations" section.
+//
+// An optional '@' tag (currently only '@nonrecursive' is recognized) comes
+// before the '@' addr placement, same as structDecl's own '@packedTag' -
+// see docs/language.md's "Non-recursion" section for what it asserts and
+// BuildAst.cpp's own check of its text (a plain IDENT, not a reserved
+// keyword, so 'nonrecursive' stays usable as an ordinary identifier
+// everywhere else).
 functionDecl
     : 'extern' returnTypeSpec IDENT '(' paramList? ')' ';'                                   # externFunctionDecl
-    | stat='static'? returnTypeSpec IDENT '(' paramList? ')' ('@' addr=NUMBER)? (block | ';') # localFunctionDecl
+    | stat='static'? returnTypeSpec IDENT '(' paramList? ')' ('@' tag=IDENT)? ('@' addr=NUMBER)? (block | ';') # localFunctionDecl
     ;
 
 // A function's return type is either an ordinary typeSpec or 'void'

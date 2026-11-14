@@ -225,6 +225,52 @@ regardless of what the compiler would pick, like a kernel's interrupt/
 trap vector cells. See `docs/ir.md`'s own "Fixed absolute placement"
 for exactly what `addr` means and how each backend applies it.
 
+## Non-recursion
+
+A function declared with a leading `@nonrecursive` (e.g.
+`int pget(int fileOffset) @nonrecursive { ... }`) asserts that no
+activation of it is ever concurrent with another: it's never called
+while an earlier call to it is still on the stack, whether directly
+(`pget` calling `pget`), indirectly through other functions
+(`pget` → `helper` → `pget`), or through re-entry while it's already
+running (an interrupt handler calling back into it).
+
+Why this matters: on a target with no base+offset addressing mode
+(e.g. pdp7), a function's own locals/parameters normally need a real,
+per-call stack frame addressed through a frame-pointer register — every
+read or write costs several words just computing that address, on top
+of the actual load/store. A function that's provably never re-entered
+doesn't need that: its locals can each get one fixed, shared storage
+cell instead, the same low-cost scheme already used for a "leaf"
+function (one that makes no call at all). `@nonrecursive` extends that
+same scheme to a function that *does* call others, as long as the
+assertion holds — see `src/codegen/pdp7/Pdp7Codegen.h`'s own "Leaf fast
+path" comment for pdp7's own use of it; a backend with no such scheme is
+free to ignore the flag entirely, the same way most backends don't
+special-case a call-free leaf either.
+
+**What the compiler checks, and what it doesn't:** rcc rejects a
+`@nonrecursive` function whose own call graph, followed only through
+functions *defined in this same file*, leads back to itself — direct
+self-calls and same-file mutual recursion are both caught at compile
+time. It can't see through a call to a function declared `extern` (a
+real file boundary) or through an indirect call via a computed function
+pointer (the actual callee isn't known until runtime) — for either of
+those, getting `@nonrecursive` right is the programmer's own
+responsibility, the same way `@packed`'s wire-layout promise on a
+struct is. Getting it wrong is a silent miscompile (two activations
+sharing one cell, corrupting each other's locals), not a caught error,
+so this is for code the programmer already knows is non-reentrant by
+construction — e.g. a single-threaded kernel's own non-interrupt-driven
+subroutines — not a request the compiler will verify end to end.
+
+A `@nonrecursive` function still follows the ordinary C calling
+convention from its *callers'* side — nothing about calling it changes.
+It may still have a wide, array, or `struct`-typed local or parameter;
+those always need a real address regardless of reentrancy, so they keep
+their ordinary frame-relative storage even on an otherwise-eligible
+`@nonrecursive` function.
+
 ## Inline asm
 
 `asm { ... }` is an escape hatch, not a parsed sub-language: the raw
