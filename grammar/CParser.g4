@@ -156,9 +156,11 @@ paramList
 // 'const' marks the declared name itself as never written to after its
 // declaration - see ../docs/language.md's "Const declarations" section
 // for exactly what it does (and doesn't, e.g. no pointee-vs-pointer
-// distinction) protect.
+// distinction) protect. 'register' is an optional hint accepted for real
+// C's sake - see ../docs/language.md's "Register declarations" section;
+// this subset doesn't act on it, same as real C compilers are free not to.
 param
-    : cst='const'? typeSpec IDENT
+    : reg='register'? cst='const'? typeSpec IDENT
     ;
 
 // The optional '@' addr on each local alternative is the same fixed-
@@ -232,10 +234,13 @@ statement
 // no runtime value available to initialize it from. 'const' on any
 // alternative here marks the local as never written to after its
 // declaration - see param's own comment above and
-// ../docs/language.md's "Const declarations" section.
+// ../docs/language.md's "Const declarations" section. 'register' (only on
+// the two non-'static' alternatives - real C's own two storage-class
+// specifiers are mutually exclusive) is the same accepted-but-unacted-on
+// hint as param's - see param's own comment above.
 simpleStmt
-    : cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)?                    # localArrayDecl
-    | cst='const'? typeSpec IDENT ('=' expr)?                                              # localDecl
+    : reg='register'? cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)?     # localArrayDecl
+    | reg='register'? cst='const'? typeSpec IDENT ('=' expr)?                              # localDecl
     | 'static' cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)?           # staticLocalArrayDecl
     | 'static' cst='const'? typeSpec IDENT ('=' (sign='-'? val=NUMBER | identVal=IDENT))? # staticLocalDecl
     | expr                                                                  # exprStmt

@@ -69,6 +69,13 @@ struct Slot {
     // declaration (assignment, compound-assignment, or ++/--) is rejected.
     bool isConst = false;
 
+    // Local/Param. 'register': accepted, not currently acted on by any
+    // backend - kept on the slot (rather than discarded after BuildAst, the
+    // way AST.h's own Stmt::isRegister/Param::isRegister are) so a future
+    // codegen pass has it available as an allocation hint without a
+    // separate plumbing change.
+    bool isRegister = false;
+
     // Local only. Set by the induction-nonneg optimizer pass when this
     // slot provably holds a non-negative value at every read within the
     // one `for(slot=<nonneg literal>; ...; slot=slot+<positive literal>)`

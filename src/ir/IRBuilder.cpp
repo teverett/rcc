@@ -429,6 +429,7 @@ class Builder {
                 p->type = resolveStructType(fn.params[i].type, fn.line);
                 rejectStructByValue(p->type, fn.line, "a function parameter");
                 p->isConst = fn.params[i].isConst;
+                p->isRegister = fn.params[i].isRegister;
                 p->ownerFunctionName = fn.name;
                 p->paramIndex = static_cast<int>(i);
                 // No alignUp: the caller's push sequence lays params
@@ -1474,6 +1475,7 @@ class Builder {
                 ir::Slot *slot = allocSlot(ir::SlotKind::Local, s.declName, s.arraySize);
                 slot->type = resolveStructType(s.type, s.line);
                 slot->isConst = s.isConst;
+                slot->isRegister = s.isRegister;
                 if (slot->type.base == BaseType::Struct) {
                     // A struct local (scalar or array) starts uninitialized,
                     // same as any other local with no initializer - skip

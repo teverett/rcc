@@ -131,6 +131,9 @@ struct Stmt {
     bool isStatic = false;
     // LocalDecl: 'const' - writing to this name after its declaration is rejected.
     bool isConst = false;
+    // LocalDecl: 'register' - accepted, not acted on (never set alongside isStatic;
+    // the grammar doesn't allow both on the same declaration).
+    bool isRegister = false;
 };
 
 using StmtPtr = std::unique_ptr<Stmt>;
@@ -140,7 +143,8 @@ using StmtPtr = std::unique_ptr<Stmt>;
 struct Param {
     std::string name;
     Type type;
-    bool isConst = false;  // 'const': writing to this parameter is rejected
+    bool isConst = false;    // 'const': writing to this parameter is rejected
+    bool isRegister = false; // 'register': accepted, not acted on
 };
 
 struct FunctionDecl {

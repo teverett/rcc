@@ -638,6 +638,7 @@ StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
         s->arrayInit = buildArrayInit(c->arrayInit());
         padArrayInit(s->arrayInit, s->arraySize, c);
         s->isConst = c->cst != nullptr;
+        s->isRegister = c->reg != nullptr;
         return s;
     }
     if (auto *c = dynamic_cast<CParser::LocalDeclContext *>(ctx)) {
@@ -648,6 +649,7 @@ StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
         s->type = buildType(c->typeSpec());
         if (auto *e = c->expr()) s->initOrReturnOrExpr = buildExpr(e);
         s->isConst = c->cst != nullptr;
+        s->isRegister = c->reg != nullptr;
         if (s->isConst && !s->initOrReturnOrExpr) {
             err(c, "a 'const' local must have an initializer");
         }
@@ -915,7 +917,7 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                 buildReturnType(ext->returnTypeSpec(), fn.returnType, fn.isVoid);
                 if (auto *pl = ext->paramList()) {
                     for (auto *p : pl->param()) {
-                        fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr});
+                        fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr, p->reg != nullptr});
                     }
                 }
                 fn.isExternDecl = true;
@@ -932,7 +934,7 @@ Program buildProgram(CParser::ProgramContext *ctx) {
             buildReturnType(local->returnTypeSpec(), fn.returnType, fn.isVoid);
             if (auto *pl = local->paramList()) {
                 for (auto *p : pl->param()) {
-                    fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr});
+                    fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr, p->reg != nullptr});
                 }
             }
             if (local->tag) {

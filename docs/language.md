@@ -456,6 +456,29 @@ would be. A `const` array's elements, by contrast, *are* protected
 is addressed directly off the array's own slot, not through a separate
 pointer value.
 
+## Register declarations
+
+`register` may appear on a local declaration or a function parameter
+(not on a file-scope global, and not combined with `static` on the
+same local - real C's own storage-class specifiers are mutually
+exclusive there), same as real C:
+
+```c
+int add(register int a, register const int b) {
+    register int sum = a + b;
+    return sum;
+}
+```
+
+It's accepted and otherwise has no effect: this subset's ordinary
+(non-`static`) locals already get a plain stack-frame slot, so there's
+no separate "non-register" allocation for `register` to differ from -
+real C compilers are likewise free to ignore it. When combined with
+`const` on the same declaration, `register` comes first (`register
+const int x`, not `const register int x`), same fixed order the
+grammar's other storage-class-specifier-then-`const` alternatives
+(`extern`/`static`) use.
+
 ## Building / Usage
 
 Building rcc from source, and every compile-mode/link-mode
