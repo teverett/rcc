@@ -8,7 +8,7 @@ backend is selected — since every backend-specific decision
 after the IR exists, an optimizer written once benefits every target
 (see `docs/platforms.md` for the full list).
 
-Today there are nine, run in this order (`src/main.cpp`). Eight implement
+Today there are ten, run in this order (`src/main.cpp`). Nine implement
 the shared `Optimizer` interface; `AddressHoisting` is the exception (see
 below).
 
@@ -95,6 +95,23 @@ below).
   this doesn't implement the `Optimizer` interface — `main.cpp` calls it
   directly, like `recomputeFrameLayout`. Runs after `LocalCSE` for the
   same canonicalization reason the passes below do.
+
+- **`InductionNonNegative`**
+  (`src/optimizers/induction_nonneg/InductionNonNegative.cpp`) — proves
+  non-negativity for one narrow loop idiom: a Local `Slot` initialized to
+  a non-negative literal and incremented only by a positive literal
+  inside the one loop that owns it (the `for(i=0; i<N; i=i+1)`
+  desugaring), with no other write to it and its address never taken
+  anywhere in the function. Marks such a slot's `knownNonNegative` flag
+  (`ir/IR.h`), which a backend's signed-comparison lowering may treat the
+  same as a non-negative literal operand — `Pdp7Codegen.cpp`'s
+  `genCompareCells()` does, letting `emitSignedLtCells()` skip that
+  operand's own dynamic sign dispatch. Deliberately narrow rather than a
+  general value-range-analysis pass (see `docs/known-bugs.md`'s own
+  PDP-7 entry for the general case this doesn't cover); conservative
+  enough that two sequential loops in one function reusing the same
+  counter variable disqualify each other, since each sees the other's
+  init/increment as an unrelated write.
 
 - **`DeadStoreElimination`**
   (`src/optimizers/dead_store_elimination/DeadStoreElimination.cpp`) —

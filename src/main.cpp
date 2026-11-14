@@ -47,6 +47,7 @@
 #include "optimizers/dead_code_elimination/DeadCodeElimination.h"
 #include "optimizers/dead_store_elimination/DeadStoreElimination.h"
 #include "optimizers/identical_code_folding/IdenticalCodeFolding.h"
+#include "optimizers/induction_nonneg/InductionNonNegative.h"
 #include "optimizers/local_cse/LocalCSE.h"
 #include "optimizers/unused_global_elimination/UnusedGlobalElimination.h"
 #include "preprocessor/Preprocessor.h"
@@ -466,6 +467,11 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // Optimizer - see AddressHoisting.h.
         rcc::AddressHoisting addrHoist;
         addrHoist.run(irProg, backend.typeWidths(), srcPath);
+        // After the above for the same canonicalization reason; narrow
+        // enough (see InductionNonNegative.h) that ordering relative to
+        // them doesn't actually matter beyond that.
+        rcc::InductionNonNegative indNonNeg;
+        indNonNeg.run(irProg, srcPath);
         // Before DeadCodeElimination, so a LocalDecl this pass strips down
         // to a bare, unread declaration looks unused to it too.
         rcc::DeadStoreElimination dse;

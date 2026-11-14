@@ -1781,6 +1781,12 @@ void Pdp7Codegen::genCompareCells(const ir::Expr &a, const ir::Expr &b, bool uns
     auto flip = [&]() {
         if (unsignedCmp) code_ << "   xor " << literalLabel(0400000L) << "\n";
     };
+    // Whether `e`'s sign is knowable with no runtime cost at all - a
+    // literal, or a slot the induction-nonneg pass proved non-negative
+    // (see IR.h's own `knownNonNegative`).
+    auto hasStaticSign = [&](const ir::Expr &e) {
+        return e.kind == ir::ExprKind::IntLit || (e.kind == ir::ExprKind::Var && e.slot && e.slot->knownNonNegative);
+    };
     // A cell already holding the operand's comparison value: a
     // constant (flipped at compile time) or, for a signed comparison,
     // a plain variable.
@@ -1792,6 +1798,20 @@ void Pdp7Codegen::genCompareCells(const ir::Expr &a, const ir::Expr &b, bool uns
             return literalLabel(w);
         }
         if (unsignedCmp) return std::nullopt;
+        // A slot the induction-nonneg pass proved always non-negative
+        // (see InductionNonNegative.h) gets the same known-sign treatment
+        // a literal does, letting emitSignedLtCells() skip its dynamic
+        // sign dispatch for this operand - but only when the *other*
+        // operand is also statically sign-known. Otherwise
+        // emitSignedLtCells()'s own "either sign known" branch inlines a
+        // dedicated subtract for this call site, which costs more than
+        // the shared `__cmp_lt` subroutine the fully-unknown case already
+        // routes through when the other operand needs its own runtime
+        // sign check anyway - no sharing is gained by knowing just one
+        // side here.
+        if (e.kind == ir::ExprKind::Var && e.slot && e.slot->knownNonNegative && hasStaticSign(&e == &a ? b : a)) {
+            sign = 0;
+        }
         return simpleCell(e);
     };
     auto toTemp = [&]() {

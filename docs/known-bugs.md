@@ -79,30 +79,30 @@ platform whose own hardware also reaches high memory could move the
 stack somewhere genuinely clear of it, or some other way to reserve a
 provably-safe margin instead of an empirically-chosen one.
 
-## PDP-7 codegen can't prove a variable comparison operand is non-negative, so it still pays the full sign-dispatch cost inline
+## PDP-7 codegen still pays the full sign-dispatch cost inline for a variable comparison operand outside the one idiom it can prove non-negative
 
 Affects `src/codegen/pdp7/Pdp7Codegen.cpp`'s `emitSignedLtCells()`/
 `genCompareCells()`.
 
-When neither operand's sign is known at compile time, `emitSignedLtCells()`
-sign-dispatches on both operands via the shared `__cmp_lt` subroutine
-(`pdp7RuntimeAsm()`, called via `jms`), paying that cost even for a
-variable a human reader can see never actually goes negative - a `for`
-loop's own induction variable (`i = 0; ...; i++`), for example.
-Eliminating that dispatch would need the compiler to prove a variable's
-value range at a given program point (e.g. that such a loop keeps `i`
-non-negative until it exits), not just recognize a literal operand the
-way the compile-time-constant case already does. That's a
-value-range-analysis pass that doesn't exist anywhere in this codebase
-(no `nonNeg`/`ValueRange`/range-tracking code anywhere in `src/ir` or
-`src/codegen`) - a narrow, syntax-only pattern match for just the
-`for(i=0;...)` shape would be easy to get subtly wrong (e.g. missing a
-path that reassigns `i` inside the loop body), and a real general pass is
-a substantial undertaking on its own. Still PDP-7-specific: the PDP-7 has
-no condition-code/flags register, so every signed `<` needs sign-based
-machinery at all, unlike i386/6502 which get a correct comparison for
-free from one native compare instruction regardless of either operand's
-sign.
+`src/optimizers/induction_nonneg/InductionNonNegative.cpp` now proves
+non-negativity for one narrow, common idiom - a Local slot initialized to
+a non-negative literal and only ever incremented by a positive literal
+inside the one loop that owns it, with no other write or `&slot` anywhere
+in the function (the `for(i=0; i<N; i=i+1)` desugaring) - letting
+`genCompareCells()`'s `ready()` treat such a slot's `Var` read the same
+as a literal operand. Every other variable whose sign a human reader can
+see never goes negative but doesn't match that exact shape (a decrementing
+loop, a sign proven across an `if`, a value range narrower than "always
+non-negative from zero") still pays the full dynamic sign dispatch via the
+shared `__cmp_lt` subroutine. Closing that general case would need a real
+value-range-analysis pass, which still doesn't exist anywhere in this
+codebase (no `ValueRange`/range-tracking code in `src/ir` or
+`src/codegen` - only the one slot-level `knownNonNegative` flag the narrow
+pass above sets) - a substantial undertaking on its own, not attempted
+here. Still PDP-7-specific: the PDP-7 has no condition-code/flags
+register, so every signed `<` needs sign-based machinery at all, unlike
+i386/6502 which get a correct comparison for free from one native compare
+instruction regardless of either operand's sign.
 
 ## A packed struct can still land at a misaligned absolute address on `mips`/`r10000`
 

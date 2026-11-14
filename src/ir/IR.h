@@ -69,6 +69,15 @@ struct Slot {
     // declaration (assignment, compound-assignment, or ++/--) is rejected.
     bool isConst = false;
 
+    // Local only. Set by the induction-nonneg optimizer pass when this
+    // slot provably holds a non-negative value at every read within the
+    // one `for(slot=<nonneg literal>; ...; slot=slot+<positive literal>)`
+    // loop that owns it (see InductionNonNegative.h) - nothing else in
+    // the function writes or takes this slot's address. A backend's
+    // signed-comparison lowering may treat a `Var` read of such a slot
+    // the same as a non-negative integer literal operand.
+    bool knownNonNegative = false;
+
     // Param only. A backend's label for a global/param slot must be a
     // deterministic function of name + position, not of `id` (which is just
     // this compile's own allocation order) — separate compilation units
