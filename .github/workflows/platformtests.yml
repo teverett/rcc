@@ -67,13 +67,14 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libc6-dev-i386
 
-      # Only `make` and `python` are needed here (not gcc) - rcc.exe does
-      # its own codegen/linking, and the i386-windows hello example only
-      # pulls in msvcrt.dll/kernel32.dll, both present on any Windows
-      # machine. `python` is MSYS2's own package (providing the `python3`
-      # this job's assertion scripts below run under this shell) - the
-      # windows-latest runner's own system Python isn't on PATH inside
-      # the `msys2 {0}` shell.
+      # `make` and `python` cover every other example here - rcc.exe does its own codegen/
+      # linking, and the i386-windows hello example only pulls in msvcrt.dll/kernel32.dll, both
+      # present on any Windows machine; `python` is MSYS2's own package (providing the `python3`
+      # this job's assertion scripts below run under this shell) - the windows-latest runner's
+      # own system Python isn't on PATH inside the `msys2 {0}` shell. `gcc` is the one exception:
+      # examples/vex/'s own `test` target builds the vendored vex interpreter
+      # (tests/sim/vex/vex.c, plain C99) from source to run the compiled example under, needing
+      # a real C compiler rather than anything rcc itself produces.
       - uses: msys2/setup-msys2@v2
         if: matrix.name == 'windows'
         with:
@@ -82,6 +83,7 @@ jobs:
           install: >-
             python
             mingw-w64-ucrt-x86_64-make
+            mingw-w64-ucrt-x86_64-gcc
 
       - name: Install py65 (6502 emulator)
         if: matrix.name == 'macos'
@@ -140,3 +142,16 @@ jobs:
         if: matrix.name == 'windows'
         shell: msys2 {0}
         run: mingw32-make -C examples/hosted-hello test
+
+      # Unlike the simulator-dependent examples above, examples/vex/'s own `test` target only
+      # needs a real C compiler (to build the vendored reference interpreter it then runs the
+      # compiled example under - tests/sim/vex/vex.c, plain C99, no dependencies), which every
+      # OS here already has, so this runs everywhere rather than joining the macOS-only list.
+      - name: Build and run vex example (macOS/Linux)
+        if: matrix.name != 'windows'
+        run: make -C examples/vex test
+
+      - name: Build and run vex example (Windows)
+        if: matrix.name == 'windows'
+        shell: msys2 {0}
+        run: mingw32-make -C examples/vex test CC=gcc

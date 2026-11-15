@@ -248,6 +248,7 @@ FileFormatKind detectFileFormat(const std::string &bytes) {
         0x8051,  // 8051/8052/8031/8032 (mcs51)
         0xFC18,  // pic18
         0x16F8,  // pic16
+        0x5658,  // vex
     };
     if (bytes.size() >= 2) {
         uint16_t machine = static_cast<uint8_t>(bytes[0]) | (static_cast<uint8_t>(bytes[1]) << 8);

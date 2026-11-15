@@ -777,6 +777,55 @@ pair - see `docs/using.md`.
   the branch/load/multiply delay slots faithfully; `tests/tms320c6713/
   *.c` holds the C6713-only cases. Standard library only, nothing to
   install. Not run by `make test`.
+- **parrotvm** — PIR (Parrot Intermediate Representation) text
+  (`src/codegen/parrotvm/ParrotVmCodegen.h`) for the Parrot virtual
+  machine, the register-based VM originally built for Perl 6/Rakudo.
+  Parrot has no raw-memory instruction and no fixed register count, so
+  every `Slot` (global, local, param, scalar or array) lives in one
+  synthetic flat address space - a global `ResizableIntegerArray` PMC -
+  addressed the same way every other backend's own Slots are, rather
+  than in a bare register; only expression-evaluation intermediates use
+  Parrot's own unlimited-count `$I` registers. Control transfer (call/
+  return, argument passing) uses Parrot's native sub-call mechanism
+  directly. Every integer type this project supports (`char` through
+  `long long` - there is no `float`/`double` in this project's C subset
+  at all) fits in one native `$I` register, so unlike most other
+  backends here, `long`/`long long` need no multi-word carry chain.
+  `assembledFormats()` is just `raw` (`--format=raw` is the same PIR
+  text as `--format=asm`, byte for byte - there is no real in-process
+  assembler, just like `--format=asm` is consumed directly by the
+  external `parrot` interpreter/compiler) and there is no
+  `TargetLinker`/`--link` support, the same shape as `pdp1`.
+  Parrot's own Homebrew formula is disabled (unmaintained upstream since
+  ~2017), so this backend has no real-interpreter test coverage -
+  `tests/parrotvm_codegen_test.cpp` checks `ParrotVmCodegen::generate()`'s
+  output structurally instead (no `tests/run_tests.sh --target=parrotvm`).
+- **vex** — Vex (`src/codegen/vex/VexCodegen.h`, `/Users/tom/projects/vex`), a minimal
+  byte-addressed 32-bit stack machine in the spirit of uxn: 22 one-byte instructions, no
+  general-purpose registers at all, a data stack and a separate return stack. This backend's own
+  shape follows from that: there is no register allocator, because compiling an expression just
+  means walking it and emitting the stack ops that leave its value on top of the data stack.
+  `char`/`short`/`int`/`long` are all one 32-bit cell (the machine has no narrower `LD`/`ST`); an
+  explicit or implicit narrowing conversion still masks and sign-extends correctly, but a bare
+  `char`/`short` variable's own storage never silently wraps on overflow the same way real 8-/
+  16-bit storage would. `long long` and `struct` aren't supported yet (see
+  `VexCodegen.h`'s own class comment for the former's reason - no carry/overflow flag at all).
+  `DIV` is unsigned-only and there's no shift instruction, so signed `/`/`%` and a variable-count
+  `<<`/`>>` go through small shared runtime routines (software long division's sign-then-
+  magnitude trick, and repeated doubling/halving) emitted once per program, or once in every
+  object-mode link's entry object. A function that never calls anything (or is marked
+  `@nonrecursive`) gives every Local/Param its own static memory cell; one that does call
+  something gets independent, properly-recursive storage on the return stack instead (`PUSH`/
+  `POP`/`LDS.r`/`STS.r`, exactly docs/SPEC.md's own suggested convention) - but can't take the
+  address of, or declare an array/struct, Local/Param, since the return stack isn't addressable
+  memory at all (a clear compile error names the construct). `--format=raw` is a flat ROM a
+  vendored reference interpreter (`tests/sim/vex/vex.c`) loads at `0x0100` and runs for real;
+  `--format=coff`/`--link` support real separate compilation (`src/rt/vex/` is a real runtime
+  library: console I/O through the machine's own `DEI`/`DEO` reference devices). `main`'s return
+  value is left untouched on top of the data stack at the normal halt (an empty return stack),
+  rather than becoming a process exit code - this machine has no stronger OS/exit-code
+  convention of its own; a program that wants a specific exit status writes it explicitly via
+  `vex_exit()` (`DEO` to port `0x00`).
 
 Every global variable is a single statically allocated word; every Local
 and Param lives in a per-call frame that each backend builds on whatever
@@ -784,7 +833,10 @@ stack (hardware or software) its target provides, so direct and
 indirect/mutual recursion compute correctly everywhere — bounded by that
 backend's own real limit (available memory for a software stack, or a
 fixed-depth hardware call stack on `8008`/`pic16`/`pic18` that can't be
-extended).
+extended) — except on `vex`, where a recursive function's Locals/Params
+can't be an array/struct or have their address taken at all (see that
+target's own entry above: its per-call frame lives on a stack that isn't
+addressable memory).
 
 The same C subset compiles to every target, each predefining its own
 macro for `#ifdef`-gated code (an alias target defines both its base
@@ -803,5 +855,5 @@ target's macro and its own): `__PDP1__`, `__PDP7__`, `__8086__` (also for
 `__POWERPC__` (also `__ppc__`), `__SPARC__` (also `__sparc__`), `__VAX__`
 (also `__vax__`), `__AVR__` (also `__AVR_ATmega328P__`), `__ALPHA__`
 (also `__alpha__`), `__SATURN__`, `__TMS320C6713__` (also
-`__tms320c6713__`) — see `src/main.cpp`'s `predefinedMacros` setup in
+`__tms320c6713__`), `__PARROTVM__`, `__VEX__` — see `src/main.cpp`'s `predefinedMacros` setup in
 `main()`.

@@ -6,7 +6,7 @@
 # on every target (see ../src/Backend.h: a .c file means the same
 # thing regardless of --target).
 #
-# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|tms9900|8008|8051|stm32|i386|armv7a|armv8a] [--optimize]
+# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|tms9900|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
 #
 # --optimize passes rcc's own --optimize straight through to every
 # compile below, so the exact same checks also confirm the IR
@@ -343,8 +343,14 @@ case "$TARGET" in
         # small from-scratch C67x core written just for this, the same idea as check_alpha()/
         # check_saturn(). Standard library only, nothing to install.
         ;;
+    vex)
+        if ! command -v "${CC:-cc}" >/dev/null 2>&1; then
+            echo "no C compiler (\$CC or 'cc') found on PATH - needed to build the vendored vex interpreter" >&2
+            exit 1
+        fi
+        ;;
     *)
-        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, tms9900, 8008, 8051, stm32, i386, armv7a, armv8a)" >&2
+        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, tms9900, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
         exit 1
         ;;
 esac
@@ -357,6 +363,16 @@ tmpdir="$(mktemp -d)"
 sockdir="$(mktemp -d /tmp/rccq.XXXXXX)"
 qemu_count=0
 trap 'rm -rf "$tmpdir" "$sockdir"' EXIT
+
+# Built once, reused by every check_vex() call below - the reference interpreter vendored at
+# ../tests/sim/vex/vex.c (see that file's own header comment).
+if [ "$TARGET" = "vex" ]; then
+    vex_interp="$tmpdir/vex_interp"
+    if ! "${CC:-cc}" -O2 -o "$vex_interp" "$SCRIPT_DIR/sim/vex/vex.c"; then
+        echo "failed to build the vendored vex interpreter (tests/sim/vex/vex.c)" >&2
+        exit 1
+    fi
+fi
 
 # Runs "$@" with a portable bash-only timeout: `timeout`/`gtimeout`
 # aren't guaranteed to exist (notably, GitHub's macOS runners have
@@ -1559,6 +1575,48 @@ check_armv8a() {
         return 0
     fi
     echo "FAIL $name: expected $expect, got $x0_dec (X00 hex: $x0_hex)"
+    return 1
+}
+
+# vex has a real reference interpreter (vendored at ../tests/sim/vex/vex.c, built once into
+# $vex_interp above), so this runs a genuine simulator, not a from-scratch core. `main`'s return
+# value sits untouched on top of the data stack at the normal halt VexCodegen.cpp's own entry
+# sequence produces (see that file's own class comment) - read back via the interpreter's own
+# `-d` dump flag rather than its exit status, since the exit status is only ever the low byte of
+# an explicit `DEO`-to-port-0 (see docs/SPEC.md), not wide enough for every EXPECT value here.
+check_vex() {
+    local src="$1" name="$2"
+    local romfile="$tmpdir/$name.rom"
+
+    if ! "$RCC" --target=vex --format=raw \
+            $OPTFLAGS --dump-ir --out="$romfile" "$src" >"$tmpdir/$name.log" 2>&1; then
+        echo "FAIL $name: compile error"
+        sed 's/^/    /' "$tmpdir/$name.log"
+        return 1
+    fi
+
+    local dump
+    dump="$(run_with_timeout 10 "$vex_interp" -d -s 20000000 "$romfile" 2>&1 >/dev/null)"
+    local ds_line
+    ds_line="$(printf '%s\n' "$dump" | grep '^ds: ')"
+    if [ -z "$ds_line" ]; then
+        echo "FAIL $name: interpreter didn't halt normally"
+        printf '%s\n' "$dump" | sed 's/^/    /'
+        return 1
+    fi
+    local ds_hex="${ds_line#ds: }"
+    if [ "${#ds_hex}" -lt 8 ]; then
+        echo "FAIL $name: data stack empty at halt - no return value from main()"
+        return 1
+    fi
+    local top_hex="${ds_hex: -8}"
+    local top_dec=$((16#$top_hex))
+    top_dec="$(to_signed "$top_dec" 32)"
+    if [ "$top_dec" -eq "$expect" ]; then
+        echo "PASS $name (ds top=$top_dec)"
+        return 0
+    fi
+    echo "FAIL $name: expected $expect, got $top_dec (ds: $ds_hex)"
     return 1
 }
 
@@ -2806,6 +2864,50 @@ check_stm32() {
 # unaffected.
 is_known_unsupported() {
     case "$TARGET:$1" in
+        # vex has no 'long long' support at all (no carry/overflow flag to build a 64-bit
+        # carry chain on - see src/codegen/vex/VexCodegen.h's own class comment); plain
+        # 'long' is fully supported (same width as 'int' there).
+        vex:convert_int_to_longlong.c) return 0 ;;
+        vex:local_wide_scalar_layout.c) return 0 ;;
+        vex:longlong_add_carry_chain.c) return 0 ;;
+        vex:longlong_sub_borrow_chain.c) return 0 ;;
+        vex:types_longlong_arith.c) return 0 ;;
+        vex:types_longlong_divmod.c) return 0 ;;
+        vex:types_longlong_divmod_repeated.c) return 0 ;;
+        vex:types_longlong_equality_repeated.c) return 0 ;;
+        vex:types_longlong_signed_cmp.c) return 0 ;;
+        vex:types_params_return.c) return 0 ;;
+        vex:unsigned_literal_above_long_max.c) return 0 ;;
+        # vex has no struct support yet - see VexCodegen.h's class comment.
+        vex:struct_array_of_structs.c) return 0 ;;
+        vex:struct_basic_fields.c) return 0 ;;
+        vex:struct_global.c) return 0 ;;
+        vex:struct_member_array.c) return 0 ;;
+        vex:struct_mixed_width_fields.c) return 0 ;;
+        vex:struct_nested_access.c) return 0 ;;
+        vex:struct_nonpow2_array_stride.c) return 0 ;;
+        vex:struct_packed_array.c) return 0 ;;
+        vex:struct_packed_basic.c) return 0 ;;
+        vex:struct_ptr_access.c) return 0 ;;
+        vex:struct_ptr_chain.c) return 0 ;;
+        # '@addr' pins a function to a fixed entry point; vex has no fixed-entry-point
+        # convention beyond `main` (see VexCodegen.h's class comment).
+        vex:identical_code_folding_addr_exclusion.c) return 0 ;;
+        vex:place.c) return 0 ;;
+        # An array/struct Local/Param (or one whose address is taken) inside a function that's
+        # actually part of a recursion cycle can't be stored on vex's own return stack, which
+        # isn't addressable memory at all - see VexCodegen.h's class comment.
+        vex:local_array_recur.c) return 0 ;;
+        vex:recursion_array.c) return 0 ;;
+        vex:recursion_local_array.c) return 0 ;;
+        # Both read a plain C string as a byte-granular run (walking `char*`/an untyped `int`
+        # holding an address one byte at a time, or asserting `sizeof(char) == 1`) - this
+        # backend's own `char` occupies one full 32-bit cell, not one byte (vex's `LD`/`ST`
+        # have no narrower form at all - see VexCodegen.h's class comment's storage model), so
+        # neither holds here: a string's characters sit one cell apart, not one byte apart, and
+        # `sizeof(char)` is genuinely 4 on this backend, not 1.
+        vex:string_literal.c) return 0 ;;
+        vex:types_sizeof.c) return 0 ;;
         # pdp1 has no 'long'/'long long' support at all (no link/carry bit
         # to build a multi-word carry chain on - see
         # ../src/codegen/pdp1/Pdp1Codegen.h's class comment), unlike pdp7
@@ -3008,6 +3110,7 @@ for src in "$SCRIPT_DIR"/*.c "${target_sources[@]}"; do
         i386) check_i386 "$src" "$name" || fail=1 ;;
         armv7a) check_armv7a "$src" "$name" || fail=1 ;;
         armv8a) check_armv8a "$src" "$name" || fail=1 ;;
+        vex) check_vex "$src" "$name" || fail=1 ;;
     esac
 done
 

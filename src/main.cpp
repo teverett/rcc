@@ -51,7 +51,9 @@
 #include "optimizers/local_cse/LocalCSE.h"
 #include "optimizers/unused_global_elimination/UnusedGlobalElimination.h"
 #include "preprocessor/Preprocessor.h"
+#include "codegen/parrotvm/ParrotVmCodegen.h"
 #include "codegen/pdp1/Pdp1Codegen.h"
+#include "codegen/vex/VexCodegen.h"
 #include "codegen/pdp7/Pdp7Codegen.h"
 #include "codegen/x86_8086/I8086Codegen.h"
 #include "codegen/m6502/M6502Codegen.h"
@@ -119,6 +121,7 @@
 #include "linker/factory/MCS51LinkerFactory.h"
 #include "linker/factory/PIC16LinkerFactory.h"
 #include "linker/factory/PIC18LinkerFactory.h"
+#include "linker/factory/VexLinkerFactory.h"
 
 namespace {
 
@@ -198,7 +201,7 @@ const std::vector<std::string> kTargetNames = {
     "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "6809", "8008",
     "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
-    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900",
+    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "parrotvm", "vex",
 };
 
 std::string knownTargetsList() {
@@ -246,6 +249,8 @@ ParsedTarget parseTargetTriple(const std::string &value) {
 // instruction this compiler emits, so there's nothing for a separate
 // Codegen to do differently.
 std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
+    if (target == "parrotvm") return std::make_unique<rcc::ParrotVmCodegen>();
+    if (target == "vex") return std::make_unique<rcc::VexCodegen>();
     if (target == "pdp1") return std::make_unique<rcc::Pdp1Codegen>();
     if (target == "pdp7") return std::make_unique<rcc::Pdp7Codegen>();
     if (target == "8086" || target == "8088") return std::make_unique<rcc::I8086Codegen>();
@@ -337,6 +342,7 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     if (target == "8051" || target == "8052" || target == "8031" || target == "8032") return rcc::makeMCS51Linker();
     if (target == "pic16") return rcc::makePIC16Linker();
     if (target == "pic18") return rcc::makePIC18Linker();
+    if (target == "vex") return rcc::makeVexLinker();
     return nullptr;
 }
 
@@ -962,6 +968,10 @@ int main(int argc, char **argv) {
     } else if (target == "tms320c6713") {
         predefinedMacros["__TMS320C6713__"] = "1";
         predefinedMacros["__tms320c6713__"] = "1";
+    } else if (target == "parrotvm") {
+        predefinedMacros["__PARROTVM__"] = "1";
+    } else if (target == "vex") {
+        predefinedMacros["__VEX__"] = "1";
     }
 
     // An external reference is allowed under a real object format for this

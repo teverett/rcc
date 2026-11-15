@@ -75,7 +75,7 @@ SPACE +=
 # on every source file before ANTLR ever sees it) - not backend-
 # specific, but still their own subdirectories needing the same vpath
 # treatment.
-BACKEND_DIRS := $(SRC_DIR)/codegen/pdp1 $(SRC_DIR)/codegen/pdp7 $(SRC_DIR)/codegen/x86_8086 $(SRC_DIR)/codegen/m6502 $(SRC_DIR)/codegen/m65c02 $(SRC_DIR)/codegen/m68k $(SRC_DIR)/codegen/mc68328 $(SRC_DIR)/codegen/pdp11 $(SRC_DIR)/codegen/pdp10 $(SRC_DIR)/codegen/i8080 $(SRC_DIR)/codegen/pic16 $(SRC_DIR)/codegen/pic18 $(SRC_DIR)/codegen/z80 $(SRC_DIR)/codegen/i8008 $(SRC_DIR)/codegen/stm8 $(SRC_DIR)/codegen/m16c $(SRC_DIR)/codegen/mips $(SRC_DIR)/codegen/mcs51 $(SRC_DIR)/codegen/stm32 $(SRC_DIR)/codegen/i386 $(SRC_DIR)/codegen/armm $(SRC_DIR)/codegen/arm $(SRC_DIR)/codegen/arm64 $(SRC_DIR)/codegen/powerpc $(SRC_DIR)/codegen/sparc $(SRC_DIR)/codegen/vax $(SRC_DIR)/codegen/avr $(SRC_DIR)/codegen/alpha $(SRC_DIR)/codegen/saturn $(SRC_DIR)/codegen/tms320c6713 $(SRC_DIR)/codegen/m6809 $(SRC_DIR)/codegen/tms9900
+BACKEND_DIRS := $(SRC_DIR)/codegen/pdp1 $(SRC_DIR)/codegen/pdp7 $(SRC_DIR)/codegen/x86_8086 $(SRC_DIR)/codegen/m6502 $(SRC_DIR)/codegen/m65c02 $(SRC_DIR)/codegen/m68k $(SRC_DIR)/codegen/mc68328 $(SRC_DIR)/codegen/pdp11 $(SRC_DIR)/codegen/pdp10 $(SRC_DIR)/codegen/i8080 $(SRC_DIR)/codegen/pic16 $(SRC_DIR)/codegen/pic18 $(SRC_DIR)/codegen/z80 $(SRC_DIR)/codegen/i8008 $(SRC_DIR)/codegen/stm8 $(SRC_DIR)/codegen/m16c $(SRC_DIR)/codegen/mips $(SRC_DIR)/codegen/mcs51 $(SRC_DIR)/codegen/stm32 $(SRC_DIR)/codegen/i386 $(SRC_DIR)/codegen/armm $(SRC_DIR)/codegen/arm $(SRC_DIR)/codegen/arm64 $(SRC_DIR)/codegen/powerpc $(SRC_DIR)/codegen/sparc $(SRC_DIR)/codegen/vax $(SRC_DIR)/codegen/avr $(SRC_DIR)/codegen/alpha $(SRC_DIR)/codegen/saturn $(SRC_DIR)/codegen/tms320c6713 $(SRC_DIR)/codegen/m6809 $(SRC_DIR)/codegen/tms9900 $(SRC_DIR)/codegen/parrotvm $(SRC_DIR)/codegen/vex
 AST_DIR      := $(SRC_DIR)/ast
 IR_DIR       := $(SRC_DIR)/ir
 LINKER_DIR   := $(SRC_DIR)/linker
@@ -164,6 +164,7 @@ HAND_SRCS := \
     $(FACTORY_DIR)/PIC18LinkerFactory.cpp \
     $(FACTORY_DIR)/I8086LinkerFactory.cpp \
     $(FACTORY_DIR)/Pdp7LinkerFactory.cpp \
+    $(FACTORY_DIR)/VexLinkerFactory.cpp \
     $(PREPROCESSOR_DIR)/Preprocessor.cpp \
     $(AST_DIR)/BuildAst.cpp \
     $(IR_DIR)/IRBuilder.cpp \
@@ -242,7 +243,10 @@ HAND_SRCS := \
     $(SRC_DIR)/codegen/tms320c6713/Tms320C6713Codegen.cpp \
     $(SRC_DIR)/codegen/tms320c6713/Tms320C6713Assembler.cpp \
     $(SRC_DIR)/codegen/m6809/M6809Assembler.cpp \
-    $(SRC_DIR)/codegen/m6809/M6809Codegen.cpp
+    $(SRC_DIR)/codegen/m6809/M6809Codegen.cpp \
+    $(SRC_DIR)/codegen/parrotvm/ParrotVmCodegen.cpp \
+    $(SRC_DIR)/codegen/vex/VexCodegen.cpp \
+    $(SRC_DIR)/codegen/vex/VexAssembler.cpp
 
 ALL_SRCS := $(GENERATED_SRCS) $(HAND_SRCS)
 OBJS     := $(patsubst %,$(OBJ_DIR)/%.o,$(notdir $(ALL_SRCS)))
@@ -253,7 +257,10 @@ vpath %.cpp $(GEN_DIR):$(SRC_DIR):$(AST_DIR):$(IR_DIR):$(LINKER_DIR):$(FACTORY_D
 
 all: build rt
 
-build: $(TARGET)
+build: $(TARGET) platforms.txt
+
+platforms.txt: $(TARGET)
+	$(TARGET) --list-platforms > $@
 
 # Target runtime libraries (src/rt/<target>/, e.g. apple2/apple2.lib - see
 # src/rt/Makefile) - each one's own Makefile invokes $(TARGET) itself, so
@@ -288,6 +295,7 @@ $(TARGET): $(OBJS)
 
 clean:
 	rm -rf build
+	rm -f platforms.txt
 	$(MAKE) -C src/rt clean
 
 # Runs the shared preprocessor unit tests and every backend's test suite in
@@ -362,7 +370,21 @@ $(BIN_DIR)/tms9900_assembler_test: tests/tms9900_assembler_test.cpp $(SRC_DIR)/c
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/tms9900_assembler_test.cpp $(SRC_DIR)/codegen/tms9900/TMS9900Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
-test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test
+# Unlike every other backend's own unit test, this one exercises a whole Codegen (not just
+# an Assembler) directly against hand-built ir::Program values - no ANTLR grammar dependency
+# at all, so -I$(SRC_DIR) alone is enough, the same as the file-format tests above.
+$(BIN_DIR)/parrotvm_codegen_test: tests/parrotvm_codegen_test.cpp $(SRC_DIR)/codegen/parrotvm/ParrotVmCodegen.cpp $(SRC_DIR)/codegen/parrotvm/ParrotVmCodegen.h $(SRC_DIR)/Type.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/parrotvm_codegen_test.cpp $(SRC_DIR)/codegen/parrotvm/ParrotVmCodegen.cpp $(SRC_DIR)/Type.cpp -o $@
+
+# Links against the generated ANTLR grammar (VexAssembler.cpp parses via grammar/RccAsm.g4), so
+# it needs the same $(CPPFLAGS)/$(LDFLAGS)/$(LDLIBS) the main binary does - see
+# $(BIN_DIR)/m6809_assembler_test's own comment.
+$(BIN_DIR)/vex_assembler_test: tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(SRC_DIR)/codegen/vex/VexAssembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
@@ -377,12 +399,14 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	$(BIN_DIR)/m6809_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
 	$(BIN_DIR)/tms9900_assembler_test
+	$(BIN_DIR)/parrotvm_codegen_test
+	$(BIN_DIR)/vex_assembler_test
 	python3 tests/m6809_link_test.py $(TARGET)
 	python3 tests/platform_flag_test.py $(TARGET)
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
@@ -398,6 +422,8 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	$(BIN_DIR)/m6809_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
 	$(BIN_DIR)/tms9900_assembler_test
+	$(BIN_DIR)/parrotvm_codegen_test
+	$(BIN_DIR)/vex_assembler_test
 	python3 tests/qemu_wait_test.py
 	python3 tests/m6809_link_test.py $(TARGET)
 	python3 tests/platform_flag_test.py $(TARGET)
@@ -434,3 +460,5 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	./tests/run_zx81_rt_tests.sh $(TARGET)
 	./tests/run_const_tests.sh $(TARGET)
 	./tests/run_register_tests.sh $(TARGET)
+	./tests/run_tests.sh $(TARGET) --target=vex
+	$(MAKE) -C examples/vex test

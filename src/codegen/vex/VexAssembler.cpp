@@ -1,0 +1,382 @@
+#include "VexAssembler.h"
+
+#include <algorithm>
+#include <cctype>
+#include <cstdint>
+#include <stdexcept>
+#include <unordered_map>
+#include <vector>
+
+#include "ANTLRInputStream.h"
+#include "BaseErrorListener.h"
+#include "CommonTokenStream.h"
+#include "RccAsmLexer.h"
+#include "RccAsmParser.h"
+
+namespace rcc {
+
+namespace {
+
+[[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("VexAssembler: " + msg); }
+
+std::string toLower(std::string s) {
+    for (char &c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+// The opcode (bits 4:0) for every mnemonic this dialect accepts, before any `.r` suffix is
+// considered - see docs/SPEC.md section 2's own table.
+const std::unordered_map<std::string, uint8_t> &opcodes() {
+    static const std::unordered_map<std::string, uint8_t> table = {
+        {"ret", 0x00}, {"lit", 0x01}, {"ld", 0x02}, {"st", 0x03}, {"dei", 0x04}, {"deo", 0x05},
+        {"jmp", 0x06}, {"jcn", 0x07}, {"cal", 0x08}, {"add", 0x09}, {"sub", 0x0A}, {"mul", 0x0B},
+        {"div", 0x0C}, {"and", 0x0D}, {"ora", 0x0E}, {"xor", 0x0F}, {"equ", 0x10}, {"lth", 0x11},
+        {"push", 0x13}, {"pop", 0x14}, {"lds", 0x15}, {"sts", 0x16},
+    };
+    return table;
+}
+
+// --- Parsing, via the shared grammar/RccAsm.g4 ---------------------------
+
+enum class SylKind { Number, Symbol };
+struct Syllable {
+    char sign = 0;
+    SylKind kind;
+    std::string text;
+};
+
+struct Line {
+    std::vector<std::string> labels;
+    enum Kind { None, Org, Byte, Short, Word, Zero, Instr } kind = None;
+    std::vector<std::vector<Syllable>> exprList;  // Org (1) / Byte|Short|Word (N) / Zero (1)
+    std::string mnemonic;                          // Instr - already lowercased, `.r` stripped
+    bool relFlag = false;                          // Instr - `.r` suffix was present
+    std::vector<std::vector<Syllable>> operands;    // Instr - "lit" only, exactly one
+};
+
+class ThrowingErrorListener : public antlr4::BaseErrorListener {
+   public:
+    void syntaxError(antlr4::Recognizer *, antlr4::Token *, size_t line, size_t col, const std::string &msg,
+                      std::exception_ptr) override {
+        fail(std::to_string(line) + ":" + std::to_string(col) + ": " + msg);
+    }
+};
+
+std::vector<Syllable> exprToSyllables(RccAsmParser::ExprContext *ctx) {
+    std::vector<Syllable> result;
+    for (auto *syl : ctx->syllable()) {
+        char sign = 0;
+        if (auto *s = syl->sign()) sign = s->PLUS() ? '+' : '-';
+        auto *atom = syl->atom();
+        if (atom->expr() != nullptr) fail("'(...)' grouping isn't part of this target's dialect");
+        if (atom->NUMBER()) {
+            result.push_back({sign, SylKind::Number, atom->NUMBER()->getText()});
+        } else {
+            result.push_back({sign, SylKind::Symbol, atom->IDENT()->getText()});
+        }
+    }
+    if (result.empty()) fail("empty expression");
+    return result;
+}
+
+std::vector<Syllable> operandExpr(RccAsmParser::OperandContext *ctx, const std::string &mnemonic) {
+    if (ctx->LBRACKET()) fail("'" + mnemonic + "': this dialect has no bracketed/memory operand form");
+    return exprToSyllables(ctx->expr());
+}
+
+// Splits a trailing ".r" (case-insensitive) off an already-lowercased mnemonic, e.g.
+// "jmp.r" -> ("jmp", true). The shared grammar's IDENT already accepts '.' mid-token, so the
+// suffix arrives as part of one token, not a separate one.
+std::pair<std::string, bool> splitRelSuffix(const std::string &mnemonic) {
+    const std::string suffix = ".r";
+    if (mnemonic.size() > suffix.size() && mnemonic.compare(mnemonic.size() - suffix.size(), suffix.size(), suffix) == 0) {
+        return {mnemonic.substr(0, mnemonic.size() - suffix.size()), true};
+    }
+    return {mnemonic, false};
+}
+
+Line buildLine(RccAsmParser::LineContext *ctx) {
+    Line line;
+    for (auto *lbl : ctx->label()) line.labels.push_back(lbl->IDENT()->getText());
+
+    auto *stmt = ctx->statement();
+    if (stmt == nullptr) {
+        line.kind = Line::None;
+        return line;
+    }
+    if (dynamic_cast<RccAsmParser::AssignStmtContext *>(stmt)) {
+        fail("'='-style equates aren't part of this target's dialect");
+    }
+    if (dynamic_cast<RccAsmParser::TimesStmtContext *>(stmt)) {
+        fail("'times' isn't part of this target's dialect");
+    }
+    auto *instr = dynamic_cast<RccAsmParser::InstrStmtContext *>(stmt);
+    if (!instr) fail("internal: unhandled statement alternative");
+
+    std::string word = toLower(instr->mnemonic->getText());
+    if (word == ".org") {
+        line.kind = Line::Org;
+        if (instr->operand().size() != 1) fail("'.org' needs exactly one address operand");
+        line.exprList.push_back(operandExpr(instr->operand(0), word));
+        return line;
+    }
+    if (word == ".byte") {
+        line.kind = Line::Byte;
+        for (auto *op : instr->operand()) line.exprList.push_back(operandExpr(op, word));
+        if (line.exprList.empty()) fail("'.byte' needs at least one value");
+        return line;
+    }
+    if (word == ".short") {
+        line.kind = Line::Short;
+        for (auto *op : instr->operand()) line.exprList.push_back(operandExpr(op, word));
+        if (line.exprList.empty()) fail("'.short' needs at least one value");
+        return line;
+    }
+    if (word == ".word") {
+        line.kind = Line::Word;
+        for (auto *op : instr->operand()) line.exprList.push_back(operandExpr(op, word));
+        if (line.exprList.empty()) fail("'.word' needs at least one value");
+        return line;
+    }
+    if (word == ".zero") {
+        line.kind = Line::Zero;
+        if (instr->operand().size() != 1) fail("'.zero' needs exactly one count operand");
+        line.exprList.push_back(operandExpr(instr->operand(0), word));
+        return line;
+    }
+
+    auto [mnemonic, relFlag] = splitRelSuffix(word);
+    if (!opcodes().count(mnemonic)) fail("unsupported instruction '" + instr->mnemonic->getText() + "'");
+
+    line.kind = Line::Instr;
+    line.mnemonic = mnemonic;
+    line.relFlag = relFlag;
+    for (auto *op : instr->operand()) line.operands.push_back(operandExpr(op, mnemonic));
+    if (mnemonic == "lit") {
+        if (line.operands.size() != 1) fail("'lit" + std::string(relFlag ? ".r" : "") + "' needs exactly one operand");
+    } else if (!line.operands.empty()) {
+        fail("'" + mnemonic + (relFlag ? ".r" : "") + "' takes no operand - every other operand lives on the stack");
+    }
+    return line;
+}
+
+std::vector<Line> parseProgram(const std::string &text) {
+    antlr4::ANTLRInputStream input(text);
+    RccAsmLexer lexer(&input);
+    ThrowingErrorListener errors;
+    lexer.removeErrorListeners();
+    lexer.addErrorListener(&errors);
+
+    antlr4::CommonTokenStream tokens(&lexer);
+    RccAsmParser parser(&tokens);
+    parser.removeErrorListeners();
+    parser.addErrorListener(&errors);
+
+    RccAsmParser::ProgramContext *prog = parser.program();
+
+    std::vector<Line> lines;
+    for (auto *lineCtx : prog->line()) lines.push_back(buildLine(lineCtx));
+    return lines;
+}
+
+struct Relocation {
+    uint32_t byteOffset;
+    std::string symbolName;
+};
+
+// --- Two-pass assembly ----------------------------------------------------
+class Assembler {
+   public:
+    // `addressBase` is added to every label's resolved value and is where `offset_` itself
+    // starts counting - purely an internal numbering convention, never emitted as bytes (see
+    // assembleVex()'s own comment for why a whole-program compile needs kVexBaseAddress here
+    // while an object-mode compile needs 0, left to GenericLinker's own base-shift relocation
+    // instead).
+    explicit Assembler(bool allowExternal, uint32_t addressBase = 0)
+        : allowExternal_(allowExternal), addressBase_(addressBase) {}
+
+    void run(const std::vector<Line> &lines) {
+        stage_ = 1;
+        pass(lines);
+        stage_ = 2;
+        pass(lines);
+    }
+
+    const std::vector<uint8_t> &bytes() const { return bytes_; }
+    const std::unordered_map<std::string, uint32_t> &labels() const { return labels_; }
+    const std::vector<Relocation> &relocations() const { return relocations_; }
+
+   private:
+    void pass(const std::vector<Line> &lines) {
+        bytes_.clear();
+        relocations_.clear();
+        offset_ = addressBase_;
+        for (const auto &line : lines) processLine(line);
+    }
+
+    void processLine(const Line &line) {
+        for (const auto &lbl : line.labels) labels_[lbl] = offset_;
+        switch (line.kind) {
+            case Line::None:
+                return;
+            case Line::Org: {
+                uint32_t target = evalExpr(line.exprList.at(0));
+                if (target < offset_) fail("'.org' can't move backward (at " + std::to_string(offset_) + ", asked for " +
+                                            std::to_string(target) + ")");
+                while (offset_ < target) emit8(0);
+                return;
+            }
+            case Line::Byte:
+                for (const auto &e : line.exprList) emitN(e, 1);
+                return;
+            case Line::Short:
+                for (const auto &e : line.exprList) emitN(e, 2);
+                return;
+            case Line::Word:
+                for (const auto &e : line.exprList) emitN(e, 4);
+                return;
+            case Line::Zero: {
+                uint32_t n = evalExpr(line.exprList.at(0));
+                for (uint32_t i = 0; i < n; i++) emit8(0);
+                return;
+            }
+            case Line::Instr:
+                encodeInstr(line);
+                return;
+        }
+    }
+
+    uint32_t evalExpr(const std::vector<Syllable> &syls, std::string *externalName = nullptr,
+                       bool *needsBaseShift = nullptr) {
+        uint32_t total = 0;
+        for (const auto &syl : syls) {
+            bool wasExternal = false, wasLocalAddress = false;
+            uint32_t v = resolveSyllable(syl, &wasExternal, &wasLocalAddress);
+            if (wasExternal && externalName) *externalName = syl.text;
+            if (wasLocalAddress && needsBaseShift) *needsBaseShift = true;
+            if (syl.sign == '-') {
+                total -= v;
+            } else {
+                total += v;
+            }
+        }
+        return total;
+    }
+
+    uint32_t resolveSyllable(const Syllable &syl, bool *wasExternal, bool *wasLocalAddress) {
+        if (syl.kind == SylKind::Number) {
+            const std::string &t = syl.text;
+            if (t.size() > 2 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X')) {
+                return static_cast<uint32_t>(std::stoul(t.substr(2), nullptr, 16));
+            }
+            return static_cast<uint32_t>(std::stoul(t));
+        }
+        auto it = labels_.find(syl.text);
+        if (it != labels_.end()) {
+            if (allowExternal_) *wasLocalAddress = true;
+            return it->second;
+        }
+        if (stage_ == 2) {
+            if (allowExternal_) {
+                *wasExternal = true;
+                return 0;
+            }
+            fail("undefined symbol '" + syl.text + "'");
+        }
+        return 0;
+    }
+
+    void emit8(uint8_t b) {
+        bytes_.push_back(b);
+        offset_ += 1;
+    }
+
+    // `n` bytes, big-endian. A symbolic/external value is only meaningful in a full 4-byte
+    // field (every address this backend ever stores - `.word`, or `LIT`'s own immediate - is
+    // 4 bytes; see VexCodegen.h), so stage 2 rejects one anywhere narrower instead of silently
+    // truncating a relocation that would only ever patch a 4-byte site.
+    void emitN(const std::vector<Syllable> &e, int n) {
+        std::string externalName;
+        bool needsBaseShift = false;
+        uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
+        if (stage_ == 2) {
+            if (n < 4 && (needsBaseShift || !externalName.empty())) {
+                fail("a label address needs a 4-byte field (.word or 'lit'), not " + std::to_string(n) +
+                     " byte(s)");
+            }
+            if (n < 4) {
+                uint32_t limit = 1u << (8 * n);
+                if (v >= limit) fail("value " + std::to_string(v) + " doesn't fit in " + std::to_string(n) + " byte(s)");
+            } else if (allowExternal_) {
+                if (needsBaseShift) relocations_.push_back({offset_, ".."});
+                if (!externalName.empty()) relocations_.push_back({offset_, externalName});
+            }
+        }
+        for (int i = n - 1; i >= 0; i--) emit8(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
+    }
+
+    // The 4-byte big-endian `LIT` immediate - the one relocatable field this dialect's own
+    // instructions (as opposed to its data directives) ever have.
+    void emitLit(const std::vector<Syllable> &e) { emitN(e, 4); }
+
+    void encodeInstr(const Line &line) {
+        uint8_t opcode = opcodes().at(line.mnemonic);
+        uint8_t r = line.relFlag ? 0x20 : 0x00;
+        emit8(static_cast<uint8_t>(r | opcode));
+        if (line.mnemonic == "lit") emitLit(line.operands.at(0));
+    }
+
+    std::vector<uint8_t> bytes_;
+    std::unordered_map<std::string, uint32_t> labels_;
+    std::vector<Relocation> relocations_;
+    uint32_t offset_ = 0;
+    int stage_ = 1;
+    bool allowExternal_;
+    uint32_t addressBase_ = 0;
+};
+
+ObjectFile buildObjectFile(const Assembler &a) {
+    ObjectFile obj;
+    obj.machineType = kVexCoffMachine;
+    const auto &bytesVec = a.bytes();
+    obj.textBytes.assign(bytesVec.begin(), bytesVec.end());
+
+    for (const auto &kv : a.labels()) obj.symbols.push_back({kv.first, kv.second, /*isDefined=*/true});
+    std::sort(obj.symbols.begin(), obj.symbols.end(),
+              [](const ObjSymbol &x, const ObjSymbol &y) { return x.name < y.name; });
+
+    std::unordered_map<std::string, bool> known;
+    for (const auto &s : obj.symbols) known[s.name] = true;
+    for (const auto &r : a.relocations()) {
+        if (!known.count(r.symbolName)) {
+            obj.symbols.push_back({r.symbolName, 0, /*isDefined=*/false});
+            known[r.symbolName] = true;
+        }
+        obj.relocations.push_back({r.byteOffset, r.symbolName, kVexRelocAbs32});
+    }
+    return obj;
+}
+
+}  // namespace
+
+std::string assembleVex(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    // Whole-program compile: every label must resolve to the true VM address LD/ST/JMP/CAL will
+    // see at runtime (the interpreter maps this file's own byte 0 to kVexBaseAddress), so label
+    // values are counted from there directly - see the Assembler constructor's own comment.
+    Assembler assembler(/*allowExternal=*/false, kVexBaseAddress);
+    assembler.run(lines);
+    const auto &bytes = assembler.bytes();
+    return std::string(bytes.begin(), bytes.end());
+}
+
+ObjectFile assembleVexObject(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    // Object mode: labels resolve relative to offset 0 ("org 0" until GenericLinker adds the
+    // real base in via the ".." pseudo-symbol's base-shift relocation - see VexLinkerFactory.cpp).
+    Assembler assembler(/*allowExternal=*/true, /*addressBase=*/0);
+    assembler.run(lines);
+    return buildObjectFile(assembler);
+}
+
+}  // namespace rcc

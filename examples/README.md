@@ -39,6 +39,10 @@ directory with a `Makefile` and a `README.md` of its own:
 - `z80-zxspectrum` — ZX Spectrum "hello world" for `z80`, linked as
   `--platform=z80-sna` against `src/rt/zxspectrum/`'s memory-mapped
   runtime library
+- `vex` — "hello world" for `vex`, linked as `--platform=vex-raw` against
+  `src/rt/vex/`'s console-device runtime library; `test` builds and runs
+  it under the real reference interpreter vendored at
+  `tests/sim/vex/vex.c`
 
 `examples.mk` is shared `Makefile` plumbing (the `$(RCC)` binary path, picked
 per host OS) included by each example's `Makefile`.
