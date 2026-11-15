@@ -1,192 +1,192 @@
-2a03-aout    Ricoh 2A03 (NES)
-2a03-coff    Ricoh 2A03 (NES)
-2a03-elf    Ricoh 2A03 (NES)
-2a03-nes    Ricoh 2A03 (NES)
-2a03-raw    Ricoh 2A03 (NES)
-6502-aout    MOS 6502
-6502-atari    MOS 6502
-6502-coff    MOS 6502
-6502-dos33    MOS 6502
-6502-elf    MOS 6502
-6502-prg    MOS 6502
-6502-prodos    MOS 6502
-6502-raw    MOS 6502
-65c02-aout    WDC 65C02
-65c02-atari    WDC 65C02
-65c02-coff    WDC 65C02
-65c02-dos33    WDC 65C02
-65c02-elf    WDC 65C02
-65c02-prg    WDC 65C02
-65c02-prodos    WDC 65C02
-65c02-raw    WDC 65C02
-68000-aout    Motorola 68000
-68000-coff    Motorola 68000
-68000-elf    Motorola 68000
-68000-raw    Motorola 68000
-6809-aout    Motorola 6809
-6809-coff    Motorola 6809
-6809-decb    Motorola 6809
-6809-elf    Motorola 6809
-6809-raw    Motorola 6809
-8008-aout    Intel 8008
-8008-coff    Intel 8008
-8008-elf    Intel 8008
-8008-raw    Intel 8008
-8031-aout    Intel MCS-51 (8051 family)
-8031-coff    Intel MCS-51 (8051 family)
-8031-elf    Intel MCS-51 (8051 family)
-8031-raw    Intel MCS-51 (8051 family)
-8032-aout    Intel MCS-51 (8051 family)
-8032-coff    Intel MCS-51 (8051 family)
-8032-elf    Intel MCS-51 (8051 family)
-8032-raw    Intel MCS-51 (8051 family)
-8051-aout    Intel MCS-51 (8051 family)
-8051-coff    Intel MCS-51 (8051 family)
-8051-elf    Intel MCS-51 (8051 family)
-8051-raw    Intel MCS-51 (8051 family)
-8052-aout    Intel MCS-51 (8051 family)
-8052-coff    Intel MCS-51 (8051 family)
-8052-elf    Intel MCS-51 (8051 family)
-8052-raw    Intel MCS-51 (8051 family)
-8080-aout    Intel 8080
-8080-coff    Intel 8080
-8080-elf    Intel 8080
-8080-raw    Intel 8080
-8086-aout    Intel 8086/8088
-8086-coff    Intel 8086/8088
-8086-dos-aout    Intel 8086/8088 (MS-DOS .com)
-8086-dos-coff    Intel 8086/8088 (MS-DOS .com)
-8086-dos-elf    Intel 8086/8088 (MS-DOS .com)
-8086-dos-raw    Intel 8086/8088 (MS-DOS .com)
-8086-elf    Intel 8086/8088
-8086-raw    Intel 8086/8088
-8088-aout    Intel 8086/8088
-8088-coff    Intel 8086/8088
-8088-elf    Intel 8086/8088
-8088-raw    Intel 8086/8088
-alpha-aout    DEC Alpha AXP
-alpha-coff    DEC Alpha AXP
-alpha-elf    DEC Alpha AXP
-alpha-raw    DEC Alpha AXP
-armv7a-aout    ARM Cortex-A (ARMv7-A, 32-bit)
-armv7a-coff    ARM Cortex-A (ARMv7-A, 32-bit)
-armv7a-elf    ARM Cortex-A (ARMv7-A, 32-bit)
-armv7a-raw    ARM Cortex-A (ARMv7-A, 32-bit)
-armv8a-aout    ARM Cortex-A (ARMv8-A, 64-bit)
-armv8a-coff    ARM Cortex-A (ARMv8-A, 64-bit)
-armv8a-elf    ARM Cortex-A (ARMv8-A, 64-bit)
+2a03-aout    Ricoh 2A03 (NES) - a.out relocatable object
+2a03-coff    Ricoh 2A03 (NES) - COFF relocatable object
+2a03-elf    Ricoh 2A03 (NES) - ELF relocatable object
+2a03-nes    Ricoh 2A03 (NES) - iNES ROM image
+2a03-raw    Ricoh 2A03 (NES) - flat binary image, no container
+6502-aout    MOS 6502 - a.out relocatable object
+6502-atari    MOS 6502 - Atari 400/800 DOS binary-load byte stream
+6502-coff    MOS 6502 - COFF relocatable object
+6502-dos33    MOS 6502 - Apple DOS 3.3 "B" binary file
+6502-elf    MOS 6502 - ELF relocatable object
+6502-prg    MOS 6502 - Commodore PRG byte stream (load address plus bytes)
+6502-prodos    MOS 6502 - ProDOS binary file with directory metadata footer
+6502-raw    MOS 6502 - flat binary image, no container
+65c02-aout    WDC 65C02 - a.out relocatable object
+65c02-atari    WDC 65C02 - Atari 400/800 DOS binary-load byte stream
+65c02-coff    WDC 65C02 - COFF relocatable object
+65c02-dos33    WDC 65C02 - Apple DOS 3.3 "B" binary file
+65c02-elf    WDC 65C02 - ELF relocatable object
+65c02-prg    WDC 65C02 - Commodore PRG byte stream (load address plus bytes)
+65c02-prodos    WDC 65C02 - ProDOS binary file with directory metadata footer
+65c02-raw    WDC 65C02 - flat binary image, no container
+68000-aout    Motorola 68000 - a.out relocatable object
+68000-coff    Motorola 68000 - COFF relocatable object
+68000-elf    Motorola 68000 - ELF relocatable object
+68000-raw    Motorola 68000 - flat binary image, no container
+6809-aout    Motorola 6809 - a.out relocatable object
+6809-coff    Motorola 6809 - COFF relocatable object
+6809-decb    Motorola 6809 - CoCo Disk Extended Color BASIC LOADM/CLOADM byte stream
+6809-elf    Motorola 6809 - ELF relocatable object
+6809-raw    Motorola 6809 - flat binary image, no container
+8008-aout    Intel 8008 - a.out relocatable object
+8008-coff    Intel 8008 - COFF relocatable object
+8008-elf    Intel 8008 - ELF relocatable object
+8008-raw    Intel 8008 - flat binary image, no container
+8031-aout    Intel MCS-51 (8051 family) - a.out relocatable object
+8031-coff    Intel MCS-51 (8051 family) - COFF relocatable object
+8031-elf    Intel MCS-51 (8051 family) - ELF relocatable object
+8031-raw    Intel MCS-51 (8051 family) - flat binary image, no container
+8032-aout    Intel MCS-51 (8051 family) - a.out relocatable object
+8032-coff    Intel MCS-51 (8051 family) - COFF relocatable object
+8032-elf    Intel MCS-51 (8051 family) - ELF relocatable object
+8032-raw    Intel MCS-51 (8051 family) - flat binary image, no container
+8051-aout    Intel MCS-51 (8051 family) - a.out relocatable object
+8051-coff    Intel MCS-51 (8051 family) - COFF relocatable object
+8051-elf    Intel MCS-51 (8051 family) - ELF relocatable object
+8051-raw    Intel MCS-51 (8051 family) - flat binary image, no container
+8052-aout    Intel MCS-51 (8051 family) - a.out relocatable object
+8052-coff    Intel MCS-51 (8051 family) - COFF relocatable object
+8052-elf    Intel MCS-51 (8051 family) - ELF relocatable object
+8052-raw    Intel MCS-51 (8051 family) - flat binary image, no container
+8080-aout    Intel 8080 - a.out relocatable object
+8080-coff    Intel 8080 - COFF relocatable object
+8080-elf    Intel 8080 - ELF relocatable object
+8080-raw    Intel 8080 - flat binary image, no container
+8086-aout    Intel 8086/8088 - a.out relocatable object
+8086-coff    Intel 8086/8088 - COFF relocatable object
+8086-dos-aout    Intel 8086/8088 (MS-DOS .com) - a.out relocatable object
+8086-dos-coff    Intel 8086/8088 (MS-DOS .com) - COFF relocatable object
+8086-dos-elf    Intel 8086/8088 (MS-DOS .com) - ELF relocatable object
+8086-dos-raw    Intel 8086/8088 (MS-DOS .com) - flat binary image, no container
+8086-elf    Intel 8086/8088 - ELF relocatable object
+8086-raw    Intel 8086/8088 - flat binary image, no container
+8088-aout    Intel 8086/8088 - a.out relocatable object
+8088-coff    Intel 8086/8088 - COFF relocatable object
+8088-elf    Intel 8086/8088 - ELF relocatable object
+8088-raw    Intel 8086/8088 - flat binary image, no container
+alpha-aout    DEC Alpha AXP - a.out relocatable object
+alpha-coff    DEC Alpha AXP - COFF relocatable object
+alpha-elf    DEC Alpha AXP - ELF relocatable object
+alpha-raw    DEC Alpha AXP - flat binary image, no container
+armv7a-aout    ARM Cortex-A (ARMv7-A, 32-bit) - a.out relocatable object
+armv7a-coff    ARM Cortex-A (ARMv7-A, 32-bit) - COFF relocatable object
+armv7a-elf    ARM Cortex-A (ARMv7-A, 32-bit) - ELF relocatable object
+armv7a-raw    ARM Cortex-A (ARMv7-A, 32-bit) - flat binary image, no container
+armv8a-aout    ARM Cortex-A (ARMv8-A, 64-bit) - a.out relocatable object
+armv8a-coff    ARM Cortex-A (ARMv8-A, 64-bit) - COFF relocatable object
+armv8a-elf    ARM Cortex-A (ARMv8-A, 64-bit) - ELF relocatable object
 armv8a-macos    ARM Cortex-A (ARMv8-A, 64-bit)
-armv8a-raw    ARM Cortex-A (ARMv8-A, 64-bit)
-atari2600-a26    MOS 6502 (Atari 2600)
-atari2600-aout    MOS 6502 (Atari 2600)
-atari2600-coff    MOS 6502 (Atari 2600)
-atari2600-elf    MOS 6502 (Atari 2600)
-atari2600-raw    MOS 6502 (Atari 2600)
-avr-aout    Atmel AVR (ATmega328P)
-avr-coff    Atmel AVR (ATmega328P)
-avr-elf    Atmel AVR (ATmega328P)
-avr-raw    Atmel AVR (ATmega328P)
-cortex-m3-aout    ARM Cortex-M (ARMv7-M)
-cortex-m3-coff    ARM Cortex-M (ARMv7-M)
-cortex-m3-elf    ARM Cortex-M (ARMv7-M)
-cortex-m3-raw    ARM Cortex-M (ARMv7-M)
-cortex-m4-aout    ARM Cortex-M (ARMv7-M)
-cortex-m4-coff    ARM Cortex-M (ARMv7-M)
-cortex-m4-elf    ARM Cortex-M (ARMv7-M)
-cortex-m4-raw    ARM Cortex-M (ARMv7-M)
-cortex-m7-aout    ARM Cortex-M (ARMv7-M)
-cortex-m7-coff    ARM Cortex-M (ARMv7-M)
-cortex-m7-elf    ARM Cortex-M (ARMv7-M)
-cortex-m7-raw    ARM Cortex-M (ARMv7-M)
-i386-aout    Intel 386
-i386-coff    Intel 386
-i386-elf    Intel 386
+armv8a-raw    ARM Cortex-A (ARMv8-A, 64-bit) - flat binary image, no container
+atari2600-a26    MOS 6502 (Atari 2600) - Atari 2600 cartridge ROM image
+atari2600-aout    MOS 6502 (Atari 2600) - a.out relocatable object
+atari2600-coff    MOS 6502 (Atari 2600) - COFF relocatable object
+atari2600-elf    MOS 6502 (Atari 2600) - ELF relocatable object
+atari2600-raw    MOS 6502 (Atari 2600) - flat binary image, no container
+avr-aout    Atmel AVR (ATmega328P) - a.out relocatable object
+avr-coff    Atmel AVR (ATmega328P) - COFF relocatable object
+avr-elf    Atmel AVR (ATmega328P) - ELF relocatable object
+avr-raw    Atmel AVR (ATmega328P) - flat binary image, no container
+cortex-m3-aout    ARM Cortex-M (ARMv7-M) - a.out relocatable object
+cortex-m3-coff    ARM Cortex-M (ARMv7-M) - COFF relocatable object
+cortex-m3-elf    ARM Cortex-M (ARMv7-M) - ELF relocatable object
+cortex-m3-raw    ARM Cortex-M (ARMv7-M) - flat binary image, no container
+cortex-m4-aout    ARM Cortex-M (ARMv7-M) - a.out relocatable object
+cortex-m4-coff    ARM Cortex-M (ARMv7-M) - COFF relocatable object
+cortex-m4-elf    ARM Cortex-M (ARMv7-M) - ELF relocatable object
+cortex-m4-raw    ARM Cortex-M (ARMv7-M) - flat binary image, no container
+cortex-m7-aout    ARM Cortex-M (ARMv7-M) - a.out relocatable object
+cortex-m7-coff    ARM Cortex-M (ARMv7-M) - COFF relocatable object
+cortex-m7-elf    ARM Cortex-M (ARMv7-M) - ELF relocatable object
+cortex-m7-raw    ARM Cortex-M (ARMv7-M) - flat binary image, no container
+i386-aout    Intel 386 - a.out relocatable object
+i386-coff    Intel 386 - COFF relocatable object
+i386-elf    Intel 386 - ELF relocatable object
 i386-linux    Intel 386
-i386-raw    Intel 386
+i386-raw    Intel 386 - flat binary image, no container
 i386-windows    Intel 386
-m16c-aout    Renesas M16C
-m16c-coff    Renesas M16C
-m16c-elf    Renesas M16C
-m16c-raw    Renesas M16C
-m30626fjpfp-aout    Renesas M16C
-m30626fjpfp-coff    Renesas M16C
-m30626fjpfp-elf    Renesas M16C
-m30626fjpfp-raw    Renesas M16C
-mc68328-aout    Motorola MC68328 "DragonBall"
-mc68328-coff    Motorola MC68328 "DragonBall"
-mc68328-elf    Motorola MC68328 "DragonBall"
-mc68328-raw    Motorola MC68328 "DragonBall"
-parrotvm-raw    Parrot VM
-pdp1-list    DEC PDP-1
-pdp1-rim    DEC PDP-1
-pdp10-aout    DEC PDP-10
-pdp10-coff    DEC PDP-10
-pdp10-elf    DEC PDP-10
-pdp10-raw    DEC PDP-10
-pdp11-aout    DEC PDP-11
-pdp11-coff    DEC PDP-11
-pdp11-elf    DEC PDP-11
-pdp11-raw    DEC PDP-11
-pdp7-a7out    DEC PDP-7
-pdp7-aout    DEC PDP-7
-pdp7-coff    DEC PDP-7
-pdp7-list    DEC PDP-7
-pdp7-ptr    DEC PDP-7
-pdp7-rim    DEC PDP-7
-pic16-aout    Microchip PIC16
-pic16-coff    Microchip PIC16
-pic16-elf    Microchip PIC16
-pic16-raw    Microchip PIC16
-pic18-aout    Microchip PIC18
-pic18-coff    Microchip PIC18
-pic18-elf    Microchip PIC18
-pic18-raw    Microchip PIC18
-powerpc-aout    PowerPC (32-bit)
-powerpc-coff    PowerPC (32-bit)
-powerpc-elf    PowerPC (32-bit)
-powerpc-raw    PowerPC (32-bit)
-r10000-aout    MIPS I (R10000/R4000)
-r10000-coff    MIPS I (R10000/R4000)
-r10000-elf    MIPS I (R10000/R4000)
-r10000-raw    MIPS I (R10000/R4000)
-r4000-aout    MIPS I (R10000/R4000)
-r4000-coff    MIPS I (R10000/R4000)
-r4000-elf    MIPS I (R10000/R4000)
-r4000-raw    MIPS I (R10000/R4000)
-saturn-coff    HP Saturn
-saturn-raw    HP Saturn
-sparc-aout    SPARC V8 (32-bit)
-sparc-coff    SPARC V8 (32-bit)
-sparc-elf    SPARC V8 (32-bit)
-sparc-raw    SPARC V8 (32-bit)
-stm32-aout    STMicroelectronics STM32 (Cortex-M3)
-stm32-coff    STMicroelectronics STM32 (Cortex-M3)
-stm32-elf    STMicroelectronics STM32 (Cortex-M3)
-stm32-raw    STMicroelectronics STM32 (Cortex-M3)
-stm8-aout    STMicroelectronics STM8
-stm8-coff    STMicroelectronics STM8
-stm8-elf    STMicroelectronics STM8
-stm8-raw    STMicroelectronics STM8
-tms320c6713-raw    Texas Instruments TMS320C6713 DSP
-tms9900-aout    Texas Instruments TMS9900
-tms9900-coff    Texas Instruments TMS9900
-tms9900-elf    Texas Instruments TMS9900
-tms9900-raw    Texas Instruments TMS9900
-vax-aout    DEC VAX-11/780
-vax-coff    DEC VAX-11/780
-vax-elf    DEC VAX-11/780
-vax-raw    DEC VAX-11/780
-vex-coff    Vex virtual machine
-vex-raw    Vex virtual machine
-z80-amsdos    Zilog Z80
-z80-aout    Zilog Z80
-z80-cmd    Zilog Z80
-z80-coff    Zilog Z80
-z80-coleco-aout    Zilog Z80
-z80-coleco-coff    Zilog Z80
-z80-coleco-colecorom    Zilog Z80
-z80-coleco-elf    Zilog Z80
-z80-coleco-raw    Zilog Z80
-z80-elf    Zilog Z80
-z80-raw    Zilog Z80
-z80-sna    Zilog Z80
+m16c-aout    Renesas M16C - a.out relocatable object
+m16c-coff    Renesas M16C - COFF relocatable object
+m16c-elf    Renesas M16C - ELF relocatable object
+m16c-raw    Renesas M16C - flat binary image, no container
+m30626fjpfp-aout    Renesas M16C - a.out relocatable object
+m30626fjpfp-coff    Renesas M16C - COFF relocatable object
+m30626fjpfp-elf    Renesas M16C - ELF relocatable object
+m30626fjpfp-raw    Renesas M16C - flat binary image, no container
+mc68328-aout    Motorola MC68328 "DragonBall" - a.out relocatable object
+mc68328-coff    Motorola MC68328 "DragonBall" - COFF relocatable object
+mc68328-elf    Motorola MC68328 "DragonBall" - ELF relocatable object
+mc68328-raw    Motorola MC68328 "DragonBall" - flat binary image, no container
+parrotvm-raw    Parrot VM - flat binary image, no container
+pdp1-list    DEC PDP-1 - human-readable debug listing
+pdp1-rim    DEC PDP-1 - bootable paper tape (own loader protocol)
+pdp10-aout    DEC PDP-10 - a.out relocatable object
+pdp10-coff    DEC PDP-10 - COFF relocatable object
+pdp10-elf    DEC PDP-10 - ELF relocatable object
+pdp10-raw    DEC PDP-10 - flat binary image, no container
+pdp11-aout    DEC PDP-11 - a.out relocatable object
+pdp11-coff    DEC PDP-11 - COFF relocatable object
+pdp11-elf    DEC PDP-11 - ELF relocatable object
+pdp11-raw    DEC PDP-11 - flat binary image, no container
+pdp7-a7out    DEC PDP-7 - PDP-7 word-oriented paper-tape object
+pdp7-aout    DEC PDP-7 - a.out relocatable object
+pdp7-coff    DEC PDP-7 - COFF relocatable object
+pdp7-list    DEC PDP-7 - human-readable debug listing
+pdp7-ptr    DEC PDP-7 - PDP-7 paper-tape reader format
+pdp7-rim    DEC PDP-7 - bootable paper tape (own loader protocol)
+pic16-aout    Microchip PIC16 - a.out relocatable object
+pic16-coff    Microchip PIC16 - COFF relocatable object
+pic16-elf    Microchip PIC16 - ELF relocatable object
+pic16-raw    Microchip PIC16 - flat binary image, no container
+pic18-aout    Microchip PIC18 - a.out relocatable object
+pic18-coff    Microchip PIC18 - COFF relocatable object
+pic18-elf    Microchip PIC18 - ELF relocatable object
+pic18-raw    Microchip PIC18 - flat binary image, no container
+powerpc-aout    PowerPC (32-bit) - a.out relocatable object
+powerpc-coff    PowerPC (32-bit) - COFF relocatable object
+powerpc-elf    PowerPC (32-bit) - ELF relocatable object
+powerpc-raw    PowerPC (32-bit) - flat binary image, no container
+r10000-aout    MIPS I (R10000/R4000) - a.out relocatable object
+r10000-coff    MIPS I (R10000/R4000) - COFF relocatable object
+r10000-elf    MIPS I (R10000/R4000) - ELF relocatable object
+r10000-raw    MIPS I (R10000/R4000) - flat binary image, no container
+r4000-aout    MIPS I (R10000/R4000) - a.out relocatable object
+r4000-coff    MIPS I (R10000/R4000) - COFF relocatable object
+r4000-elf    MIPS I (R10000/R4000) - ELF relocatable object
+r4000-raw    MIPS I (R10000/R4000) - flat binary image, no container
+saturn-coff    HP Saturn - COFF relocatable object
+saturn-raw    HP Saturn - flat binary image, no container
+sparc-aout    SPARC V8 (32-bit) - a.out relocatable object
+sparc-coff    SPARC V8 (32-bit) - COFF relocatable object
+sparc-elf    SPARC V8 (32-bit) - ELF relocatable object
+sparc-raw    SPARC V8 (32-bit) - flat binary image, no container
+stm32-aout    STMicroelectronics STM32 (Cortex-M3) - a.out relocatable object
+stm32-coff    STMicroelectronics STM32 (Cortex-M3) - COFF relocatable object
+stm32-elf    STMicroelectronics STM32 (Cortex-M3) - ELF relocatable object
+stm32-raw    STMicroelectronics STM32 (Cortex-M3) - flat binary image, no container
+stm8-aout    STMicroelectronics STM8 - a.out relocatable object
+stm8-coff    STMicroelectronics STM8 - COFF relocatable object
+stm8-elf    STMicroelectronics STM8 - ELF relocatable object
+stm8-raw    STMicroelectronics STM8 - flat binary image, no container
+tms320c6713-raw    Texas Instruments TMS320C6713 DSP - flat binary image, no container
+tms9900-aout    Texas Instruments TMS9900 - a.out relocatable object
+tms9900-coff    Texas Instruments TMS9900 - COFF relocatable object
+tms9900-elf    Texas Instruments TMS9900 - ELF relocatable object
+tms9900-raw    Texas Instruments TMS9900 - flat binary image, no container
+vax-aout    DEC VAX-11/780 - a.out relocatable object
+vax-coff    DEC VAX-11/780 - COFF relocatable object
+vax-elf    DEC VAX-11/780 - ELF relocatable object
+vax-raw    DEC VAX-11/780 - flat binary image, no container
+vex-coff    Vex virtual machine - COFF relocatable object
+vex-raw    Vex virtual machine - flat binary image, no container
+z80-amsdos    Zilog Z80 - Amstrad CPC file header plus data
+z80-aout    Zilog Z80 - a.out relocatable object
+z80-cmd    Zilog Z80 - TRS-80 DOS "/CMD" load-module byte stream
+z80-coff    Zilog Z80 - COFF relocatable object
+z80-coleco-aout    Zilog Z80 - a.out relocatable object
+z80-coleco-coff    Zilog Z80 - COFF relocatable object
+z80-coleco-colecorom    Zilog Z80 - ColecoVision cartridge ROM image
+z80-coleco-elf    Zilog Z80 - ELF relocatable object
+z80-coleco-raw    Zilog Z80 - flat binary image, no container
+z80-elf    Zilog Z80 - ELF relocatable object
+z80-raw    Zilog Z80 - flat binary image, no container
+z80-sna    Zilog Z80 - ZX Spectrum 48K .sna snapshot

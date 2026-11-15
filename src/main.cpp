@@ -411,11 +411,48 @@ std::string backendTargetOf(const Platform &platform) {
     return platform.target;
 }
 
+// Short, human-readable description of a `--format` value, for --list-platforms. Covers every
+// name fileFormatKindFromName() accepts, plus the non-FileFormatKind single-file-compile-only
+// names (`asm`, `objraw`, `hex`) that never reach that function.
+std::string formatDescription(const std::string &format) {
+    static const std::map<std::string, std::string> kDescriptions = {
+        {"asm", "generated assembly text, not assembled"},
+        {"raw", "flat binary image, no container"},
+        {"objraw", "bare assembled bytes, symbol-less, inspection only"},
+        {"hex", "Intel HEX records"},
+        {"coff", "COFF relocatable object"},
+        {"elf", "ELF relocatable object"},
+        {"macho", "Mach-O relocatable object"},
+        {"aout", "a.out relocatable object"},
+        {"a7out", "PDP-7 word-oriented paper-tape object"},
+        {"list", "human-readable debug listing"},
+        {"ptr", "PDP-7 paper-tape reader format"},
+        {"rim", "bootable paper tape (own loader protocol)"},
+        {"dos33", "Apple DOS 3.3 \"B\" binary file"},
+        {"prodos", "ProDOS binary file with directory metadata footer"},
+        {"cmd", "TRS-80 DOS \"/CMD\" load-module byte stream"},
+        {"colecorom", "ColecoVision cartridge ROM image"},
+        {"decb", "CoCo Disk Extended Color BASIC LOADM/CLOADM byte stream"},
+        {"prg", "Commodore PRG byte stream (load address plus bytes)"},
+        {"atari", "Atari 400/800 DOS binary-load byte stream"},
+        {"a26", "Atari 2600 cartridge ROM image"},
+        {"nes", "iNES ROM image"},
+        {"sna", "ZX Spectrum 48K .sna snapshot"},
+        {"amsdos", "Amstrad CPC file header plus data"},
+    };
+    auto it = kDescriptions.find(format);
+    return it != kDescriptions.end() ? it->second : "";
+}
+
 void listPlatforms() {
     for (const auto &platform : allPlatforms()) {
         std::unique_ptr<rcc::Backend> backend = makeBackend(backendTargetOf(platform));
         std::cout << platform.name;
         if (backend) std::cout << "    " << backend->description();
+        if (!platform.format.empty()) {
+            std::string fmtDesc = formatDescription(platform.format);
+            if (!fmtDesc.empty()) std::cout << " - " << fmtDesc;
+        }
         std::cout << "\n";
     }
 }
