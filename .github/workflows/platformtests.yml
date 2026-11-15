@@ -42,7 +42,7 @@ jobs:
       # `run-id` pulls the artifact from the CI run that triggered this
       # workflow, since artifacts don't cross workflows on their own.
       - name: Download rcc binary
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: ${{ matrix.artifact }}
           path: build/bin
