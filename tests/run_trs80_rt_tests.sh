@@ -19,6 +19,11 @@ for arg in "$@"; do
         *) RCC="$arg" ;;
     esac
 done
+# Resolve to an absolute path before the later `cd "$tmpdir"` below - a relative
+# path (what the root Makefile's own `test` target passes: `build/bin/rcc`)
+# would otherwise stop resolving once this script cd's away, same fix
+# run_cpc_rt_tests.sh already has.
+RCC="$(cd "$(dirname "$RCC")" && pwd)/$(basename "$RCC")"
 
 if [ ! -x "$RCC" ]; then
     echo "rcc binary not found at $RCC - build it first ('make')" >&2

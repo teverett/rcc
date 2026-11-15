@@ -3005,6 +3005,7 @@ is_known_unsupported() {
         z80:types_longlong_divmod_repeated.c) return 0 ;;  # same - no verified wide multiply/divide routine
         6809:types_longlong_divmod.c) return 0 ;;          # no verified wide multiply/divide routine
         6809:types_longlong_divmod_repeated.c) return 0 ;; # same - no verified wide multiply/divide routine
+        8051:hex_literal.c) return 0 ;;                     # same - uses an 'unsigned long' local
         8051:types_arrays.c) return 0 ;;                   # wide (long/long long) values unsupported at all
         8051:struct_alignment_size.c) return 0 ;;          # same - sizeof() always yields a 'long'-typed literal
         8051:struct_packed_array.c) return 0 ;;

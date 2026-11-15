@@ -174,23 +174,6 @@ workflow, so that suite - and the py65/z80-python packages installed for
 it - never actually run in CI. Not yet fixed.
 
 
-## `pic16`/`pic18`'s `tests/pic16_pic18_extern_function_address_test.py` links with `--format=flat`, which neither target's linker factory supports
-
-Affects `tests/pic16_pic18_extern_function_address_test.py`'s
-`compileAndLink()` helper, which calls `--link --target=pic16`/`pic18`
-with `--format=flat`. Both `src/linker/factory/PIC16LinkerFactory.cpp`
-and `PIC18LinkerFactory.cpp` set `config.outputFormats = {"raw", "coff",
-"elf", "aout"}` - `flat` isn't one of them, so every one of this test's
-three cases fails immediately with `unknown --format 'flat' for --link
---target=pic16/pic18 (valid: raw coff elf aout)`, before ever reaching
-the dispatch-table/extern-address behavior the test means to check.
-
-Either the test should use one of the four formats actually supported
-(most likely `raw`, matching every other bare-metal target's own
-convention), or `flat` needs adding to both factories' `outputFormats` if
-it's meant to be a real distinct format for these targets. Not yet
-fixed.
-
 ## `--target=6809` and its CoCo runtime have no automated execution test
 
 Affects the whole `6809` backend (`src/codegen/m6809/M6809Codegen.cpp`,

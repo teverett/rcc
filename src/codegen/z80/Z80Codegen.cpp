@@ -1321,16 +1321,28 @@ void Z80Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRe
         negateIf("ptr", "dx");
         negateIf("ptr+1", "_bc");
     }
-    code_ << "    ld hl, 0\n    ld [ac], hl\n";
-    std::string Lloop = newLabel(), Ldone = newLabel();
+    // Non-restoring division, with divisor/quotient pinned in registers for the loop's whole
+    // run (HL = running remainder, DE = divisor, BC = quotient) - no memory access at all
+    // inside the loop itself, unlike the load-from-memory-every-iteration version this
+    // replaced (same fix as I8080Codegen::genDivMod() - see that function's own comment and
+    // docs/known-bugs.md for the 8080 case this was originally found on). Each round
+    // speculatively does HL -= DE; a final borrow means that went negative, so it's undone
+    // (`add hl, de`) and the loop stops; otherwise it's kept and the quotient (BC) counts it.
+    // This cuts the common-case iteration from 10 instructions (two 16-bit memory loads plus a
+    // memory round trip for the quotient) down to 5 (`or a`/`sbc hl,de`/`jp c`/`inc bc`/`jp`).
+    code_ << "    ld de, [_bc]\n";  // de = divisor (fixed for the loop)
+    code_ << "    ld hl, [dx]\n";   // hl = running remainder
+    code_ << "    ld bc, 0\n";      // bc = quotient = 0
+    std::string Lloop = newLabel(), Lrestore = newLabel();
     code_ << Lloop << ":\n";
-    code_ << "    ld hl, [dx]\n    ld de, [_bc]\n";
-    code_ << "    or a\n    sbc hl, de\n";  // HL = dx - bc; CY = borrow (dx < bc)
-    code_ << "    jp c, " << Ldone << "\n";
-    code_ << "    ld [dx], hl\n";  // commit: dx -= bc (HL already holds the subtracted result)
-    code_ << "    ld hl, [ac]\n    inc hl\n    ld [ac], hl\n";
+    code_ << "    or a\n    sbc hl, de\n";
+    code_ << "    jp c, " << Lrestore << "\n";
+    code_ << "    inc bc\n";
     code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    code_ << Lrestore << ":\n";
+    code_ << "    add hl, de\n";  // undo: hl was about to go negative, add the divisor back
+    code_ << "    ld [dx], hl\n";  // dx = remainder
+    code_ << "    ld [ac], bc\n";  // ac = quotient
     if (!isUnsigned) {
         // Quotient is negative iff the two original signs differed; the
         // remainder keeps the dividend's sign.

@@ -1363,22 +1363,33 @@ void I8080Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
         negateIf("ptr", "dx");
         negateIf("ptr+1", "bc");
     }
-    code_ << "    lxi h, 0\n    shld ac\n";  // ac = quotient = 0
-    std::string Lloop = newLabel(), Ldone = newLabel();
+    // Non-restoring division, with divisor/quotient pinned in registers for the loop's whole
+    // run (HL = running remainder, DE = divisor, BC = quotient) - no memory access and no
+    // register-pair shuffling through the stack at all inside the loop itself, unlike the
+    // load-from-memory-every-iteration version this replaced. Each round speculatively does
+    // HL -= DE; a final borrow means that went negative, so it's undone (`dad d`, real 8080
+    // 16-bit add) and the loop stops; otherwise it's kept and the quotient (BC) counts it. This
+    // keeps the common-case iteration to 9 instructions (`mov`/`sub`/`sbb`/`jnc`/`inx`/`jmp`)
+    // instead of the previous 19 (three lhld/shld round trips through memory plus a push/pop
+    // register-pair move) - division by a large dividend needs one iteration per unit of
+    // quotient, so that difference is what used to run a real test past the test harness's own
+    // step-count ceiling (see docs/known-bugs.md).
+    code_ << "    lhld bc\n    mov d,h\n    mov e,l\n";  // de = divisor (fixed for the loop)
+    code_ << "    lhld dx\n";                            // hl = running remainder
+    code_ << "    lxi b, 0\n";                           // bc = quotient = 0
+    std::string Lloop = newLabel(), Lcontinue = newLabel(), Ldone = newLabel();
     code_ << Lloop << ":\n";
-    loadPair("d", "dx");
-    code_ << "    lhld bc\n";
-    // Tentative dx - bc; carry (borrow) set afterward means dx < bc, so this round's
-    // subtraction can't happen - stop.
-    code_ << "    mov a,e\n    sub l\n    mov c,a\n";  // c = tentative low result
-    code_ << "    mov a,d\n    sbb h\n";
-    code_ << "    jc " << Ldone << "\n";
-    // Commit: dx -= bc.
-    code_ << "    mov d,a\n    mov e,c\n";
-    storePair("dx", "d");
-    code_ << "    lhld ac\n    inx h\n    shld ac\n";  // quotient += 1
+    code_ << "    mov a,l\n    sub e\n    mov l,a\n";
+    code_ << "    mov a,h\n    sbb d\n    mov h,a\n";
+    code_ << "    jnc " << Lcontinue << "\n";
+    code_ << "    dad d\n";  // undo: hl was about to go negative, add the divisor back
+    code_ << "    jmp " << Ldone << "\n";
+    code_ << Lcontinue << ":\n";
+    code_ << "    inx b\n";
     code_ << "    jmp " << Lloop << "\n";
     code_ << Ldone << ":\n";
+    code_ << "    shld dx\n";                            // dx = remainder
+    code_ << "    push b\n    pop h\n    shld ac\n";     // ac = quotient
     if (!isUnsigned) {
         // Quotient is negative iff the two original signs differed; the remainder always takes
         // the dividend's original sign.
