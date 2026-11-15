@@ -34,7 +34,10 @@ class PlatformFlagTest(unittest.TestCase):
         return object_path
 
     def test_list_platforms_contains_expected_names_including_formatless_targets(self):
-        names = set(self.run_rcc("--list-platforms").stdout.splitlines())
+        # Each line is "<name>    <backend description>[ - <format description>]"
+        # (see src/main.cpp's own listPlatforms()) - only the first whitespace-
+        # separated token is the actual --platform name this test checks.
+        names = {line.split()[0] for line in self.run_rcc("--list-platforms").stdout.splitlines() if line}
         for expected in (
             "6502-dos33", "65c02-prodos", "z80-coleco-colecorom",
             "6809-decb", "8086-dos-raw", "saturn-coff", "i386-linux",

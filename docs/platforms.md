@@ -440,6 +440,35 @@ pair - see `docs/using.md`.
   deliberate scope limitation, not a bug. No automated emulator-based
   test exists yet for this target or its CoCo runtime - see
   `docs/known-bugs.md`.
+- **6809-vectrex** — a separate `--target`, sharing `6809`'s own codegen
+  and calling convention but a different `GenericLinker` entry object and
+  base address ($0000, the address the cartridge is mapped at, instead of
+  $3000): the entry's first bytes are the GCE Vectrex cartridge header
+  the BIOS reads at $0000 before running anything else - a copyright
+  string starting "g GCE" and ending `$80`, a music pointer, title
+  size/position bytes, and a title string - all fixed boilerplate baked
+  into the linker (no way for a C program to customize it, the same
+  limitation `z80-coleco`'s own header has). Also supports
+  `--format=vectrex` (see `docs/using.md`'s own `--format` row), the real
+  cartridge ROM image (`src/fileformat/vectrex/VectrexFormat.h`), padded
+  with `$FF` up to the nearest of the conventional 4/8/16/32 KiB
+  non-bankswitched cartridge sizes.
+
+  `src/rt/vectrex/` is a BIOS-call runtime, not a memory-mapped one - the
+  Vectrex has no video RAM; the display is an analog vector CRT the BIOS
+  drives through a DAC in real time - so every function is a thin inline-
+  `asm` wrapper around one fixed BIOS subroutine address (`Wait_Recal`,
+  `Reset0Ref`, `Intensity_5F`, `Moveto_d`, `Dot_d`, `Random`, and a
+  best-effort button-read routine). No official GCE technical reference
+  is bundled with this project to confirm those addresses/calling
+  conventions byte-for-byte - same best-effort caveat as `src/rt/trs80/`'s
+  own header comment, cross-checked against two independent community
+  sources where noted in `vectrex.h`. Text printing, sound (the
+  AY-3-8912 PSG), and low-level timed vector-list line drawing are out of
+  scope for this runtime - see that header's own comment for why - so
+  this runtime's only drawing primitive is a single dot. No verified
+  Vectrex emulator exists in this project's CI, so this target's example
+  is compile-only - see `docs/known-bugs.md`.
 - **tms9900** — real TMS9900 assembly/machine code (`TMS9900Assembler.h`),
   a genuinely different architecture from every other target on this
   page: its 16 "registers" (`r0`-`r15`) aren't real CPU registers at

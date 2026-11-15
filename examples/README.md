@@ -36,6 +36,9 @@ directory with a `Makefile` and a `README.md` of its own:
 - `6809-coco` — TRS-80 Color Computer "hello world" for `6809`, linked as
   `--platform=6809-raw` against `src/rt/coco/`'s video-RAM runtime
   library
+- `6809-vectrex` — GCE Vectrex cartridge for `6809-vectrex`, linked as
+  `--platform=6809-vectrex-vectrex` against `src/rt/vectrex/`'s BIOS-call
+  runtime library
 - `z80-zxspectrum` — ZX Spectrum "hello world" for `z80`, linked as
   `--platform=z80-sna` against `src/rt/zxspectrum/`'s memory-mapped
   runtime library

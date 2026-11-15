@@ -77,7 +77,7 @@ class PIC16PIC18ExternFunctionAddressTest(unittest.TestCase):
             )
             self.assertEqual(result.returncode, 0, result.stderr)
         result = subprocess.run(
-            [str(RCC), "--link", f"--target={target}", "--format=flat", f"--out={out}", str(a_obj), str(b_obj)],
+            [str(RCC), "--link", f"--target={target}", "--format=raw", f"--out={out}", str(a_obj), str(b_obj)],
             capture_output=True, text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -92,7 +92,7 @@ OPTIMIZERS_DIRS   := $(OPTIMIZERS_DIR)/constant_folding $(OPTIMIZERS_DIR)/consta
 # header comment - instead of being split across src/coff/, src/elf/,
 # src/objectformat/ and src/linker/format/ the way it used to be.
 FILEFORMAT_DIR  := $(SRC_DIR)/fileformat
-FILEFORMAT_DIRS := $(FILEFORMAT_DIR) $(FILEFORMAT_DIR)/archive $(FILEFORMAT_DIR)/coff $(FILEFORMAT_DIR)/elf $(FILEFORMAT_DIR)/macho $(FILEFORMAT_DIR)/aout $(FILEFORMAT_DIR)/raw $(FILEFORMAT_DIR)/rim $(FILEFORMAT_DIR)/ptr $(FILEFORMAT_DIR)/a7out $(FILEFORMAT_DIR)/list $(FILEFORMAT_DIR)/dos33 $(FILEFORMAT_DIR)/prodos $(FILEFORMAT_DIR)/cmd $(FILEFORMAT_DIR)/colecorom $(FILEFORMAT_DIR)/decb $(FILEFORMAT_DIR)/prg $(FILEFORMAT_DIR)/atari $(FILEFORMAT_DIR)/atari2600 $(FILEFORMAT_DIR)/nes $(FILEFORMAT_DIR)/sna $(FILEFORMAT_DIR)/amsdos
+FILEFORMAT_DIRS := $(FILEFORMAT_DIR) $(FILEFORMAT_DIR)/archive $(FILEFORMAT_DIR)/coff $(FILEFORMAT_DIR)/elf $(FILEFORMAT_DIR)/macho $(FILEFORMAT_DIR)/aout $(FILEFORMAT_DIR)/raw $(FILEFORMAT_DIR)/rim $(FILEFORMAT_DIR)/ptr $(FILEFORMAT_DIR)/a7out $(FILEFORMAT_DIR)/list $(FILEFORMAT_DIR)/dos33 $(FILEFORMAT_DIR)/prodos $(FILEFORMAT_DIR)/cmd $(FILEFORMAT_DIR)/colecorom $(FILEFORMAT_DIR)/decb $(FILEFORMAT_DIR)/prg $(FILEFORMAT_DIR)/atari $(FILEFORMAT_DIR)/atari2600 $(FILEFORMAT_DIR)/nes $(FILEFORMAT_DIR)/sna $(FILEFORMAT_DIR)/amsdos $(FILEFORMAT_DIR)/vectrex
 
 HAND_SRCS := \
     $(SRC_DIR)/main.cpp \
@@ -120,6 +120,7 @@ HAND_SRCS := \
     $(FILEFORMAT_DIR)/nes/NesRomFormat.cpp \
     $(FILEFORMAT_DIR)/sna/SnaFormat.cpp \
     $(FILEFORMAT_DIR)/amsdos/AmsdosFormat.cpp \
+    $(FILEFORMAT_DIR)/vectrex/VectrexFormat.cpp \
     $(FILEFORMAT_DIR)/archive/ArchiveReader.cpp \
     $(FILEFORMAT_DIR)/coff/PeExportReader.cpp \
     $(FILEFORMAT_DIR)/coff/HostedCoffReader.cpp \
@@ -135,6 +136,7 @@ HAND_SRCS := \
     $(FACTORY_DIR)/Z80LinkerFactory.cpp \
     $(FACTORY_DIR)/ColecoLinkerFactory.cpp \
     $(FACTORY_DIR)/M6809LinkerFactory.cpp \
+    $(FACTORY_DIR)/VectrexLinkerFactory.cpp \
     $(FACTORY_DIR)/M6502LinkerFactory.cpp \
     $(FACTORY_DIR)/M65C02LinkerFactory.cpp \
     $(FACTORY_DIR)/I8080LinkerFactory.cpp \
@@ -333,6 +335,10 @@ $(BIN_DIR)/decb_format_test: tests/decb_format_test.cpp $(FILEFORMAT_DIR)/decb/D
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/decb_format_test.cpp $(FILEFORMAT_DIR)/decb/DecbFormat.cpp -o $@
 
+$(BIN_DIR)/vectrex_format_test: tests/vectrex_format_test.cpp $(FILEFORMAT_DIR)/vectrex/VectrexFormat.cpp $(FILEFORMAT_DIR)/vectrex/VectrexFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/vectrex_format_test.cpp $(FILEFORMAT_DIR)/vectrex/VectrexFormat.cpp -o $@
+
 $(BIN_DIR)/prg_format_test: tests/prg_format_test.cpp $(FILEFORMAT_DIR)/prg/PrgFormat.cpp $(FILEFORMAT_DIR)/prg/PrgFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/prg_format_test.cpp $(FILEFORMAT_DIR)/prg/PrgFormat.cpp -o $@
@@ -394,12 +400,13 @@ $(BIN_DIR)/vex_assembler_test: tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/v
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
-test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
 	$(BIN_DIR)/colecorom_format_test
 	$(BIN_DIR)/decb_format_test
+	$(BIN_DIR)/vectrex_format_test
 	$(BIN_DIR)/prg_format_test
 	$(BIN_DIR)/atari_exe_format_test
 	$(BIN_DIR)/atari2600_rom_format_test
@@ -417,13 +424,14 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
 	$(BIN_DIR)/colecorom_format_test
 	$(BIN_DIR)/decb_format_test
+	$(BIN_DIR)/vectrex_format_test
 	$(BIN_DIR)/prg_format_test
 	$(BIN_DIR)/atari_exe_format_test
 	$(BIN_DIR)/atari2600_rom_format_test

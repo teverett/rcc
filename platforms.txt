@@ -28,6 +28,11 @@
 6809-decb    Motorola 6809 - CoCo Disk Extended Color BASIC LOADM/CLOADM byte stream
 6809-elf    Motorola 6809 - ELF relocatable object
 6809-raw    Motorola 6809 - flat binary image, no container
+6809-vectrex-aout    Motorola 6809 - a.out relocatable object
+6809-vectrex-coff    Motorola 6809 - COFF relocatable object
+6809-vectrex-elf    Motorola 6809 - ELF relocatable object
+6809-vectrex-raw    Motorola 6809 - flat binary image, no container
+6809-vectrex-vectrex    Motorola 6809 - GCE Vectrex cartridge ROM image
 8008-aout    Intel 8008 - a.out relocatable object
 8008-coff    Intel 8008 - COFF relocatable object
 8008-elf    Intel 8008 - ELF relocatable object

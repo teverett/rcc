@@ -109,15 +109,16 @@ jobs:
       # whichever simulator (py65, z80-python, qemu-system-m68k,
       # open-simh's pdp7) that target has one wired up for - see each
       # example's own Makefile/README for which. m30626fjpfp-freestanding/
-      # 8086-msdos/6809-coco/tms9900-ti994a have no emulator wired into
-      # this project at all, so their `test` targets only confirm the
-      # build output exists.
+      # 8086-msdos/6809-coco/6809-vectrex/tms9900-ti994a have no emulator
+      # wired into this project at all, so their `test` targets only
+      # confirm the build output exists.
       - name: Run macOS-only example tests
         if: matrix.name == 'macos'
         run: |
           make -C examples/m30626fjpfp-freestanding test
           make -C examples/8086-msdos test
           make -C examples/6809-coco test
+          make -C examples/6809-vectrex test
           make -C examples/6502-freestanding test
           make -C examples/68000-freestanding test
           make -C examples/pdp7-freestanding test

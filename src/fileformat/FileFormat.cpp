@@ -23,6 +23,7 @@
 #include "fileformat/nes/NesRomFormat.h"
 #include "fileformat/sna/SnaFormat.h"
 #include "fileformat/amsdos/AmsdosFormat.h"
+#include "fileformat/vectrex/VectrexFormat.h"
 
 namespace rcc {
 
@@ -68,6 +69,8 @@ std::unique_ptr<FileFormatWriter> makeFileFormatWriter(FileFormatKind kind) {
             return std::make_unique<SnaFormatWriter>();
         case FileFormatKind::Amsdos:
             return std::make_unique<AmsdosFormatWriter>();
+        case FileFormatKind::VectrexRom:
+            return std::make_unique<VectrexRomFormatWriter>();
     }
     return nullptr;
 }
@@ -114,6 +117,8 @@ std::unique_ptr<FileFormatReader> makeFileFormatReader(FileFormatKind kind) {
             return std::make_unique<SnaFormatReader>();
         case FileFormatKind::Amsdos:
             return std::make_unique<AmsdosFormatReader>();
+        case FileFormatKind::VectrexRom:
+            return std::make_unique<VectrexRomFormatReader>();
     }
     return nullptr;
 }
@@ -140,6 +145,7 @@ std::optional<FileFormatKind> fileFormatKindFromName(const std::string &name) {
     if (name == "nes") return FileFormatKind::NesRom;
     if (name == "sna") return FileFormatKind::Sna;
     if (name == "amsdos") return FileFormatKind::Amsdos;
+    if (name == "vectrex") return FileFormatKind::VectrexRom;
     return std::nullopt;
 }
 
@@ -185,6 +191,8 @@ std::string fileFormatName(FileFormatKind kind) {
             return "sna";
         case FileFormatKind::Amsdos:
             return "amsdos";
+        case FileFormatKind::VectrexRom:
+            return "vectrex";
     }
     return "";
 }

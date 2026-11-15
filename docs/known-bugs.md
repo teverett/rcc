@@ -214,6 +214,77 @@ the same as running real 6809 machine code. Remove this entry once a
 suitable Python 6809 emulator package is found and `check_6809()` is
 wired into the dispatch.
 
+## `--target=6809-vectrex` programs that multiply/divide/modulo/shift-by-variable, or deref through a pointer that spills, write through compiler-internal scratch cells placed in the same ROM-mapped cartridge image as code
+
+Affects `src/codegen/m6809/M6809Codegen.cpp`'s `declareTemp()`-based
+scratch cells (`ac`/`_bc`/`cx`/`dx`/`ptr`, the same ones `VectrexLinkerFactory.cpp`'s
+entry object declares right after its own `halt:` loop) and
+`GenericLinker.cpp`'s shared "lay everything out in one address space
+starting at `baseAddress`" model - the exact same root cause as this
+file's own `z80-coleco` entry above, just on the 6809 side.
+
+`6809-vectrex`'s `baseAddress` is `$0000`, the address the Vectrex maps
+its cartridge ROM at, so every scratch cell - and every global the linker
+places after it - ends up inside that same read-only cartridge image. A
+real Vectrex can't write through any of them: any 16-bit multiply/divide/
+modulo/shift-by-a-variable-amount, or a spilled pointer dereference (the
+operations that use these scratch cells - see `M6809Codegen.cpp`'s own
+`genWideMul()`/`genWideDivMod()`/`genWideLoad()`/`genWideStore()`), is a
+no-op on real hardware instead of updating the value, silently producing
+a wrong result rather than a crash. The plain `6809` target doesn't have
+this problem - its `baseAddress` ($3000) is ordinary CoCo RAM.
+
+Not yet fixed - same fix shape as the `z80-coleco` entry: a real Harvard
+code(ROM)/data(RAM) split for this backend (wiring
+`GenericLinkerConfig::dataBaseAddress` through `M6809Codegen.cpp`'s own
+global/temp placement, pointed at the Vectrex's $C800-$CFFF RAM window,
+the way `pic16`/`pic18`/`avr` already do for their own Flash/RAM split).
+`src/rt/vectrex/vectrex.c`'s own functions don't hit this themselves (no
+multiply/divide/variable-shift/spilled-pointer code in them), but any
+game logic that does will.
+
+## `--target=6809-vectrex` and its runtime have no automated execution test
+
+Affects the whole `6809-vectrex` target (shares `src/codegen/m6809/
+M6809Codegen.cpp`/`M6809Assembler.cpp` with plain `6809` - see that
+target's own "no automated execution test" entry above for why no
+verified Python 6809 CPU core exists) and `src/rt/vectrex/`: there is no
+verified Vectrex emulator wired into this project either (unlike, say,
+`py65` for 6502 targets), so `tests/run_tests.sh --target=6809-vectrex`
+is compile-only and `examples/6809-vectrex`'s own `make test` only
+confirms the cartridge image was produced, not that it does anything
+real hardware or an emulator would agree with.
+
+Verified as far as possible without execution: `make build`'s own build
+is clean; `tests/vectrex_format_test.cpp` checks the cartridge header/
+padding/signature logic byte-for-byte against the documented header
+layout; the BIOS call addresses `src/rt/vectrex/vectrex.h` wraps were
+cross-checked against two independent community sources where noted
+there - but none of this is the same as running real 6809 machine code
+against a real (or emulated) Vectrex BIOS. Remove this entry once a
+verified Vectrex emulator is found and wired into `run_tests.sh`.
+
+## `--target=6809-vectrex`'s runtime has no text printing, sound, or line drawing
+
+Affects `src/rt/vectrex/vectrex.h`/`vectrex.c`: the BIOS's vector-font
+text-printing routines (`Print_Str_*`) need a character-encoding table
+this project has no independently verified source for; the AY-3-8912
+sound-chip init/play routines need register-level PSG documentation this
+project doesn't have verified either; and the low-level timed vector-list
+line-drawing routines (`Mov_Draw_VLc_b`/`Mov_Draw_VLcs`) have addresses
+confirmed by two sources but a calling convention (the vector-list's own
+byte layout) that isn't. Only the single-dot-plot (`Dot_d`), beam-move
+(`Moveto_d`), intensity, recalibration/recenter, and random-number BIOS
+calls are exposed, plus a best-effort button-read whose exact bit layout
+also isn't independently confirmed.
+
+Not a bug in what's implemented - a deliberate scope cut, logged here per
+this project's own documentation policy rather than silently omitted.
+Fixing it means finding/verifying the missing BIOS calling conventions
+(a real GCE technical reference, or a disassembly of the real BIOS ROM,
+would resolve all three at once) and extending `vectrex.h`/`vectrex.c`
+accordingly.
+
 ## `--target=tms9900` has no automated execution test
 
 Affects the whole `tms9900` backend (`src/codegen/tms9900/

@@ -6,7 +6,7 @@
 # on every target (see ../src/Backend.h: a .c file means the same
 # thing regardless of --target).
 #
-# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|tms9900|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
+# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
 #
 # --optimize passes rcc's own --optimize straight through to every
 # compile below, so the exact same checks also confirm the IR
@@ -206,6 +206,13 @@ case "$TARGET" in
         echo "no verified Python 6809 emulator package is wired in yet - see docs/known-bugs.md; --target=6809 compiles only, verify execution manually" >&2
         exit 1
         ;;
+    6809-vectrex)
+        # Same situation as plain 6809 above (shares its codegen/assembler), plus no verified
+        # Vectrex emulator of any kind (Python or otherwise) is wired into this project either -
+        # see ../docs/known-bugs.md.
+        echo "no verified Python 6809 emulator package is wired in yet, and no verified Vectrex emulator either - see docs/known-bugs.md; --target=6809-vectrex compiles only, verify execution manually" >&2
+        exit 1
+        ;;
     tms9900)
         # No pip-installable Python TMS9900 core was found (see docs/known-bugs.md) - same
         # situation as 6809 above. This target's own codegen/assembler were instead verified
@@ -350,7 +357,7 @@ case "$TARGET" in
         fi
         ;;
     *)
-        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, tms9900, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
+        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
         exit 1
         ;;
 esac
@@ -2913,6 +2920,7 @@ is_known_unsupported() {
         # ../src/codegen/pdp1/Pdp1Codegen.h's class comment), unlike pdp7
         # which only lacks wide multiply/divide.
         pdp1:convert_int_to_longlong.c) return 0 ;;
+        pdp1:hex_literal.c) return 0 ;;
         pdp1:literal_promotes_to_long.c) return 0 ;;
         pdp1:longlong_add_carry_chain.c) return 0 ;;
         pdp1:longlong_sub_borrow_chain.c) return 0 ;;
