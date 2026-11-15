@@ -25,6 +25,11 @@ class Backend {
     // Backend name, selected via --target=<name>.
     virtual std::string name() const = 0;
 
+    // Human-readable description of the processor/machine this backend targets (e.g.
+    // "Intel 8086/8088", "Parrot VM"), printed by --list-platforms after each platform's
+    // own triple.
+    virtual std::string description() const = 0;
+
     // This target's storage width for char/short/int/long/long long; usually bytes, but a
     // target's native word on a non-byte-addressable backend (e.g. pdp7).
     virtual TypeWidths typeWidths() const = 0;

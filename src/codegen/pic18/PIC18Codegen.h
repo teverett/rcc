@@ -112,6 +112,7 @@ class PIC18Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pic18"; }
+    std::string description() const override { return "Microchip PIC18"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".pic18"; }
     // `hex` is the whole-program Intel-HEX output; the other formats mean

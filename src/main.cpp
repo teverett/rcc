@@ -398,8 +398,26 @@ std::vector<Platform> allPlatforms() {
     return platforms;
 }
 
+// The chip/machine Backend::description() is queried from: `platform.target` for most
+// platforms, but the three hosted triples (i386-linux/windows, armv8a-macos) carry the
+// host folded into `target` itself ("i386-linux") - makeBackend() only knows the bare
+// target name, so that suffix is stripped back off here.
+std::string backendTargetOf(const Platform &platform) {
+    for (const std::string &hostedTarget : {std::string("i386"), std::string("armv8a")}) {
+        if (platform.target == hostedTarget || platform.target.rfind(hostedTarget + "-", 0) == 0) {
+            return hostedTarget;
+        }
+    }
+    return platform.target;
+}
+
 void listPlatforms() {
-    for (const auto &platform : allPlatforms()) std::cout << platform.name << "\n";
+    for (const auto &platform : allPlatforms()) {
+        std::unique_ptr<rcc::Backend> backend = makeBackend(backendTargetOf(platform));
+        std::cout << platform.name;
+        if (backend) std::cout << "    " << backend->description();
+        std::cout << "\n";
+    }
 }
 
 // Parses one file into its own Program, then appends its functions/globals

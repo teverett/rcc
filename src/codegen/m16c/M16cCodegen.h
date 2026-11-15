@@ -49,6 +49,7 @@ class M16cCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "m16c"; }
+    std::string description() const override { return "Renesas M16C"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s16c"; }
     std::vector<std::string> assembledFormats() const override {

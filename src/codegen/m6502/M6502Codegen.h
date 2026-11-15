@@ -100,6 +100,13 @@ class M6502Codegen : public Backend {
             default: return "6502";
         }
     }
+    std::string description() const override {
+        switch (variant_) {
+            case Variant::Atari2600: return "MOS 6502 (Atari 2600)";
+            case Variant::Nes2A03: return "Ricoh 2A03 (NES)";
+            default: return "MOS 6502";
+        }
+    }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s65"; }
     std::vector<std::string> assembledFormats() const override {

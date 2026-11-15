@@ -86,6 +86,7 @@ class ArmMCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "cortex-m3"; }
+    std::string description() const override { return "ARM Cortex-M (ARMv7-M)"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".sarm"; }
     std::vector<std::string> assembledFormats() const override {

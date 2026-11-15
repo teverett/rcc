@@ -35,6 +35,7 @@ class SaturnCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "saturn"; }
+    std::string description() const override { return "HP Saturn"; }
     // Real byte widths - this backend's registers/addresses are plain byte addresses (see
     // SaturnAssembler.h), so TypeWidths' unit must be a real byte: IRBuilder pre-scales every
     // pointer-arithmetic step and frame offset by `widthOf()` in this same unit (see IR.h), and

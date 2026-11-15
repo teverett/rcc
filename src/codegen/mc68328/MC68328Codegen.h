@@ -26,6 +26,7 @@ class MC68328Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "mc68328"; }
+    std::string description() const override { return "Motorola MC68328 \"DragonBall\""; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".s328"; }
     std::vector<std::string> assembledFormats() const override {

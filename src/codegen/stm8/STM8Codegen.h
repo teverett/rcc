@@ -47,6 +47,7 @@ class STM8Codegen : public Backend {
 
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "stm8"; }
+    std::string description() const override { return "STMicroelectronics STM8"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s8m"; }
     std::vector<std::string> assembledFormats() const override {

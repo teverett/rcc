@@ -47,6 +47,7 @@ class TMS9900Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "tms9900"; }
+    std::string description() const override { return "Texas Instruments TMS9900"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s99"; }
     std::vector<std::string> assembledFormats() const override {

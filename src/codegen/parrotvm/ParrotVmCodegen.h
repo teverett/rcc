@@ -45,6 +45,7 @@ class ParrotVmCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "parrotvm"; }
+    std::string description() const override { return "Parrot VM"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".pir"; }
     std::vector<std::string> assembledFormats() const override { return {"raw"}; }

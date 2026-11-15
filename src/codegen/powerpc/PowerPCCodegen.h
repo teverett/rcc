@@ -57,6 +57,7 @@ class PowerPCCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "powerpc"; }
+    std::string description() const override { return "PowerPC (32-bit)"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".sppc"; }
     std::vector<std::string> assembledFormats() const override {

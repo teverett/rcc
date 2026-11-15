@@ -101,6 +101,7 @@ class PIC16Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pic16"; }
+    std::string description() const override { return "Microchip PIC16"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".pic16"; }
     std::vector<std::string> assembledFormats() const override {

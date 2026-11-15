@@ -45,6 +45,7 @@ class Pdp11Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp11"; }
+    std::string description() const override { return "DEC PDP-11"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s11"; }
     std::vector<std::string> assembledFormats() const override {

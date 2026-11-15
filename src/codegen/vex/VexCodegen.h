@@ -111,6 +111,7 @@ class VexCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "vex"; }
+    std::string description() const override { return "Vex virtual machine"; }
     // Byte-addressed, `unitBits=8` (matching vex's own real address space), with every scalar
     // 4 storage units (one 32-bit cell) wide regardless of C type - see the class comment's
     // storage model. `widthOfType()` therefore always returns a byte count directly, matching

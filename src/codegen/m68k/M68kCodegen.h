@@ -38,6 +38,7 @@ class M68kCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "68000"; }
+    std::string description() const override { return "Motorola 68000"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".s68"; }
     std::vector<std::string> assembledFormats() const override {

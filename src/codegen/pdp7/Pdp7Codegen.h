@@ -41,6 +41,7 @@ class Pdp7Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp7"; }
+    std::string description() const override { return "DEC PDP-7"; }
     TypeWidths typeWidths() const override { return {1, 1, 1, 2, 4, 18}; }
     std::string sourceExtension() const override { return ".s"; }
     std::vector<std::string> assembledFormats() const override { return {"a7out", "list", "ptr", "rim", "coff"}; }

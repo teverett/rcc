@@ -58,6 +58,7 @@ class MipsCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "r10000"; }
+    std::string description() const override { return "MIPS I (R10000/R4000)"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".smips"; }
     std::vector<std::string> assembledFormats() const override {

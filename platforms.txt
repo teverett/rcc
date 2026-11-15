@@ -1,192 +1,192 @@
-2a03-aout
-2a03-coff
-2a03-elf
-2a03-nes
-2a03-raw
-6502-aout
-6502-atari
-6502-coff
-6502-dos33
-6502-elf
-6502-prg
-6502-prodos
-6502-raw
-65c02-aout
-65c02-atari
-65c02-coff
-65c02-dos33
-65c02-elf
-65c02-prg
-65c02-prodos
-65c02-raw
-68000-aout
-68000-coff
-68000-elf
-68000-raw
-6809-aout
-6809-coff
-6809-decb
-6809-elf
-6809-raw
-8008-aout
-8008-coff
-8008-elf
-8008-raw
-8031-aout
-8031-coff
-8031-elf
-8031-raw
-8032-aout
-8032-coff
-8032-elf
-8032-raw
-8051-aout
-8051-coff
-8051-elf
-8051-raw
-8052-aout
-8052-coff
-8052-elf
-8052-raw
-8080-aout
-8080-coff
-8080-elf
-8080-raw
-8086-aout
-8086-coff
-8086-dos-aout
-8086-dos-coff
-8086-dos-elf
-8086-dos-raw
-8086-elf
-8086-raw
-8088-aout
-8088-coff
-8088-elf
-8088-raw
-alpha-aout
-alpha-coff
-alpha-elf
-alpha-raw
-armv7a-aout
-armv7a-coff
-armv7a-elf
-armv7a-raw
-armv8a-aout
-armv8a-coff
-armv8a-elf
-armv8a-macos
-armv8a-raw
-atari2600-a26
-atari2600-aout
-atari2600-coff
-atari2600-elf
-atari2600-raw
-avr-aout
-avr-coff
-avr-elf
-avr-raw
-cortex-m3-aout
-cortex-m3-coff
-cortex-m3-elf
-cortex-m3-raw
-cortex-m4-aout
-cortex-m4-coff
-cortex-m4-elf
-cortex-m4-raw
-cortex-m7-aout
-cortex-m7-coff
-cortex-m7-elf
-cortex-m7-raw
-i386-aout
-i386-coff
-i386-elf
-i386-linux
-i386-raw
-i386-windows
-m16c-aout
-m16c-coff
-m16c-elf
-m16c-raw
-m30626fjpfp-aout
-m30626fjpfp-coff
-m30626fjpfp-elf
-m30626fjpfp-raw
-mc68328-aout
-mc68328-coff
-mc68328-elf
-mc68328-raw
-parrotvm-raw
-pdp1-list
-pdp1-rim
-pdp10-aout
-pdp10-coff
-pdp10-elf
-pdp10-raw
-pdp11-aout
-pdp11-coff
-pdp11-elf
-pdp11-raw
-pdp7-a7out
-pdp7-aout
-pdp7-coff
-pdp7-list
-pdp7-ptr
-pdp7-rim
-pic16-aout
-pic16-coff
-pic16-elf
-pic16-raw
-pic18-aout
-pic18-coff
-pic18-elf
-pic18-raw
-powerpc-aout
-powerpc-coff
-powerpc-elf
-powerpc-raw
-r10000-aout
-r10000-coff
-r10000-elf
-r10000-raw
-r4000-aout
-r4000-coff
-r4000-elf
-r4000-raw
-saturn-coff
-saturn-raw
-sparc-aout
-sparc-coff
-sparc-elf
-sparc-raw
-stm32-aout
-stm32-coff
-stm32-elf
-stm32-raw
-stm8-aout
-stm8-coff
-stm8-elf
-stm8-raw
-tms320c6713-raw
-tms9900-aout
-tms9900-coff
-tms9900-elf
-tms9900-raw
-vax-aout
-vax-coff
-vax-elf
-vax-raw
-vex-coff
-vex-raw
-z80-amsdos
-z80-aout
-z80-cmd
-z80-coff
-z80-coleco-aout
-z80-coleco-coff
-z80-coleco-colecorom
-z80-coleco-elf
-z80-coleco-raw
-z80-elf
-z80-raw
-z80-sna
+2a03-aout    Ricoh 2A03 (NES)
+2a03-coff    Ricoh 2A03 (NES)
+2a03-elf    Ricoh 2A03 (NES)
+2a03-nes    Ricoh 2A03 (NES)
+2a03-raw    Ricoh 2A03 (NES)
+6502-aout    MOS 6502
+6502-atari    MOS 6502
+6502-coff    MOS 6502
+6502-dos33    MOS 6502
+6502-elf    MOS 6502
+6502-prg    MOS 6502
+6502-prodos    MOS 6502
+6502-raw    MOS 6502
+65c02-aout    WDC 65C02
+65c02-atari    WDC 65C02
+65c02-coff    WDC 65C02
+65c02-dos33    WDC 65C02
+65c02-elf    WDC 65C02
+65c02-prg    WDC 65C02
+65c02-prodos    WDC 65C02
+65c02-raw    WDC 65C02
+68000-aout    Motorola 68000
+68000-coff    Motorola 68000
+68000-elf    Motorola 68000
+68000-raw    Motorola 68000
+6809-aout    Motorola 6809
+6809-coff    Motorola 6809
+6809-decb    Motorola 6809
+6809-elf    Motorola 6809
+6809-raw    Motorola 6809
+8008-aout    Intel 8008
+8008-coff    Intel 8008
+8008-elf    Intel 8008
+8008-raw    Intel 8008
+8031-aout    Intel MCS-51 (8051 family)
+8031-coff    Intel MCS-51 (8051 family)
+8031-elf    Intel MCS-51 (8051 family)
+8031-raw    Intel MCS-51 (8051 family)
+8032-aout    Intel MCS-51 (8051 family)
+8032-coff    Intel MCS-51 (8051 family)
+8032-elf    Intel MCS-51 (8051 family)
+8032-raw    Intel MCS-51 (8051 family)
+8051-aout    Intel MCS-51 (8051 family)
+8051-coff    Intel MCS-51 (8051 family)
+8051-elf    Intel MCS-51 (8051 family)
+8051-raw    Intel MCS-51 (8051 family)
+8052-aout    Intel MCS-51 (8051 family)
+8052-coff    Intel MCS-51 (8051 family)
+8052-elf    Intel MCS-51 (8051 family)
+8052-raw    Intel MCS-51 (8051 family)
+8080-aout    Intel 8080
+8080-coff    Intel 8080
+8080-elf    Intel 8080
+8080-raw    Intel 8080
+8086-aout    Intel 8086/8088
+8086-coff    Intel 8086/8088
+8086-dos-aout    Intel 8086/8088 (MS-DOS .com)
+8086-dos-coff    Intel 8086/8088 (MS-DOS .com)
+8086-dos-elf    Intel 8086/8088 (MS-DOS .com)
+8086-dos-raw    Intel 8086/8088 (MS-DOS .com)
+8086-elf    Intel 8086/8088
+8086-raw    Intel 8086/8088
+8088-aout    Intel 8086/8088
+8088-coff    Intel 8086/8088
+8088-elf    Intel 8086/8088
+8088-raw    Intel 8086/8088
+alpha-aout    DEC Alpha AXP
+alpha-coff    DEC Alpha AXP
+alpha-elf    DEC Alpha AXP
+alpha-raw    DEC Alpha AXP
+armv7a-aout    ARM Cortex-A (ARMv7-A, 32-bit)
+armv7a-coff    ARM Cortex-A (ARMv7-A, 32-bit)
+armv7a-elf    ARM Cortex-A (ARMv7-A, 32-bit)
+armv7a-raw    ARM Cortex-A (ARMv7-A, 32-bit)
+armv8a-aout    ARM Cortex-A (ARMv8-A, 64-bit)
+armv8a-coff    ARM Cortex-A (ARMv8-A, 64-bit)
+armv8a-elf    ARM Cortex-A (ARMv8-A, 64-bit)
+armv8a-macos    ARM Cortex-A (ARMv8-A, 64-bit)
+armv8a-raw    ARM Cortex-A (ARMv8-A, 64-bit)
+atari2600-a26    MOS 6502 (Atari 2600)
+atari2600-aout    MOS 6502 (Atari 2600)
+atari2600-coff    MOS 6502 (Atari 2600)
+atari2600-elf    MOS 6502 (Atari 2600)
+atari2600-raw    MOS 6502 (Atari 2600)
+avr-aout    Atmel AVR (ATmega328P)
+avr-coff    Atmel AVR (ATmega328P)
+avr-elf    Atmel AVR (ATmega328P)
+avr-raw    Atmel AVR (ATmega328P)
+cortex-m3-aout    ARM Cortex-M (ARMv7-M)
+cortex-m3-coff    ARM Cortex-M (ARMv7-M)
+cortex-m3-elf    ARM Cortex-M (ARMv7-M)
+cortex-m3-raw    ARM Cortex-M (ARMv7-M)
+cortex-m4-aout    ARM Cortex-M (ARMv7-M)
+cortex-m4-coff    ARM Cortex-M (ARMv7-M)
+cortex-m4-elf    ARM Cortex-M (ARMv7-M)
+cortex-m4-raw    ARM Cortex-M (ARMv7-M)
+cortex-m7-aout    ARM Cortex-M (ARMv7-M)
+cortex-m7-coff    ARM Cortex-M (ARMv7-M)
+cortex-m7-elf    ARM Cortex-M (ARMv7-M)
+cortex-m7-raw    ARM Cortex-M (ARMv7-M)
+i386-aout    Intel 386
+i386-coff    Intel 386
+i386-elf    Intel 386
+i386-linux    Intel 386
+i386-raw    Intel 386
+i386-windows    Intel 386
+m16c-aout    Renesas M16C
+m16c-coff    Renesas M16C
+m16c-elf    Renesas M16C
+m16c-raw    Renesas M16C
+m30626fjpfp-aout    Renesas M16C
+m30626fjpfp-coff    Renesas M16C
+m30626fjpfp-elf    Renesas M16C
+m30626fjpfp-raw    Renesas M16C
+mc68328-aout    Motorola MC68328 "DragonBall"
+mc68328-coff    Motorola MC68328 "DragonBall"
+mc68328-elf    Motorola MC68328 "DragonBall"
+mc68328-raw    Motorola MC68328 "DragonBall"
+parrotvm-raw    Parrot VM
+pdp1-list    DEC PDP-1
+pdp1-rim    DEC PDP-1
+pdp10-aout    DEC PDP-10
+pdp10-coff    DEC PDP-10
+pdp10-elf    DEC PDP-10
+pdp10-raw    DEC PDP-10
+pdp11-aout    DEC PDP-11
+pdp11-coff    DEC PDP-11
+pdp11-elf    DEC PDP-11
+pdp11-raw    DEC PDP-11
+pdp7-a7out    DEC PDP-7
+pdp7-aout    DEC PDP-7
+pdp7-coff    DEC PDP-7
+pdp7-list    DEC PDP-7
+pdp7-ptr    DEC PDP-7
+pdp7-rim    DEC PDP-7
+pic16-aout    Microchip PIC16
+pic16-coff    Microchip PIC16
+pic16-elf    Microchip PIC16
+pic16-raw    Microchip PIC16
+pic18-aout    Microchip PIC18
+pic18-coff    Microchip PIC18
+pic18-elf    Microchip PIC18
+pic18-raw    Microchip PIC18
+powerpc-aout    PowerPC (32-bit)
+powerpc-coff    PowerPC (32-bit)
+powerpc-elf    PowerPC (32-bit)
+powerpc-raw    PowerPC (32-bit)
+r10000-aout    MIPS I (R10000/R4000)
+r10000-coff    MIPS I (R10000/R4000)
+r10000-elf    MIPS I (R10000/R4000)
+r10000-raw    MIPS I (R10000/R4000)
+r4000-aout    MIPS I (R10000/R4000)
+r4000-coff    MIPS I (R10000/R4000)
+r4000-elf    MIPS I (R10000/R4000)
+r4000-raw    MIPS I (R10000/R4000)
+saturn-coff    HP Saturn
+saturn-raw    HP Saturn
+sparc-aout    SPARC V8 (32-bit)
+sparc-coff    SPARC V8 (32-bit)
+sparc-elf    SPARC V8 (32-bit)
+sparc-raw    SPARC V8 (32-bit)
+stm32-aout    STMicroelectronics STM32 (Cortex-M3)
+stm32-coff    STMicroelectronics STM32 (Cortex-M3)
+stm32-elf    STMicroelectronics STM32 (Cortex-M3)
+stm32-raw    STMicroelectronics STM32 (Cortex-M3)
+stm8-aout    STMicroelectronics STM8
+stm8-coff    STMicroelectronics STM8
+stm8-elf    STMicroelectronics STM8
+stm8-raw    STMicroelectronics STM8
+tms320c6713-raw    Texas Instruments TMS320C6713 DSP
+tms9900-aout    Texas Instruments TMS9900
+tms9900-coff    Texas Instruments TMS9900
+tms9900-elf    Texas Instruments TMS9900
+tms9900-raw    Texas Instruments TMS9900
+vax-aout    DEC VAX-11/780
+vax-coff    DEC VAX-11/780
+vax-elf    DEC VAX-11/780
+vax-raw    DEC VAX-11/780
+vex-coff    Vex virtual machine
+vex-raw    Vex virtual machine
+z80-amsdos    Zilog Z80
+z80-aout    Zilog Z80
+z80-cmd    Zilog Z80
+z80-coff    Zilog Z80
+z80-coleco-aout    Zilog Z80
+z80-coleco-coff    Zilog Z80
+z80-coleco-colecorom    Zilog Z80
+z80-coleco-elf    Zilog Z80
+z80-coleco-raw    Zilog Z80
+z80-elf    Zilog Z80
+z80-raw    Zilog Z80
+z80-sna    Zilog Z80

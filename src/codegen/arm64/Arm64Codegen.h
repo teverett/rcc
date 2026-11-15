@@ -78,6 +78,7 @@ class Arm64Codegen : public Backend {
     void setHostedAbi(bool enabled) { darwinHosted_ = enabled; }
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "armv8a"; }
+    std::string description() const override { return "ARM Cortex-A (ARMv8-A, 64-bit)"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8, 8, darwinHosted_ ? 8 : 0}; }
     std::string sourceExtension() const override { return ".s64"; }
     std::vector<std::string> assembledFormats() const override {

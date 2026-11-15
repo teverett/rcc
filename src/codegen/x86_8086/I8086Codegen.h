@@ -35,6 +35,9 @@ class I8086Codegen : public Backend {
     explicit I8086Codegen(bool dosAbi = false) : dosAbi_(dosAbi) {}
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return dosAbi_ ? "8086-dos" : "8086"; }
+    std::string description() const override {
+        return dosAbi_ ? "Intel 8086/8088 (MS-DOS .com)" : "Intel 8086/8088";
+    }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".asm"; }
     std::vector<std::string> assembledFormats() const override { return {"raw", "coff", "elf"}; }

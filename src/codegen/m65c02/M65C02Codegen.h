@@ -67,6 +67,7 @@ class M65C02Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "65c02"; }
+    std::string description() const override { return "WDC 65C02"; }
     TypeWidths typeWidths() const override { return {1, 2, 2, 4, 8}; }
     std::string sourceExtension() const override { return ".s65c"; }
     std::vector<std::string> assembledFormats() const override {

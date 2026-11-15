@@ -74,6 +74,7 @@ class AlphaCodegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "alpha"; }
+    std::string description() const override { return "DEC Alpha AXP"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 8, 8}; }
     std::string sourceExtension() const override { return ".salpha"; }
     std::vector<std::string> assembledFormats() const override {

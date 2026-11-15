@@ -83,6 +83,7 @@ class Tms320C6713Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "tms320c6713"; }
+    std::string description() const override { return "Texas Instruments TMS320C6713 DSP"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".stms6713"; }
     // Whole-program flat binary only; see this header's own comment on why this first pass

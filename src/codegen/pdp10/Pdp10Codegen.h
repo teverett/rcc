@@ -93,6 +93,7 @@ class Pdp10Codegen : public Backend {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp10"; }
+    std::string description() const override { return "DEC PDP-10"; }
     TypeWidths typeWidths() const override { return {1, 1, 1, 2, 4, 36}; }
     std::string sourceExtension() const override { return ".s10"; }
     std::vector<std::string> assembledFormats() const override {

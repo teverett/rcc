@@ -29,6 +29,7 @@ class I386Codegen : public Backend {
      void setWindowsAbi(bool enabled) { windowsAbi_ = enabled; }
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "i386"; }
+    std::string description() const override { return "Intel 386"; }
     TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
     std::string sourceExtension() const override { return ".s386"; }
     std::vector<std::string> assembledFormats() const override {
