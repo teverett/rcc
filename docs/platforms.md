@@ -826,6 +826,34 @@ pair - see `docs/using.md`.
   rather than becoming a process exit code - this machine has no stronger OS/exit-code
   convention of its own; a program that wants a specific exit status writes it explicitly via
   `vex_exit()` (`DEO` to port `0x00`).
+- **moarvm** — real binary MoarVM bytecode (`src/codegen/moarvm/MoarVmCodegen.h`,
+  `src/codegen/moarvm/MoarVmAssembler.h`), the bytecode interpreter behind Rakudo/Raku. Unlike
+  `parrotvm`/`vex`, MoarVM has no official textual assembly form at all - only the documented
+  binary `.moarvm` file format - so `generate()` builds the final bytecode bytes directly via
+  `MoarVmAssembler` (a programmatic op-encoder, driven by method calls rather than parsed text)
+  instead of emitting text for a separate assembler to parse; `--format=raw` is that same binary,
+  byte for byte. Every C value is one native MoarVM `int64` register, the same single-register
+  model `parrotvm` uses, and every `Slot` (global, local, param, scalar or array) lives in one
+  flat `int64` array object (`atpos_i`/`bindpos_i`), addressed the same way every other backend's
+  own Slots are. A MoarVM frame (this format's unit of code, roughly a function activation) has
+  no storage that automatically persists across separate invocations without real lexical-scope
+  nesting, which this backend doesn't build, so the flat array (`mem`) and a parallel table of
+  every function's code object (`funcs`, for `&fn`/a call through a function pointer) are built
+  once by a synthetic entry frame and passed as the first two actual parameters of every call
+  this backend ever emits; the bump-allocated per-call stack has nowhere persistent to live
+  either, so `mem[0]` itself is reserved for it (every Global's own offset starts at 1). Every
+  call - direct or through a function pointer - goes through MoarVM's builtin `lang-call`
+  dispatcher, which needs no HLL configuration or serialization-context setup, and every
+  generated frame returns via `return_i` (even a `void` C function, returning 0) so a call site
+  that doesn't statically know its callee's voidness (a function pointer) can always use one
+  calling convention. This backend has no hardware, so there is no runtime library the way
+  `src/rt/<machine>/` is for a real machine; the one exception is `extern void
+  moarvm_say(char *s)`, a name this backend recognizes directly (not a real call) and lowers to a
+  loop that walks a NUL-terminated byte string out of `mem` and prints it via MoarVM's own `say`
+  op - the only output primitive this target has at all. `tests/moarvm_codegen_test.cpp` compiles
+  small hand-built `ir::Program` values straight to bytecode and actually executes the result
+  with the real `moar` interpreter (`brew install moarvm`), skipping (not failing) wherever
+  `moar` isn't on `PATH`.
 
 Every global variable is a single statically allocated word; every Local
 and Param lives in a per-call frame that each backend builds on whatever
@@ -855,5 +883,5 @@ target's macro and its own): `__PDP1__`, `__PDP7__`, `__8086__` (also for
 `__POWERPC__` (also `__ppc__`), `__SPARC__` (also `__sparc__`), `__VAX__`
 (also `__vax__`), `__AVR__` (also `__AVR_ATmega328P__`), `__ALPHA__`
 (also `__alpha__`), `__SATURN__`, `__TMS320C6713__` (also
-`__tms320c6713__`), `__PARROTVM__`, `__VEX__` — see `src/main.cpp`'s `predefinedMacros` setup in
-`main()`.
+`__tms320c6713__`), `__PARROTVM__`, `__VEX__`, `__MOARVM__` — see `src/main.cpp`'s
+`predefinedMacros` setup in `main()`.

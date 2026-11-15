@@ -101,6 +101,10 @@ jobs:
         if: matrix.name == 'macos'
         run: brew install open-simh
 
+      - name: Install moarvm (moarvm interpreter)
+        if: matrix.name == 'macos'
+        run: brew install moarvm
+
       # Each example's own `test` target builds it, then verifies it in
       # whichever simulator (py65, z80-python, qemu-system-m68k,
       # open-simh's pdp7) that target has one wired up for - see each
@@ -129,6 +133,7 @@ jobs:
           make -C examples/z80-cpc test
           make -C examples/z80-zx81 test
           make -C examples/tms9900-ti994a test
+          make -C examples/moarvm-hello test
 
       - name: Build and run macOS hello example
         if: matrix.name == 'macos'

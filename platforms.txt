@@ -116,6 +116,7 @@ mc68328-aout    Motorola MC68328 "DragonBall" - a.out relocatable object
 mc68328-coff    Motorola MC68328 "DragonBall" - COFF relocatable object
 mc68328-elf    Motorola MC68328 "DragonBall" - ELF relocatable object
 mc68328-raw    Motorola MC68328 "DragonBall" - flat binary image, no container
+moarvm-raw    MoarVM - flat binary image, no container
 parrotvm-raw    Parrot VM - flat binary image, no container
 pdp1-list    DEC PDP-1 - human-readable debug listing
 pdp1-rim    DEC PDP-1 - bootable paper tape (own loader protocol)

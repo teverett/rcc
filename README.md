@@ -16,7 +16,7 @@ Supported `--target` values: `pdp1`, `pdp7`, `8086`/`8088`, `6502`/`65c02`, `ata
 `8051`/`8052`/`8031`/`8032`, `pic16`, `pic18`, `stm32`, `i386`,
 `armv7a`, `armv8a`, `cortex-m3`/`cortex-m4`/`cortex-m7`,
 `r10000`/`r4000`, `powerpc`, `sparc`, `vax`, `avr`, `alpha`, `saturn`,
-`tms320c6713`, `vex` — see
+`tms320c6713`, `vex`, `moarvm` — see
 [`docs/platforms.md`](docs/platforms.md) for what each target's real
 hardware is and how it's tested.
 

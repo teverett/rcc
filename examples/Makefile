@@ -1,8 +1,8 @@
 EXAMPLES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: all hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-atari2600 6502-2a03 8086-msdos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 6809-coco tms9900-ti994a vex test clean
+.PHONY: all hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-atari2600 6502-2a03 8086-msdos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 6809-coco tms9900-ti994a vex moarvm-hello test clean
 
-all: hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-atari2600 6502-2a03 8086-msdos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 6809-coco tms9900-ti994a vex
+all: hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-atari2600 6502-2a03 8086-msdos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 6809-coco tms9900-ti994a vex moarvm-hello
 
 hosted-hello:
 	$(MAKE) -C $(EXAMPLES_DIR)hosted-hello
@@ -64,6 +64,9 @@ tms9900-ti994a:
 vex:
 	$(MAKE) -C $(EXAMPLES_DIR)vex
 
+moarvm-hello:
+	$(MAKE) -C $(EXAMPLES_DIR)moarvm-hello
+
 # Each example's own `test` target builds it, then verifies it in
 # whichever simulator (py65, z80-python, qemu-system-m68k) that target
 # has one wired up for - see each example's own Makefile/README for which.
@@ -88,6 +91,7 @@ test:
 	$(MAKE) -C $(EXAMPLES_DIR)6809-coco test
 	$(MAKE) -C $(EXAMPLES_DIR)tms9900-ti994a test
 	$(MAKE) -C $(EXAMPLES_DIR)vex test
+	$(MAKE) -C $(EXAMPLES_DIR)moarvm-hello test
 
 clean:
 	$(MAKE) -C $(EXAMPLES_DIR)hosted-hello clean
@@ -110,3 +114,4 @@ clean:
 	$(MAKE) -C $(EXAMPLES_DIR)6809-coco clean
 	$(MAKE) -C $(EXAMPLES_DIR)tms9900-ti994a clean
 	$(MAKE) -C $(EXAMPLES_DIR)vex clean
+	$(MAKE) -C $(EXAMPLES_DIR)moarvm-hello clean

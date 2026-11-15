@@ -64,7 +64,7 @@ jobs:
       - uses: actions/checkout@v7
 
       - name: Install ANTLR C++ runtime and target simulators (Homebrew)
-        run: brew install antlr4-cpp-runtime open-simh qemu
+        run: brew install antlr4-cpp-runtime open-simh qemu moarvm
 
       # `make test` (below) drives real, independent CPU cores for the
       # 6502/65c02 (py65) and 8080/z80 (z80-python) targets - see

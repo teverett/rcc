@@ -51,6 +51,7 @@
 #include "optimizers/local_cse/LocalCSE.h"
 #include "optimizers/unused_global_elimination/UnusedGlobalElimination.h"
 #include "preprocessor/Preprocessor.h"
+#include "codegen/moarvm/MoarVmCodegen.h"
 #include "codegen/parrotvm/ParrotVmCodegen.h"
 #include "codegen/pdp1/Pdp1Codegen.h"
 #include "codegen/vex/VexCodegen.h"
@@ -201,7 +202,7 @@ const std::vector<std::string> kTargetNames = {
     "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "6809", "8008",
     "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
-    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "parrotvm", "vex",
+    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "parrotvm", "vex", "moarvm",
 };
 
 std::string knownTargetsList() {
@@ -250,6 +251,7 @@ ParsedTarget parseTargetTriple(const std::string &value) {
 // Codegen to do differently.
 std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "parrotvm") return std::make_unique<rcc::ParrotVmCodegen>();
+    if (target == "moarvm") return std::make_unique<rcc::MoarVmCodegen>();
     if (target == "vex") return std::make_unique<rcc::VexCodegen>();
     if (target == "pdp1") return std::make_unique<rcc::Pdp1Codegen>();
     if (target == "pdp7") return std::make_unique<rcc::Pdp7Codegen>();
@@ -1025,6 +1027,8 @@ int main(int argc, char **argv) {
         predefinedMacros["__tms320c6713__"] = "1";
     } else if (target == "parrotvm") {
         predefinedMacros["__PARROTVM__"] = "1";
+    } else if (target == "moarvm") {
+        predefinedMacros["__MOARVM__"] = "1";
     } else if (target == "vex") {
         predefinedMacros["__VEX__"] = "1";
     }

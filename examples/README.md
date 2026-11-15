@@ -43,6 +43,10 @@ directory with a `Makefile` and a `README.md` of its own:
   `src/rt/vex/`'s console-device runtime library; `test` builds and runs
   it under the real reference interpreter vendored at
   `tests/sim/vex/vex.c`
+- `moarvm-hello` — "hello world" for `moarvm`, a single `rcc --target=moarvm`
+  invocation straight to the final bytecode file (no link step, no runtime
+  library - this backend is whole-program only, like `vex`); `test` runs it
+  under the real `moar` interpreter (`brew install moarvm`)
 
 `examples.mk` is shared `Makefile` plumbing (the `$(RCC)` binary path, picked
 per host OS) included by each example's `Makefile`.
