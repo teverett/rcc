@@ -6,7 +6,7 @@
  * interpreter version instead of whatever that repo's own `interpreter/vex.c` happens to be on
  * a given day.
  *
- * vex.c - reference interpreter for the Vex virtual machine (spec v0.1).
+ * vex.c - reference interpreter for the Vex virtual machine (spec v0.4).
  * See docs/SPEC.md for the machine definition.
  *
  * Usage: vex [-t] [-d] [-s steps] program.rom
@@ -30,7 +30,7 @@
 #include <io.h>
 #endif
 
-#define MEM_SIZE  0x10000
+#define MEM_SIZE  UINT64_C(0x100000000)
 #define LOAD_ADDR 0x0100
 #define DS_SIZE   1024
 #define RS_SIZE   512
@@ -64,8 +64,8 @@ typedef struct {
     uint8_t dbuf[DS_SIZE];
     uint8_t rbuf[RS_SIZE];
     Stack ds, rs;
-    uint16_t pc;     /* address of the next instruction */
-    uint16_t ipc;    /* address of the instruction being executed */
+    uint32_t pc;     /* address of the next instruction */
+    uint32_t ipc;    /* address of the instruction being executed */
     int halted;
     int exit_code;
     long steps;
@@ -116,7 +116,7 @@ static void spush(VM *m, Stack *s, uint32_t v, int n)
 static uint32_t mrd(VM *m, uint32_t addr, int n)
 {
     uint32_t v = 0;
-    if (addr + (uint32_t)n > MEM_SIZE)
+    if ((uint64_t)addr + (unsigned)n > MEM_SIZE)
         fault(m, "memory read out of range at 0x%x", addr);
     for (int i = 0; i < n; i++)
         v = (v << 8) | m->mem[addr + i];
@@ -125,7 +125,7 @@ static uint32_t mrd(VM *m, uint32_t addr, int n)
 
 static void mwr(VM *m, uint32_t addr, uint32_t v, int n)
 {
-    if (addr + (uint32_t)n > MEM_SIZE)
+    if ((uint64_t)addr + (unsigned)n > MEM_SIZE)
         fault(m, "memory write out of range at 0x%x", addr);
     for (int i = n - 1; i >= 0; i--) {
         m->mem[addr + i] = (uint8_t)(v & 0xFF);
@@ -174,9 +174,9 @@ static void dev_out(VM *m, uint8_t port, uint8_t v)
 
 /* ---- execution ---- */
 
-static void jump(VM *m, uint16_t operand, int rel)
+static void jump(VM *m, uint32_t operand, int rel)
 {
-    m->pc = rel ? (uint16_t)(m->pc + (int16_t)operand) : operand;
+    m->pc = rel ? (uint32_t)(m->pc + (int32_t)operand) : operand;
 }
 
 static void step(VM *m)
@@ -194,7 +194,7 @@ static void step(VM *m)
         fault(m, "unknown opcode 0x%02x", ins);
 
     uint32_t a, b, res;
-    uint16_t addr;
+    uint32_t addr;
 
     switch (op) {
     case OP_RET:
@@ -202,24 +202,24 @@ static void step(VM *m)
             m->halted = 1;
             m->exit_code = 0;
         } else {
-            m->pc = (uint16_t)spop(m, &m->rs, 4);
+            m->pc = spop(m, &m->rs, 4);
         }
         break;
     case OP_LIT:
         a = mrd(m, m->pc, 4);
-        m->pc = (uint16_t)(m->pc + 4);
+        m->pc = (uint32_t)(m->pc + 4);
         spush(m, &m->ds, a, 4);
         break;
     case OP_LD:
-        addr = (uint16_t)spop(m, &m->ds, 4);
+        addr = spop(m, &m->ds, 4);
         if (r)
-            addr = (uint16_t)(m->pc + (int16_t)addr);
+            addr = (uint32_t)(m->pc + (int32_t)addr);
         spush(m, &m->ds, mrd(m, addr, 4), 4);
         break;
     case OP_ST:
-        addr = (uint16_t)spop(m, &m->ds, 4);
+        addr = spop(m, &m->ds, 4);
         if (r)
-            addr = (uint16_t)(m->pc + (int16_t)addr);
+            addr = (uint32_t)(m->pc + (int32_t)addr);
         a = spop(m, &m->ds, 4);
         mwr(m, addr, a, 4);
         break;
@@ -235,17 +235,17 @@ static void step(VM *m)
         break;
     }
     case OP_JMP:
-        addr = (uint16_t)spop(m, &m->ds, 4);
+        addr = spop(m, &m->ds, 4);
         jump(m, addr, r);
         break;
     case OP_JCN:
-        addr = (uint16_t)spop(m, &m->ds, 4);
+        addr = spop(m, &m->ds, 4);
         a = spop(m, &m->ds, 4);
         if (a)
             jump(m, addr, r);
         break;
     case OP_CAL:
-        addr = (uint16_t)spop(m, &m->ds, 4);
+        addr = spop(m, &m->ds, 4);
         spush(m, &m->rs, m->pc, 4);
         jump(m, addr, r);
         break;
@@ -334,14 +334,14 @@ static void print_stack(FILE *f, const Stack *s)
 
 static void trace_line(const VM *m)
 {
-    uint16_t pc = m->pc;
+    uint32_t pc = m->pc;
     uint8_t ins = m->mem[pc];
     int reserved = ins >> 6, r = (ins >> 5) & 1, op = ins & 31;
     char text[48];
 
     if (reserved == 0 && op < OP_COUNT && OPNAME[op][0] != '\0') {
         int len = snprintf(text, sizeof text, "%s%s", OPNAME[op], r ? ".r" : "");
-        if (op == OP_LIT && pc + 1 + 4 <= MEM_SIZE) {
+        if (op == OP_LIT && (uint64_t)pc + 1 + 4 <= MEM_SIZE) {
             len += snprintf(text + len, sizeof text - (size_t)len, " 0x");
             for (int i = 0; i < 4; i++)
                 len += snprintf(text + len, sizeof text - (size_t)len, "%02x", m->mem[pc + 1 + i]);
@@ -349,7 +349,7 @@ static void trace_line(const VM *m)
     } else {
         snprintf(text, sizeof text, "??? 0x%02x", ins);
     }
-    fprintf(stderr, "%04x  %-18s ds=", pc, text);
+    fprintf(stderr, "%08x  %-18s ds=", pc, text);
     print_stack(stderr, &m->ds);
     fprintf(stderr, "  rs=");
     print_stack(stderr, &m->rs);
@@ -369,13 +369,13 @@ static int run(VM *m, long limit, int trace)
 {
     if (setjmp(m->trap)) {
         fflush(stdout);
-        fprintf(stderr, "vex: fault at 0x%04x: %s\n", m->ipc, m->err);
+        fprintf(stderr, "vex: fault at 0x%08x: %s\n", m->ipc, m->err);
         return 2;
     }
     while (!m->halted) {
         if (limit && m->steps >= limit) {
             fflush(stdout);
-            fprintf(stderr, "vex: step limit (%ld) reached at 0x%04x\n", limit, m->pc);
+            fprintf(stderr, "vex: step limit (%ld) reached at 0x%08x\n", limit, m->pc);
             return 3;
         }
         if (trace)
@@ -425,10 +425,12 @@ int main(int argc, char **argv)
         perror(path);
         return 1;
     }
-    size_t got = fread(vm.mem + LOAD_ADDR, 1, MEM_SIZE - LOAD_ADDR + 1, f);
+    size_t cap = MEM_SIZE - LOAD_ADDR;
+    size_t got = fread(vm.mem + LOAD_ADDR, 1, cap, f);
+    int overflowed = got == cap && fgetc(f) != EOF;
     fclose(f);
-    if (got > MEM_SIZE - LOAD_ADDR) {
-        fprintf(stderr, "vex: %s: program too large (max %d bytes)\n", path, MEM_SIZE - LOAD_ADDR);
+    if (overflowed) {
+        fprintf(stderr, "vex: %s: program too large (max %llu bytes)\n", path, (unsigned long long)cap);
         return 1;
     }
 

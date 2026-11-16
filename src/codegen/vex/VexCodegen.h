@@ -78,7 +78,7 @@ namespace rcc {
 // before `RET` - exactly docs/SPEC.md section 4's own suggested convention ("PUSH them, reach
 // them with LDS.r/STS.r, and POP them again before RET").
 //
-// The return stack is NOT part of vex's addressable 64 KiB memory at all (see docs/SPEC.md
+// The return stack is NOT part of vex's addressable 4 GiB memory at all (see docs/SPEC.md
 // section 1's own table - it's a separate fixed buffer, like the data stack), so a value stored
 // there has no address `&` could ever name. A function that recurses therefore can't have an
 // array/struct Local/Param, and can't take the address of a scalar one either -
