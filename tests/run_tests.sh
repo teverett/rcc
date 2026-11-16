@@ -3088,12 +3088,17 @@ is_known_unsupported() {
     esac
 }
 
-target_sources=()
+# Built as one array, rather than `"$SCRIPT_DIR"/*.c "${target_sources[@]}"` with a separate
+# possibly-empty `target_sources` array: macOS's shipped /bin/bash is 3.2 (the last GPLv2
+# release), which throws "unbound variable" on `"${arr[@]}"` under `set -u` when `arr` is empty
+# (fixed in bash 4) - "$SCRIPT_DIR"/*.c is never empty, so seeding `all_sources` from that glob
+# first sidesteps the bug entirely rather than needing bash 3.2's own `+` workaround idiom.
+all_sources=("$SCRIPT_DIR"/*.c)
 if [ -d "$SCRIPT_DIR/$TARGET" ]; then
-    target_sources=("$SCRIPT_DIR/$TARGET"/*.c)
+    all_sources+=("$SCRIPT_DIR/$TARGET"/*.c)
 fi
 
-for src in "$SCRIPT_DIR"/*.c "${target_sources[@]}"; do
+for src in "${all_sources[@]}"; do
     expect="$(grep -m1 -oE 'EXPECT: *-?[0-9]+' "$src" | grep -oE '\-?[0-9]+$' || true)"
     if [ -z "$expect" ]; then
         continue
