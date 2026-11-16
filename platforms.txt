@@ -196,3 +196,7 @@ z80-coleco-raw    Zilog Z80 - flat binary image, no container
 z80-elf    Zilog Z80 - ELF relocatable object
 z80-raw    Zilog Z80 - flat binary image, no container
 z80-sna    Zilog Z80 - ZX Spectrum 48K .sna snapshot
+z8000-aout    Zilog Z8000 (Z8002, non-segmented) - a.out relocatable object
+z8000-coff    Zilog Z8000 (Z8002, non-segmented) - COFF relocatable object
+z8000-elf    Zilog Z8000 (Z8002, non-segmented) - ELF relocatable object
+z8000-raw    Zilog Z8000 (Z8002, non-segmented) - flat binary image, no container

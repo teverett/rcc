@@ -226,6 +226,27 @@ pair - see `docs/using.md`.
   `MUL`/`DIV`) that almost everything maps onto one real instruction.
   Tested against an `open-simh` PDP-11 simulator; not run by `make test`
   (not wired into the Makefile's `test` rule — see `docs/building.md`).
+- **z8000** — Zilog Z8000 assembly (own dialect; `Z8000Assembler.h`), the
+  unsegmented Z8002 variant (a flat 64KB address space; the segmented
+  Z8001 isn't targeted), a bare flat binary loaded/entered at `$1000`,
+  halting via `HALT`. `int` is 16 bits; every value in flight lives in
+  `r0`/`r1` (with `r2` for a computed address), `r13` is the
+  software frame pointer and `r15` is the real hardware stack pointer
+  (`PUSH`/`POP`/`CALL`/`RET` all use it directly). Every branch/call/jump
+  targets a full 16-bit absolute address (`JP cc,addr`/`CALL addr`), not
+  the Z8000's own short PC-relative `JR`/`CALR`, so (unlike the PDP-11
+  backend) no branch ever needs a short-range workaround. `MULT`/`DIV`
+  use the real hardware register-pair convention (`r0:r1`, with the
+  multiplier/divisor in a third register); `<<`/`>>` loop one bit at a
+  time via `RLC`/`RRC` (rotate-through-carry) rather than the Z8000's own
+  native variable-count `SDL`/`SDA` dynamic shift. `long`/`long long`
+  add/subtract/compare/bitwise/shift work (ripple-carry across stacked
+  words, using the Z8000's real two-operand `ADC`/`SBC`); multiply/divide
+  on them isn't implemented (a deliberate scope cut, matching the
+  PDP-11 backend's own identical cut — see `Z8000Codegen.cpp`'s own
+  `genWideMul()`/`genWideDivMod()` comment). No pip-installable Python
+  Z8000 core exists, so this backend isn't run by `make test` either —
+  see `docs/known-bugs.md`.
 - **pdp10** — real PDP-10 (KL10-class) assembly/machine code (own
   dialect; `Pdp10Assembler.h`), a bare flat binary loaded/entered at
   `010000` octal, halting via the real `JRST 4,0` ("HALT") instruction

@@ -292,6 +292,51 @@ wrong code. Remove this entry once a suitable Python TMS9900 emulator
 package is found (or written) and a real `check_tms9900()` is wired
 into the dispatch.
 
+## `--target=z8000` has no automated execution test
+
+Affects the whole `z8000` backend (`src/codegen/z8000/Z8000Codegen.cpp`,
+`Z8000Assembler.cpp`). No pip-installable Python Z8000 CPU core exists
+(searched directly - nothing on PyPI). GDB's own built-in simulator
+*can* run Z8000 code (`target sim`, selecting between the unsegmented
+Z8002 and segmented Z8001 from the object code itself), but only when
+GDB is built from source with that target configured in - not a
+package `tests/run_tests.sh` can simply install the way it does
+`z80-python`/`py65` for the Z80/6502 families - so this script
+deliberately fails loudly with a clear message instead of silently
+skipping or faking a pass - see its `z8000)` tool-check arm. There's no
+`check_z8000()` scaffolded at all (unlike `check_6809()` above), since
+no real core exists yet to eventually wire one in against.
+
+Verified as far as possible without a real, independent, checked-in
+emulator: `make build`'s own build is clean with no warnings;
+`tests/z8000_assembler_test.cpp` asserts exact opcode bytes for every
+instruction this backend's dialect uses, cross-checked against MAME's
+own `z8000tbl.hxx`/`8000dasm.cpp` decode tables; and, the same way
+`tms9900`'s own entry above describes, a small from-scratch Z8000
+interpreter (not checked into this project - built purely as a
+development aid, covering only the instruction forms this backend's
+codegen actually emits) was used to run real test programs exercising
+int arithmetic/comparisons (signed and unsigned), multiply/divide (the
+real hardware `MULT`/`DIV` register-pair convention), variable-count
+shifts (`rlc`/`rrc`-through-carry), bitwise operators, `char`
+signed/unsigned loads and stores (`ldb`/`extsb`), pointers, arrays,
+structs (including pointer-to-struct member access), global/local
+`long` arithmetic, function pointers and computed calls, and
+recursion with a deep local-variable frame - all producing correct
+results (`ctests/test1`/`test2`/`test3` and `tests/z8000/*.c`). Several
+real register-allocation/operand-order bugs were found and fixed this
+way during development (the Z8000's own `op dst,src` convention,
+backwards from the PDP-11 dialect's `op src,dst` this backend's design
+was initially copied from; and `MULT`/`DIV`'s source operand needing a
+register outside the destination pair, unlike this backend's first
+draft). `long`/`long long` multiply/divide isn't implemented at all (a
+deliberate scope cut, not a bug - see `Z8000Codegen.cpp`'s own
+`genWideMul()`/`genWideDivMod()` comment, matching the PDP-11 backend's
+own identical cut for the same reason); every code path that would need
+it throws a clear error instead of emitting wrong code. Remove this
+entry once a suitable Python Z8000 emulator package is found (or
+written) and a real `check_z8000()` is wired into the dispatch.
+
 ## `tests/hex_literal.c` fails on `--target=8051`/`8052`/`8031`/`8032`/`pdp1`, missing from each target's long-arithmetic skip-list
 
 Affects `tests/run_tests.sh`'s `is_known_unsupported()`. MCS51 deliberately

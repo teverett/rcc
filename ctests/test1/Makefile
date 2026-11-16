@@ -6,7 +6,7 @@
 #
 # Targets excluded from TEST_TARGETS, and why (see ../../docs/known-bugs.md
 # and ../../tests/run_tests.sh's own header comment):
-#   6809, 6809-vectrex, tms9900, z80-coleco - no verified simulator exists;
+#   6809, 6809-vectrex, tms9900, z8000, z80-coleco - no verified simulator exists;
 #   compile-only, see the `compile-only` target below.
 #   8086, 8088                              - run_tests.sh has no working
 #   test execution for these (no boot-sector mechanism).
@@ -28,7 +28,7 @@ TEST_TARGETS := \
 	6502 65c02 68000 mc68328 8080 z80 8008 8051 stm32 i386 \
 	armv7a armv8a vex
 
-COMPILE_ONLY_TARGETS := 6809 6809-vectrex tms9900
+COMPILE_ONLY_TARGETS := 6809 6809-vectrex tms9900 z8000
 
 .PHONY: all test $(TEST_TARGETS) compile-only clean
 

@@ -20,7 +20,7 @@ TEST_TARGETS := \
 	6502 65c02 68000 mc68328 8080 z80 8008 8051 stm32 i386 \
 	armv7a armv8a vex
 
-COMPILE_ONLY_TARGETS := 6809 6809-vectrex tms9900
+COMPILE_ONLY_TARGETS := 6809 6809-vectrex tms9900 z8000
 
 .PHONY: all test $(TEST_TARGETS) compile-only clean
 
