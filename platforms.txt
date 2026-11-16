@@ -103,6 +103,10 @@ cortex-m7-aout    ARM Cortex-M (ARMv7-M) - a.out relocatable object
 cortex-m7-coff    ARM Cortex-M (ARMv7-M) - COFF relocatable object
 cortex-m7-elf    ARM Cortex-M (ARMv7-M) - ELF relocatable object
 cortex-m7-raw    ARM Cortex-M (ARMv7-M) - flat binary image, no container
+cp1610-aout    General Instrument CP1610 - a.out relocatable object
+cp1610-coff    General Instrument CP1610 - COFF relocatable object
+cp1610-elf    General Instrument CP1610 - ELF relocatable object
+cp1610-raw    General Instrument CP1610 - flat binary image, no container
 i386-aout    Intel 386 - a.out relocatable object
 i386-coff    Intel 386 - COFF relocatable object
 i386-elf    Intel 386 - ELF relocatable object

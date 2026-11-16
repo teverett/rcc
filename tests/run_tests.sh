@@ -6,7 +6,7 @@
 # on every target (see ../src/Backend.h: a .c file means the same
 # thing regardless of --target).
 #
-# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
+# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|cp1610|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
 #
 # --optimize passes rcc's own --optimize straight through to every
 # compile below, so the exact same checks also confirm the IR
@@ -232,6 +232,17 @@ case "$TARGET" in
         echo "no verified Python Z8000 emulator package is wired in yet - see docs/known-bugs.md; --target=z8000 compiles only, verify execution manually" >&2
         exit 1
         ;;
+    cp1610)
+        # No pip-installable Python CP1610 (Intellivision CPU) core exists, and jzIntv (the
+        # real open-source Intellivision emulator) needs copyrighted EXEC/GROM ROM images to
+        # boot a real console, which this project can't legally bundle or install - not a
+        # package this script can simply install. Same situation as tms9900/z8000 above: this
+        # backend's own codegen/assembler were instead verified against a small, from-scratch
+        # CP1610 interpreter built just for that purpose while developing it, not checked into
+        # this project.
+        echo "no verified Python CP1610 emulator package is wired in yet - see docs/known-bugs.md; --target=cp1610 compiles only, verify execution manually" >&2
+        exit 1
+        ;;
     8008)
         # No PyPI package exists for this one (the 8008 isn't object-
         # code compatible with anything later - see
@@ -367,7 +378,7 @@ case "$TARGET" in
         fi
         ;;
     *)
-        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
+        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, cp1610, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
         exit 1
         ;;
 esac
@@ -3043,6 +3054,8 @@ is_known_unsupported() {
         pdp11:types_longlong_divmod_repeated.c) return 0 ;; # same - no verified wide multiply/divide routine
         z8000:types_longlong_divmod.c) return 0 ;;          # same scope cut as pdp11 - no wide multiply/divide routine
         z8000:types_longlong_divmod_repeated.c) return 0 ;; # same - no wide multiply/divide routine
+        cp1610:types_longlong_divmod.c) return 0 ;;          # same scope cut - no wide multiply/divide routine (this CPU has no multiply/divide instruction at all)
+        cp1610:types_longlong_divmod_repeated.c) return 0 ;; # same - no wide multiply/divide routine
         pdp10:types_longlong_divmod.c) return 0 ;;          # no verified wide multiply/divide routine
         pdp10:types_longlong_divmod_repeated.c) return 0 ;; # same - no verified wide multiply/divide routine
         pdp10:types_arrays.c) return 0 ;;                   # a wide (long/long long) ARRAY ELEMENT's own

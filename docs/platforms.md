@@ -247,6 +247,35 @@ pair - see `docs/using.md`.
   `genWideMul()`/`genWideDivMod()` comment). No pip-installable Python
   Z8000 core exists, so this backend isn't run by `make test` either —
   see `docs/known-bugs.md`.
+- **cp1610** — General Instrument CP1610 assembly (own dialect;
+  `CP1610Assembler.h`), the CPU inside the Mattel Intellivision, targeted
+  here as a bare processor with no machine/runtime (no accessible,
+  simulator-runnable Intellivision machine exists without copyrighted
+  EXEC/GROM ROM images this project can't bundle — see
+  `docs/known-bugs.md`). A genuinely unusual 1975-era design: *word*-
+  addressed, not byte-addressed (every memory location holds one full
+  16-bit value; `char`/`short`/`int` are all one native word — the same
+  convention `pdp7`/`pdp10` use), with no indexed/displacement
+  addressing mode at all (only Direct, `@Rn`, `@Rn+`, `@Rn-` and
+  Immediate), no multiply or divide instruction (`*`/`/`/`%` are
+  software shift-and-add/shift-and-subtract loops — see
+  `CP1610Codegen.cpp`'s own `genMul()`/`genDivMod()`), no `OR`
+  instruction (`|` is synthesized via De Morgan's law from `AND`/`COM`),
+  and shift/rotate instructions that only shift by 1 or 2 bits in one
+  instruction, and only on `r0`-`r3`. `r4` is the software frame
+  pointer, `r5` is `JSR`'s own real link register (every prologue's
+  first instruction is `PSHR r5`), `r6` is the real hardware stack
+  pointer (`PSHR`/`PULR`), and a `PULR r7` is this CPU's own documented
+  "return" idiom (there's no dedicated instruction for it, since `r7`
+  is the real PC). A computed call is built from a direct write to
+  `r7` (there's no register-indirect call instruction either) with a
+  by-hand-pushed return address, rather than `JSR`. `long`/`long long`
+  multiply/divide isn't implemented (a deliberate scope cut, matching
+  the Z8000/PDP-11 backends' own identical cut, and even more
+  justified here given there's no hardware multiply/divide for a
+  native-width value either). No pip-installable Python CP1610 core
+  exists, so this backend isn't run by `make test` either — see
+  `docs/known-bugs.md`.
 - **pdp10** — real PDP-10 (KL10-class) assembly/machine code (own
   dialect; `Pdp10Assembler.h`), a bare flat binary loaded/entered at
   `010000` octal, halting via the real `JRST 4,0` ("HALT") instruction

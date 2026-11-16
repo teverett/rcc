@@ -337,6 +337,64 @@ it throws a clear error instead of emitting wrong code. Remove this
 entry once a suitable Python Z8000 emulator package is found (or
 written) and a real `check_z8000()` is wired into the dispatch.
 
+## `--target=cp1610` has no automated execution test
+
+Affects the whole `cp1610` backend (`src/codegen/cp1610/CP1610Codegen.cpp`,
+`CP1610Assembler.cpp`). No pip-installable Python CP1610 (the
+Intellivision's CPU) core exists. jzIntv, the real open-source
+Intellivision emulator, needs copyrighted EXEC/GROM ROM images to boot
+a real console - not something this project can legally bundle or
+install - so `tests/run_tests.sh --target=cp1610` deliberately fails
+loudly with a clear message instead of silently skipping or faking a
+pass - see its `cp1610)` tool-check arm. There's no `check_cp1610()`
+scaffolded at all, since no real core exists yet to eventually wire
+one in against. There's also no example/runtime library for this
+target (unlike most other platforms here) for the same reason: no
+accessible, simulator-runnable Intellivision machine exists to target
+one at.
+
+Verified as far as possible without a real, independent, checked-in
+emulator: `make build`'s own build is clean with no warnings;
+`tests/cp1610_assembler_test.cpp` asserts exact opcode bytes for every
+instruction this backend's dialect uses, cross-checked against MAME's
+own `cp1610.cpp`/`1610dasm.cpp` decode tables; and, the same way the
+`tms9900`/`z8000` entries elsewhere in this file describe, a small
+from-scratch CP1610 interpreter (not checked into this project - built
+purely as a development aid, covering only the instruction forms this
+backend's codegen actually emits) was used to run real test programs
+exercising int arithmetic/comparisons (signed and unsigned), the
+software multiply/divide loops, variable-count shifts, bitwise
+operators (including the De Morgan `|` synthesis this architecture's
+missing `OR` instruction needs), `char` signed/unsigned loads and
+stores, pointers, arrays (including a `long` array's own double-width
+element stride), structs (including pointer-to-struct member access),
+global/local `long` arithmetic, function pointers and computed calls
+(built from a direct `r7` write, since this CPU has no register-
+indirect call instruction), and recursion with a deep local-variable
+frame - all producing correct results (`ctests/test1`/`test2`/`test3`
+and `tests/cp1610/*.c`). Several real bugs were found and fixed this
+way during development: `r5` turned out to be real hardware auto-
+increment addressing (any `[r5]` access already advances `r5` by one
+on its own), so this backend's first draft was double-advancing it
+with an extra explicit `add 1,r5` between words of a wide load/store;
+`widthOfType(t) == 1` can't tell a real `char` apart from a plain
+`int` on this word-addressed target the way it does on a byte-
+addressed backend (every scalar type up to `int` is 1 native word
+here), so the first draft was silently re-truncating every `int`
+(and pointer!) to 8 bits; `CMPR`/`SUBR`'s own real carry convention
+turned out to be "carry = 1 means no borrow" (the opposite sense this
+backend's unsigned comparison branches were first written assuming);
+and a computed call's own return address needs to ride in `r5` (`JSR`'s
+own real convention, which every prologue's `PSHR r5` already expects),
+not be pushed by hand directly. `long`/`long long` multiply/divide
+isn't implemented at all (a deliberate scope cut - see
+`CP1610Codegen.cpp`'s own `genWideMul()`/`genWideDivMod()` comment,
+even more justified here than on the Z8000/PDP-11 backends given this
+CPU has no multiply/divide instruction even for a native-width value).
+Remove this entry once a suitable Python CP1610 emulator package is
+found (or written) and a real `check_cp1610()` is wired into the
+dispatch.
+
 ## `tests/hex_literal.c` fails on `--target=8051`/`8052`/`8031`/`8032`/`pdp1`, missing from each target's long-arithmetic skip-list
 
 Affects `tests/run_tests.sh`'s `is_known_unsupported()`. MCS51 deliberately

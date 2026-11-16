@@ -64,6 +64,7 @@
 #include "codegen/mc68328/MC68328Codegen.h"
 #include "codegen/pdp11/Pdp11Codegen.h"
 #include "codegen/z8000/Z8000Codegen.h"
+#include "codegen/cp1610/CP1610Codegen.h"
 #include "codegen/pdp10/Pdp10Codegen.h"
 #include "codegen/i8080/I8080Codegen.h"
 #include "codegen/m6809/M6809Codegen.h"
@@ -107,6 +108,7 @@
 #include "linker/factory/Tms9900LinkerFactory.h"
 #include "linker/factory/Pdp11LinkerFactory.h"
 #include "linker/factory/Z8000LinkerFactory.h"
+#include "linker/factory/CP1610LinkerFactory.h"
 #include "linker/factory/Pdp10LinkerFactory.h"
 #include "linker/factory/M16cLinkerFactory.h"
 #include "linker/factory/I386LinkerFactory.h"
@@ -205,7 +207,7 @@ const std::vector<std::string> kTargetNames = {
     "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "6809", "6809-vectrex", "8008",
     "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
-    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "parrotvm", "vex", "moarvm",
+    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "cp1610", "parrotvm", "vex", "moarvm",
 };
 
 std::string knownTargetsList() {
@@ -298,6 +300,7 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "saturn") return std::make_unique<rcc::SaturnCodegen>();
     if (target == "tms320c6713") return std::make_unique<rcc::Tms320C6713Codegen>();
     if (target == "z8000") return std::make_unique<rcc::Z8000Codegen>();
+    if (target == "cp1610") return std::make_unique<rcc::CP1610Codegen>();
     return nullptr;
 }
 
@@ -332,6 +335,7 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     if (target == "tms9900") return rcc::makeTMS9900Linker();
     if (target == "pdp11") return rcc::makePdp11Linker();
     if (target == "z8000") return rcc::makeZ8000Linker();
+    if (target == "cp1610") return rcc::makeCP1610Linker();
     if (target == "pdp10") return rcc::makePdp10Linker();
     if (target == "m16c" || target == "m30626fjpfp") return rcc::makeM16cLinker();
     if (target == "i386") return rcc::makeI386Linker();
@@ -967,6 +971,8 @@ int main(int argc, char **argv) {
         predefinedMacros["__PDP11__"] = "1";
     } else if (target == "z8000") {
         predefinedMacros["__Z8000__"] = "1";
+    } else if (target == "cp1610") {
+        predefinedMacros["__CP1610__"] = "1";
     } else if (target == "pdp10") {
         predefinedMacros["__PDP10__"] = "1";
     } else if (target == "8080") {
