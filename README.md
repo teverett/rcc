@@ -1,3 +1,6 @@
+[![CI](https://github.com/teverett/rcc/actions/workflows/ci.yml/badge.svg)](https://github.com/teverett/rcc/actions/workflows/ci.yml)
+[![Platform Tests](https://github.com/teverett/rcc/actions/workflows/platformtests.yml/badge.svg)](https://github.com/teverett/rcc/actions/workflows/platformtests.yml)
+
 # rcc
 
 `rcc` (the **r**etargetable **C** **c**ompiler) is a compiler and
