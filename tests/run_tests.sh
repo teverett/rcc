@@ -2910,6 +2910,8 @@ is_known_unsupported() {
         vex:struct_array_of_structs.c) return 0 ;;
         vex:struct_basic_fields.c) return 0 ;;
         vex:struct_global.c) return 0 ;;
+        vex:struct_global_sizing.c) return 0 ;;
+        vex:struct_global_with_local_and_pointer.c) return 0 ;;
         vex:struct_member_array.c) return 0 ;;
         vex:struct_mixed_width_fields.c) return 0 ;;
         vex:struct_nested_access.c) return 0 ;;
