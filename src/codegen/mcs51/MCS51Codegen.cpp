@@ -36,6 +36,15 @@ void MCS51Codegen::declareGlobalTemp(const std::string &lbl, long initValue) {
     initCode_ << "    movai " << ((v16 >> 8) & 0xFF) << "\n    movxw\n";
 }
 
+void MCS51Codegen::declareGlobalStruct(const std::string &lbl, int size) {
+    allocXdata(lbl, size);
+    for (int i = 0; i < size; i++) {
+        std::string byteExpr = (i == 0) ? lbl : lbl + "+" + std::to_string(i);
+        initCode_ << "    movdptr " << byteExpr << "\n";
+        initCode_ << "    movai 0\n    movxw\n";
+    }
+}
+
 // Writes array element `e` into the XDATA cell at `elemExpr`, exactly
 // `elemWidth` bytes. A symbol element (address-of function/global) has
 // no compile-time byte value, so its address is loaded into `bc` via
@@ -250,6 +259,8 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
             declareGlobalArray(lbl, slot->arraySize, widthOfType(slot->type), slot->arrayInit);
+        } else if (slot->type.base == BaseType::Struct) {
+            declareGlobalStruct(lbl, slot->type.structSize);
         } else {
             declareGlobalTemp(lbl, slot->hasInit ? slot->initValue : 0);
         }

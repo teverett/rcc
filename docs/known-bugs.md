@@ -162,18 +162,6 @@ chain-loads this binary via `INT 13h` and jumps to `kI8086BaseAddress`,
 or switching to a different execution/verification method entirely. Not
 yet fixed.
 
-## `.github/workflows/ci.yml`'s macos job installs Python CPU simulators that no step ever runs
-
-Affects `.github/workflows/ci.yml`.
-
-The `macos` job's "Install Python simulator packages (py65, z80-python)"
-step has a comment saying "`make test` (below) drives real, independent
-CPU cores for the 6502/65c02 (py65) and 8080/z80 (z80-python) targets",
-but no job invokes `make test` or `tests/run_tests.sh` anywhere in the
-workflow, so that suite - and the py65/z80-python packages installed for
-it - never actually run in CI. Not yet fixed.
-
-
 ## `--target=6809` and its CoCo runtime have no automated execution test
 
 Affects the whole `6809` backend (`src/codegen/m6809/M6809Codegen.cpp`,

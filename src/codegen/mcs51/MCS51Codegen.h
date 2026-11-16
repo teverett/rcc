@@ -219,6 +219,13 @@ class MCS51Codegen : public Backend {
     // that give it its initial value into `initCode_` - XDATA is RAM,
     // with no static initial contents the way CODE/ROM has.
     void declareGlobalTemp(const std::string &lbl, long initValue);
+    // A global struct can't have an initializer (IRBuilder rejects one),
+    // so this only needs to reserve its real size and zero it - unlike
+    // declareGlobalTemp(), which is always exactly 2 bytes regardless of
+    // the scalar's own type (every non-struct global is read/written as
+    // a full 16-bit cell via loadXdata()/storeXdata() - see those
+    // functions' own callers).
+    void declareGlobalStruct(const std::string &lbl, int size);
     void declareGlobalArray(const std::string &lbl, int arraySize, int elemWidth,
                              const std::vector<ir::ArrayInitElem> &values);
     void genArrayElementInit(const std::string &elemExpr, int elemWidth, const ir::ArrayInitElem &e);

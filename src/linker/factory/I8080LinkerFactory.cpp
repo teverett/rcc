@@ -19,7 +19,8 @@ constexpr const char *kEntryAsm =
     "bc: db 0, 0\n"
     "cx: db 0, 0\n"
     "dx: db 0, 0\n"
-    "ptr: db 0, 0\n";
+    "ptr: db 0, 0\n"
+    "fp: db 0, 0\n";
 }  // namespace
 
 std::unique_ptr<TargetLinker> makeI8080Linker() {

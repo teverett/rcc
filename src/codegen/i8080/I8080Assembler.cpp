@@ -434,6 +434,23 @@ class Assembler {
             return;
         }
 
+        // IN n/OUT n - the real 8080 has no register operand at all here (always the
+        // accumulator), unlike the Z80's later ED-prefixed IN r,(C)/OUT (C),r forms (see
+        // Z80Assembler.cpp's own comment) - so both take a single immediate port operand, no
+        // brackets, matching this dialect's plain-expression-operand convention. No codegen
+        // emits either; only asm{} blocks reaching port-mapped hardware (src/rt/altair/'s
+        // 88-2SIO) need them.
+        if (mnemonic == "in") {
+            emit8(0xDB);
+            emitImm8(operandAt(ops, 0, mnemonic, 1));
+            return;
+        }
+        if (mnemonic == "out") {
+            emit8(0xD3);
+            emitImm8(operandAt(ops, 0, mnemonic, 1));
+            return;
+        }
+
         fail("unsupported instruction '" + mnemonic + "'");
     }
 

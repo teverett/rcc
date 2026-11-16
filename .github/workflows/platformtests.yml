@@ -133,6 +133,7 @@ jobs:
           make -C examples/z80-zxspectrum test
           make -C examples/z80-cpc test
           make -C examples/z80-zx81 test
+          make -C examples/8080-altair test
           make -C examples/tms9900-ti994a test
           make -C examples/moarvm-hello test
 

@@ -294,7 +294,24 @@ pair - see `docs/using.md`.
   and no overflow flag (`<`/`<=`/`>`/`>=` use a sign-bit bias trick
   instead of 6502/68000's N-xor-V fixup). Tested against a real,
   independent Z80 core (`pip install z80-python`) — valid since the Z80
-  is object-code compatible with the 8080.
+  is object-code compatible with the 8080. `IN n`/`OUT n` (opcodes
+  `0xDB`/`0xD3`, a plain immediate port number into/out of the
+  accumulator - the real 8080 has no other register form) are also
+  encoded, for `asm{}` blocks reaching port-mapped hardware; no codegen
+  emits either on its own.
+- **Altair 8800** — `--target=8080` plus `src/rt/altair/`'s 88-2SIO
+  serial runtime library (`altair.h`/`altair.c`): console I/O through the
+  2SIO board's status port (`$10`) and data port (`$11`) via `IN`/`OUT`,
+  the convention Altair BASIC's and CP/M's own BIOS assume. No other
+  Altair hardware is standard enough across real S-100 setups to give a
+  single fixed address (disk controllers, memory-mapped video, and the
+  front-panel's own sense switches are all optional add-ins), so this
+  runtime covers only that one board. No native file/disk format either
+  - a real Altair loads a flat binary (the same `--format=raw` this
+  project already has) off the front panel or a paper tape, with no
+  bootstrap convention of its own to emulate. Tested the same way as
+  plain `8080` above, with `read_port`/`write_port` callbacks standing in
+  for the 2SIO (`examples/8080-altair/test.py`).
 - **z80** — real Z80 assembly/machine code (`Z80Assembler.h`), its own
   independent backend (unlike the `8086`/`8088` alias) since it uses
   Z80-only instructions: real 16-bit `ADD HL,rr`/`SBC HL,rr`, direct

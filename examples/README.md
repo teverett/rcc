@@ -33,6 +33,9 @@ directory with a `Makefile` and a `README.md` of its own:
 - `z80-coleco` — ColecoVision "hello world" for `z80-coleco`, linked as
   `--platform=z80-coleco-colecorom` against `src/rt/coleco/`'s
   port-mapped VDP/controller/sound runtime library
+- `8080-altair` — MITS Altair 8800 "hello world" for `8080`, linked as
+  `--platform=8080-raw` against `src/rt/altair/`'s port-mapped 88-2SIO
+  serial runtime library
 - `6809-coco` — TRS-80 Color Computer "hello world" for `6809`, linked as
   `--platform=6809-raw` against `src/rt/coco/`'s video-RAM runtime
   library

@@ -378,6 +378,10 @@ $(BIN_DIR)/tms9900_assembler_test: tests/tms9900_assembler_test.cpp $(SRC_DIR)/c
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/tms9900_assembler_test.cpp $(SRC_DIR)/codegen/tms9900/TMS9900Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
+$(BIN_DIR)/i8080_in_out_test: tests/i8080_in_out_test.cpp $(SRC_DIR)/codegen/i8080/I8080Assembler.cpp $(SRC_DIR)/codegen/i8080/I8080Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/i8080_in_out_test.cpp $(SRC_DIR)/codegen/i8080/I8080Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
 # Unlike every other backend's own unit test, this one exercises a whole Codegen (not just
 # an Assembler) directly against hand-built ir::Program values - no ANTLR grammar dependency
 # at all, so -I$(SRC_DIR) alone is enough, the same as the file-format tests above.
@@ -400,7 +404,7 @@ $(BIN_DIR)/vex_assembler_test: tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/v
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
-test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
@@ -415,16 +419,18 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	$(BIN_DIR)/amsdos_format_test
 	$(BIN_DIR)/m6809_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
+	$(BIN_DIR)/i8080_in_out_test
 	$(BIN_DIR)/tms9900_assembler_test
 	$(BIN_DIR)/parrotvm_codegen_test
 	$(BIN_DIR)/moarvm_codegen_test
 	$(BIN_DIR)/vex_assembler_test
 	python3 tests/m6809_link_test.py $(TARGET)
+	python3 tests/i8080_link_test.py $(TARGET)
 	python3 tests/platform_flag_test.py $(TARGET)
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
@@ -440,12 +446,14 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	$(BIN_DIR)/amsdos_format_test
 	$(BIN_DIR)/m6809_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
+	$(BIN_DIR)/i8080_in_out_test
 	$(BIN_DIR)/tms9900_assembler_test
 	$(BIN_DIR)/parrotvm_codegen_test
 	$(BIN_DIR)/moarvm_codegen_test
 	$(BIN_DIR)/vex_assembler_test
 	python3 tests/qemu_wait_test.py
 	python3 tests/m6809_link_test.py $(TARGET)
+	python3 tests/i8080_link_test.py $(TARGET)
 	python3 tests/platform_flag_test.py $(TARGET)
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
