@@ -1,6 +1,7 @@
 #include "I386Codegen.h"
 
 #include <cstdint>
+#include <cstring>
 #include <stdexcept>
 
 #include "I386Assembler.h"
@@ -11,6 +12,22 @@ namespace rcc {
 namespace {
 [[noreturn]] void err(int line, const std::string &msg) {
     throw std::runtime_error("line " + std::to_string(line) + ": " + msg);
+}
+
+// IEEE-754 bit patterns for a float literal's `double`-typed host value (Expr::floatValue is
+// always a host `double`, regardless of the C-level type an `f` suffix picked - see
+// BuildAst.cpp's parseFloatLiteral()) - memcpy, not a reinterpret_cast, to stay defined
+// behavior while still just copying bytes (no actual conversion logic of its own).
+uint32_t floatBitsOf(double v) {
+    float f = static_cast<float>(v);
+    uint32_t bits;
+    std::memcpy(&bits, &f, sizeof(bits));
+    return bits;
+}
+uint64_t doubleBitsOf(double v) {
+    uint64_t bits;
+    std::memcpy(&bits, &v, sizeof(bits));
+    return bits;
 }
 
 // Conventional Multiboot load address, above the BIOS/real-mode data area.
@@ -36,23 +53,41 @@ std::string I386Codegen::arrayElemText(const ir::ArrayInitElem &e) {
 
 void I386Codegen::declareArray(const std::string &lbl, const std::vector<ir::ArrayInitElem> &values, Type elemType) {
     int w = widthOfType(elemType);
-    // No 64-bit data directive: a long long literal element is emitted as two "dd"s (low,
-    // then high dword); a symbol element is always a native-int-width address and gets one.
+    bool isFloatElem = isFloatType(elemType);
+    // No 64-bit data directive: a long long (or double) literal element is emitted as two
+    // "dd"s (low, then high dword); a symbol element is always a native-int-width address
+    // and gets one.
     const char *directive = w == 1 ? "db" : w == 2 ? "dw" : "dd";
     std::ostringstream line;
     line << lbl << ": " << directive << " ";
     bool first = true;
     for (const auto &e : values) {
-        if (w == 8 && !e.isSymbol) {
-            auto v = static_cast<uint64_t>(e.value);
-            if (!first) line << ", ";
-            line << static_cast<uint32_t>(v) << ", " << static_cast<uint32_t>(v >> 32);
-            first = false;
+        if (!first) line << ", ";
+        first = false;
+        if (e.isSymbol) {
+            line << arrayElemText(e);
             continue;
         }
-        if (!first) line << ", ";
-        line << arrayElemText(e);
-        first = false;
+        if (isFloatElem) {
+            // The literal's own kind doesn't have to match the array's declared element
+            // type any more than a scalar initializer's does - IRBuilder.cpp's own
+            // resolveArrayInit() already coerced e.value<->e.floatValue to match, same as
+            // the scalar case I386Codegen::generate() handles right below.
+            double v = e.isFloat ? e.floatValue : static_cast<double>(e.value);
+            if (w == 4) {
+                line << floatBitsOf(v);
+            } else {
+                uint64_t bits = doubleBitsOf(v);
+                line << static_cast<uint32_t>(bits) << ", " << static_cast<uint32_t>(bits >> 32);
+            }
+            continue;
+        }
+        if (w == 8) {
+            auto v = static_cast<uint64_t>(e.isFloat ? static_cast<int64_t>(e.floatValue) : e.value);
+            line << static_cast<uint32_t>(v) << ", " << static_cast<uint32_t>(v >> 32);
+            continue;
+        }
+        line << (e.isFloat ? static_cast<long>(e.floatValue) : e.value);
     }
     trailer_.push_back(line.str());
 }
@@ -76,6 +111,10 @@ std::string I386Codegen::generate(const ir::Program &prog, bool objectMode) {
         // (possible once `_ion()` runs) would triple-fault.
         code_ << "    mov al,0xFF\n    out 0x21,al\n";
         code_ << "    mov al,0xFF\n    out 0xA1,al\n";
+        // GRUB/qemu's own startup state for the x87 FPU isn't this backend's to assume -
+        // FNINIT puts it in the documented post-reset state (empty register stack, default
+        // control word) once, before any float/double code anywhere in the program runs.
+        code_ << "    fninit\n";
         code_ << "    call " << label(mainFn) << "\n";
         code_ << "    hlt\n";  // result sits in eax
         code_ << "halt:\n    jmp halt\n\n";
@@ -98,6 +137,15 @@ std::string I386Codegen::generate(const ir::Program &prog, bool objectMode) {
             // directive, since this assembler dialect has no "reserve N
             // zero bytes" form of its own.
             declareArray(lbl, std::vector<ir::ArrayInitElem>(slot->type.structSize), Type{BaseType::Char, false});
+        } else if (isFloatType(slot->type)) {
+            double v = slot->hasInit ? slot->floatInitValue : 0.0;
+            if (widthOfType(slot->type) == 4) {
+                trailer_.push_back(lbl + ": dd " + std::to_string(floatBitsOf(v)) + "  ; " + slot->sourceName);
+            } else {
+                uint64_t bits = doubleBitsOf(v);
+                trailer_.push_back(lbl + ": dd " + std::to_string(static_cast<uint32_t>(bits)) + ", " +
+                                    std::to_string(static_cast<uint32_t>(bits >> 32)) + "  ; " + slot->sourceName);
+            }
         } else {
             long v = slot->hasInit ? slot->initValue : 0;
             int w = widthOfType(slot->type);
@@ -140,8 +188,7 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
             return;
         }
         case ir::StmtKind::If: {
-            genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or eax,edx\n";
+            genTruthToEax(*s.cond);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             code_ << "    cmp eax,0\n    je " << (s.elseStmt ? Lelse : Ldone) << "\n";
@@ -159,8 +206,7 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
             code_ << Lstart << ":\n";
-            genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or eax,edx\n";
+            genTruthToEax(*s.cond);
             code_ << "    cmp eax,0\n    je " << Lend << "\n";
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
@@ -192,13 +238,23 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
             if (s.declSlot->arraySize > 0) {
                 genLocalArrayInit(s.declSlot);
             } else if (s.initOrReturnOrExpr) {
-                genExpr(*s.initOrReturnOrExpr);
-                code_ << "    mov " << addr(s.declSlot) << ",eax\n";
+                if (isFloatType(s.declSlot->type)) {
+                    genFloatExpr(*s.initOrReturnOrExpr);
+                    storeFloatOperand(addr(s.declSlot), s.declSlot->type, /*pop=*/true);
+                } else {
+                    genExpr(*s.initOrReturnOrExpr);
+                    code_ << "    mov " << addr(s.declSlot) << ",eax\n";
+                }
             }
             return;
         }
         case ir::StmtKind::ExprStmt: {
             genExpr(*s.initOrReturnOrExpr);
+            // A discarded float/double result is left sitting on the FPU register stack
+            // (unlike eax, ST0 is a true stack - nothing else ever reclaims this slot), so
+            // it must be popped explicitly here or repeated statements would eventually
+            // overflow it.
+            if (isFloatType(s.initOrReturnOrExpr->type)) code_ << "    fdiscard\n";
             return;
         }
         case ir::StmtKind::Empty:
@@ -220,7 +276,13 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
 }
 
 void I386Codegen::genExpr(const ir::Expr &e) {
+    if (isFloatType(e.type)) {
+        genFloatExpr(e);
+        return;
+    }
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "internal: FloatLit reached genExpr with a non-float type");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 auto v = static_cast<uint64_t>(e.intValue);
@@ -278,9 +340,9 @@ void I386Codegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Ternary: {
-            genExpr(*e.lhs);
-            // The condition can be wide even though the result type never is.
-            if (isWide(e.lhs->type)) code_ << "    or eax,edx\n";
+            // The condition can be wide, or float/double, even though this (int-typed)
+            // branch's own result type never is.
+            genTruthToEax(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             code_ << "    cmp eax,0\n    je " << Lelse << "\n";
@@ -323,39 +385,11 @@ void I386Codegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Call: {
-            // cdecl: push right-to-left so param 0 ends up closest to the return address;
-            // caller cleans up with `add esp,N`. A wide argument pushes its high dword
-            // first so its low dword ends up at the lower address.
-            int totalBytes = 0;
-            for (const auto &arg : e.args) totalBytes += isWide(arg->type) ? 8 : 4;
-            if (hostedAbi_) {
-                code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
-                int padding = (16 - totalBytes % 16) % 16;
-                if (padding > 0) code_ << "    sub esp," << padding << "\n";
-            }
-            for (size_t i = e.args.size(); i-- > 0;) {
-                genExpr(*e.args[i]);
-                if (isWide(e.args[i]->type)) {
-                    code_ << "    push edx\n    push eax\n";
-                } else {
-                    code_ << "    push eax\n";
-                }
-            }
-            code_ << "    call " << label(e.func) << "\n";
-            if (hostedAbi_) {
-                code_ << "    mov esp,esi\n    pop esi\n";
-            } else if (totalBytes > 0) {
-                code_ << "    add esp," << totalBytes << "\n";
-            }
+            genCall(e);
             return;
         }
         case ir::ExprKind::CallPtr: {
-            // e.args is always empty here: IRBuilder rejects any argument on this kind
-            // before it reaches a backend, since the callee is never known at compile time.
-            genExpr(*e.lhs);  // eax = the callee's entry address
-            if (hostedAbi_) code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
-            code_ << "    call eax\n";
-            if (hostedAbi_) code_ << "    mov esp,esi\n    pop esi\n";
+            genCallPtr(e);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -373,6 +407,67 @@ void I386Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Func:
             err(e.line, "internal: Func reached genExpr - should only ever appear as '&'s operand");
     }
+}
+
+void I386Codegen::genTruthToEax(const ir::Expr &e) {
+    if (isFloatType(e.type)) {
+        genFloatExpr(e);
+        genFloatTruthToEax();
+        return;
+    }
+    genExpr(e);
+    if (isWide(e.type)) code_ << "    or eax,edx\n";
+}
+
+void I386Codegen::genCall(const ir::Expr &e) {
+    // cdecl: push right-to-left so param 0 ends up closest to the return address; caller
+    // cleans up with `add esp,N`. A wide or double argument pushes its high dword first so
+    // its low dword ends up at the lower address; a float argument is one dword.
+    int totalBytes = 0;
+    for (const auto &arg : e.args) {
+        totalBytes += isFloatType(arg->type) ? widthOfType(arg->type) : (isWide(arg->type) ? 8 : 4);
+    }
+    if (hostedAbi_) {
+        code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
+        int padding = (16 - totalBytes % 16) % 16;
+        if (padding > 0) code_ << "    sub esp," << padding << "\n";
+    }
+    for (size_t i = e.args.size(); i-- > 0;) {
+        const ir::Expr &arg = *e.args[i];
+        if (isFloatType(arg.type)) {
+            genFloatExpr(arg);
+            std::string tmp = allocFloatTemp(arg.type);
+            storeFloatOperand("[" + tmp + "]", arg.type, /*pop=*/true);
+            if (widthOfType(arg.type) == 8) {
+                code_ << "    mov eax,[" << tmp << "+4]\n    push eax\n";
+                code_ << "    mov eax,[" << tmp << "]\n    push eax\n";
+            } else {
+                code_ << "    mov eax,[" << tmp << "]\n    push eax\n";
+            }
+        } else {
+            genExpr(arg);
+            if (isWide(arg.type)) {
+                code_ << "    push edx\n    push eax\n";
+            } else {
+                code_ << "    push eax\n";
+            }
+        }
+    }
+    code_ << "    call " << label(e.func) << "\n";
+    if (hostedAbi_) {
+        code_ << "    mov esp,esi\n    pop esi\n";
+    } else if (totalBytes > 0) {
+        code_ << "    add esp," << totalBytes << "\n";
+    }
+}
+
+void I386Codegen::genCallPtr(const ir::Expr &e) {
+    // e.args is always empty here: IRBuilder rejects any argument on this kind before it
+    // reaches a backend, since the callee is never known at compile time.
+    genExpr(*e.lhs);  // eax = the callee's entry address
+    if (hostedAbi_) code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
+    code_ << "    call eax\n";
+    if (hostedAbi_) code_ << "    mov esp,esi\n    pop esi\n";
 }
 
 std::string I386Codegen::computeElementAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
@@ -490,6 +585,10 @@ void I386Codegen::storeOperand(const std::string &mem, const std::string &highMe
 void I386Codegen::genConvert(const ir::Expr &e) {
     Type from = e.lhs->type;
     Type to = e.type;
+    if (isFloatType(from) || isFloatType(to)) {
+        genFloatConvert(e);
+        return;
+    }
     bool fromWide = isWide(from);
     bool toWide = isWide(to);
     genExpr(*e.lhs);  // eax, or edx:eax if fromWide
@@ -704,11 +803,286 @@ void I386Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, con
     code_ << Ldone << ":\n";
 }
 
+std::string I386Codegen::allocFloatTemp(Type type) {
+    std::string lbl = allocTemp();
+    trailer_.push_back(lbl + (widthOfType(type) == 4 ? ": dd 0" : ": dd 0, 0"));
+    return lbl;
+}
+
+void I386Codegen::loadFloatOperand(const std::string &mem, Type type) {
+    code_ << "    fld " << (widthOfType(type) == 4 ? "dword " : "qword ") << mem << "\n";
+}
+
+void I386Codegen::storeFloatOperand(const std::string &mem, Type type, bool pop) {
+    code_ << "    f" << (pop ? "stp " : "st ") << (widthOfType(type) == 4 ? "dword " : "qword ") << mem << "\n";
+}
+
+void I386Codegen::genFloatTruthToEax() {
+    // ST0 holds the condition's value; FCOMPP against a freshly-pushed 0.0 compares and
+    // pops both, leaving the FPU status word's C0/C2/C3 bits to read via the same
+    // FNSTSW+SAHF idiom genFloatCompare() uses - ZF ends up set exactly when ST0 was 0.0.
+    code_ << "    fldz\n    fcompp\n    fnstsw\n    sahf\n";
+    std::string Lzero = newLabel(), Ldone = newLabel();
+    code_ << "    je " << Lzero << "\n";
+    code_ << "    mov eax,1\n    jmp " << Ldone << "\n";
+    code_ << Lzero << ":\n    mov eax,0\n";
+    code_ << Ldone << ":\n";
+}
+
+void I386Codegen::applyFloatOp(const std::string &op, const ir::Expr &rhs, Type resultType) {
+    std::string lhsTmp = allocFloatTemp(resultType);
+    storeFloatOperand("[" + lhsTmp + "]", resultType, /*pop=*/true);  // stash lhs; ST0 empty
+    genFloatExpr(rhs);                                                // ST0 = rhs
+    std::string rhsTmp = allocFloatTemp(resultType);
+    storeFloatOperand("[" + rhsTmp + "]", resultType, /*pop=*/true);  // stash rhs; ST0 empty
+    loadFloatOperand("[" + lhsTmp + "]", resultType);                 // ST0 = lhs
+    const char *sizeWord = widthOfType(resultType) == 4 ? "dword " : "qword ";
+    const char *insn = op == "+" ? "fadd" : op == "-" ? "fsub" : op == "*" ? "fmul" : op == "/" ? "fdiv" : nullptr;
+    if (!insn) err(rhs.line, "unsupported operator '" + op + "' on float/double operands");
+    code_ << "    " << insn << " " << sizeWord << "[" << rhsTmp << "]\n";
+}
+
+void I386Codegen::genFloatCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
+    Type t = lhs.type;
+    genFloatExpr(lhs);
+    std::string lhsTmp = allocFloatTemp(t);
+    storeFloatOperand("[" + lhsTmp + "]", t, /*pop=*/true);  // stash lhs; ST0 empty
+    genFloatExpr(rhs);                                       // ST0 = rhs
+    std::string rhsTmp = allocFloatTemp(t);
+    storeFloatOperand("[" + rhsTmp + "]", t, /*pop=*/true);  // stash rhs; ST0 empty
+    loadFloatOperand("[" + lhsTmp + "]", t);                  // ST0 = lhs
+    const char *sizeWord = widthOfType(t) == 4 ? "dword " : "qword ";
+    // FCOMP pops ST0 after comparing it against the memory operand (lhs cmp rhs); the same
+    // FNSTSW+SAHF idiom genFloatTruthToEax() uses maps the FPU's C0/C2/C3 bits onto
+    // CF/PF/ZF as if this were an unsigned integer comparison, so the existing jcc
+    // mnemonics below need no float-specific variants.
+    code_ << "    fcomp " << sizeWord << "[" << rhsTmp << "]\n";
+    code_ << "    fnstsw\n    sahf\n";
+    std::string jumpIfTrue = op == "==" ? "je"
+                              : op == "!=" ? "jne"
+                              : op == "<" ? "jb"
+                              : op == "<=" ? "jbe"
+                              : op == ">" ? "ja"
+                              : op == ">=" ? "jae"
+                              : "";
+    if (jumpIfTrue.empty()) err(lhs.line, "internal: unhandled float comparison operator '" + op + "'");
+    std::string Ltrue = newLabel(), Ldone = newLabel();
+    code_ << "    " << jumpIfTrue << " " << Ltrue << "\n";
+    code_ << "    mov eax,0\n    jmp " << Ldone << "\n";
+    code_ << Ltrue << ":\n    mov eax,1\n";
+    code_ << Ldone << ":\n";
+}
+
+void I386Codegen::genFloatBinary(const ir::Expr &e) {
+    const std::string &op = e.op;
+    if (op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=") {
+        genFloatCompare(op, *e.lhs, *e.rhs);
+        return;
+    }
+    if (op == "+" || op == "-" || op == "*" || op == "/") {
+        genFloatExpr(*e.lhs);
+        applyFloatOp(op, *e.rhs, e.type);
+        return;
+    }
+    err(e.line, "unsupported operator '" + op + "' on float/double operands");
+}
+
+// int<->float/double and float<->double, in either direction.
+void I386Codegen::genFloatConvert(const ir::Expr &e) {
+    Type from = e.lhs->type;
+    Type to = e.type;
+    bool fromFloat = isFloatType(from);
+    bool toFloat = isFloatType(to);
+    if (fromFloat && toFloat) {
+        // Round-tripping through a scratch cell sized for `to` gets single<->double
+        // conversion's rounding for free from the store/load themselves - x87 always
+        // computes in 80-bit extended precision internally, so a widening (float->double)
+        // "conversion" is really just reading the same value back at the wider size.
+        genFloatExpr(*e.lhs);
+        std::string tmp = allocFloatTemp(to);
+        storeFloatOperand("[" + tmp + "]", to, /*pop=*/true);
+        loadFloatOperand("[" + tmp + "]", to);
+        return;
+    }
+    if (fromFloat && !toFloat) {
+        genFloatExpr(*e.lhs);
+        // FISTP alone rounds per the FPU's default control word (round-to-nearest), not
+        // C's truncating cast semantics (round toward zero) - e.g. 7.5 would come back as
+        // 8. Saving the control word, forcing rounding-control bits 10-11 to "truncate"
+        // (binary 11) around the one FISTP, then restoring it, gets truncation without
+        // disturbing any float arithmetic elsewhere in the program that still wants the
+        // default rounding mode.
+        std::string savedCw = allocTemp();
+        trailer_.push_back(savedCw + ": dd 0");
+        std::string truncCw = allocTemp();
+        trailer_.push_back(truncCw + ": dd 0");
+        code_ << "    fstcw word [" << savedCw << "]\n";
+        code_ << "    mov eax,[" << savedCw << "]\n    mov ebx,0xC00\n    or eax,ebx\n";
+        code_ << "    mov [" << truncCw << "],eax\n";
+        code_ << "    fldcw word [" << truncCw << "]\n";
+        std::string tmp = allocTemp();
+        trailer_.push_back(tmp + ": dd 0");
+        code_ << "    fistp dword [" << tmp << "]\n";
+        code_ << "    fldcw word [" << savedCw << "]\n";
+        code_ << "    mov eax,[" << tmp << "]\n";
+        narrowEaxTo(to);
+        return;
+    }
+    // !fromFloat && toFloat: always goes through FILD qword (a 64-bit integer source),
+    // even for a 32-bit `from` - x87's FILD has no unsigned-32-bit form, so a plain 32-bit
+    // FILD would misread an `unsigned int` with its top bit set as negative; zero/sign
+    // extending into a 64-bit scratch first (per `from`'s own signedness) sidesteps that
+    // for every source width this subset has. A genuinely unsigned 64-bit source (`from`
+    // itself an unsigned `long long`) is the one case this still can't represent exactly
+    // for a value above 2^63 - FILD qword has no unsigned form at any width - a documented
+    // limitation, not a bug: real-world unsigned 64-bit values that large are rare, and no
+    // instruction exists here to fix it short of manual bias correction.
+    bool fromWide = isWide(from);
+    genExpr(*e.lhs);
+    std::string tmp = allocTemp();
+    trailer_.push_back(tmp + ": dd 0, 0");
+    code_ << "    mov [" << tmp << "],eax\n";
+    if (fromWide) {
+        code_ << "    mov [" << tmp << "+4],edx\n";
+    } else if (from.isUnsigned) {
+        code_ << "    mov eax,0\n    mov [" << tmp << "+4],eax\n";
+    } else {
+        code_ << "    cdq\n    mov [" << tmp << "+4],edx\n";
+    }
+    code_ << "    fild qword [" << tmp << "]\n";
+}
+
+void I386Codegen::genFloatExpr(const ir::Expr &e) {
+    switch (e.kind) {
+        case ir::ExprKind::FloatLit: {
+            std::string lbl = allocTemp();
+            if (e.type.base == BaseType::Float) {
+                trailer_.push_back(lbl + ": dd " + std::to_string(floatBitsOf(e.floatValue)));
+                code_ << "    fld dword [" << lbl << "]\n";
+            } else {
+                uint64_t bits = doubleBitsOf(e.floatValue);
+                trailer_.push_back(lbl + ": dd " + std::to_string(static_cast<uint32_t>(bits)) + ", " +
+                                    std::to_string(static_cast<uint32_t>(bits >> 32)));
+                code_ << "    fld qword [" << lbl << "]\n";
+            }
+            return;
+        }
+        case ir::ExprKind::Var:
+            loadFloatOperand(operandOf(e.slot), e.slot->type);
+            return;
+        case ir::ExprKind::Index: {
+            std::string mem = computeElementAddr(e.slot, *e.lhs);
+            loadFloatOperand(mem, e.type);
+            return;
+        }
+        case ir::ExprKind::Assign: {
+            if (e.lhs) {  // slot[idx] = rhs
+                std::string mem = computeElementAddr(e.slot, *e.lhs);
+                code_ << "    push ebx\n";
+                genFloatExpr(*e.rhs);
+                code_ << "    pop ebx\n";
+                storeFloatOperand("[ebx]", e.slot->type, /*pop=*/false);
+                return;
+            }
+            genFloatExpr(*e.rhs);
+            storeFloatOperand(operandOf(e.slot), e.slot->type, /*pop=*/false);
+            return;
+        }
+        case ir::ExprKind::DerefAssign: {
+            genExpr(*e.lhs);  // eax = pointer value (an address is always an int)
+            code_ << "    mov ebx,eax\n    push ebx\n";
+            genFloatExpr(*e.rhs);
+            code_ << "    pop ebx\n";
+            storeFloatOperand("[ebx]", e.type, /*pop=*/false);
+            return;
+        }
+        case ir::ExprKind::CompoundAssign: {
+            if (e.lhs) {
+                err(e.line, "compound assignment through a float/double array element isn't supported yet on this backend");
+            }
+            const ir::Slot *slot = e.slot;
+            std::string mem = operandOf(slot);
+            if (e.yieldOld) {
+                loadFloatOperand(mem, slot->type);
+                std::string oldTmp = allocFloatTemp(slot->type);
+                storeFloatOperand("[" + oldTmp + "]", slot->type, /*pop=*/true);
+                loadFloatOperand(mem, slot->type);
+                applyFloatOp(e.op, *e.rhs, e.type);
+                storeFloatOperand(mem, slot->type, /*pop=*/true);
+                loadFloatOperand("[" + oldTmp + "]", slot->type);
+                return;
+            }
+            loadFloatOperand(mem, slot->type);
+            applyFloatOp(e.op, *e.rhs, e.type);
+            storeFloatOperand(mem, slot->type, /*pop=*/false);
+            return;
+        }
+        case ir::ExprKind::CompoundDerefAssign: {
+            err(e.line, "compound assignment through a float/double pointer isn't supported yet on this backend");
+        }
+        case ir::ExprKind::Unary: {
+            if (e.op == "-") {
+                genFloatExpr(*e.rhs);
+                code_ << "    fchs\n";
+            } else if (e.op == "*") {
+                genExpr(*e.rhs);  // eax = pointer value
+                code_ << "    mov ebx,eax\n";
+                loadFloatOperand("[ebx]", e.type);
+            } else {
+                err(e.line, "unsupported unary operator '" + e.op + "' on a float/double operand");
+            }
+            return;
+        }
+        case ir::ExprKind::Binary:
+            genFloatBinary(e);
+            return;
+        case ir::ExprKind::Call:
+            genCall(e);
+            return;
+        case ir::ExprKind::CallPtr:
+            genCallPtr(e);
+            return;
+        case ir::ExprKind::Convert:
+            genConvert(e);
+            return;
+        case ir::ExprKind::Ternary: {
+            genTruthToEax(*e.lhs);
+            std::string Lelse = newLabel(), Ldone = newLabel();
+            code_ << "    cmp eax,0\n    je " << Lelse << "\n";
+            genFloatExpr(*e.rhs);
+            code_ << "    jmp " << Ldone << "\n";
+            code_ << Lelse << ":\n";
+            genFloatExpr(*e.elseExpr);
+            code_ << Ldone << ":\n";
+            return;
+        }
+        default:
+            err(e.line, "internal: unexpected expression kind reached genFloatExpr");
+    }
+}
+
 void I386Codegen::genLocalArrayInit(const ir::Slot *slot) {
     int w = widthOfType(slot->type);
+    bool isFloatElem = isFloatType(slot->type);
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
         const ir::ArrayInitElem &elem = slot->arrayInit[i];
         int byteOffset = static_cast<int>(i) * w;
+        if (isFloatElem && !elem.isSymbol) {
+            // Just the raw bit pattern, straight into memory via eax/edx - no FPU
+            // instruction needed at all for a literal (constant) initializer value.
+            double v = elem.isFloat ? elem.floatValue : static_cast<double>(elem.value);
+            if (w == 4) {
+                code_ << "    mov eax," << floatBitsOf(v) << "\n";
+                code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
+            } else {
+                uint64_t bits = doubleBitsOf(v);
+                code_ << "    mov eax," << static_cast<uint32_t>(bits) << "\n";
+                code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
+                code_ << "    mov eax," << static_cast<uint32_t>(bits >> 32) << "\n";
+                code_ << "    mov " << localArrayAddr(slot, byteOffset + 4) << ",eax\n";
+            }
+            continue;
+        }
         if (w == 8 && !elem.isSymbol) {
             // A long long literal element is split across both dwords; a symbol element is
             // always a native-int-width address, handled by the general case below.
@@ -784,6 +1158,18 @@ void I386Codegen::genBinary(const ir::Expr &e) {
     Type operandType = e.lhs->type;
     bool wide = isWide(operandType);
     bool isUnsigned = operandType.isUnsigned;
+    if (op == "&&") {
+        genLogicalAnd(*e.lhs, *e.rhs);
+        return;
+    }
+    if (op == "||") {
+        genLogicalOr(*e.lhs, *e.rhs);
+        return;
+    }
+    if (isFloatType(operandType)) {
+        genFloatBinary(e);
+        return;
+    }
     if (op == "+" || op == "-") {
         if (wide) {
             genWideAdd(*e.lhs, *e.rhs, op == "+");
@@ -848,14 +1234,6 @@ void I386Codegen::genBinary(const ir::Expr &e) {
         code_ << "    " << insn << " eax,cl\n";
         return;
     }
-    if (op == "&&") {
-        genLogicalAnd(*e.lhs, *e.rhs);
-        return;
-    }
-    if (op == "||") {
-        genLogicalOr(*e.lhs, *e.rhs);
-        return;
-    }
     genCompare(op, *e.lhs, *e.rhs);
 }
 
@@ -892,12 +1270,10 @@ void I386Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const st
 // A wide operand's truthiness needs both dwords: `or eax,edx` folds them together before
 // the usual "cmp eax,0".
 void I386Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
-    genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or eax,edx\n";
+    genTruthToEax(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     code_ << "    cmp eax,0\n    je " << Lfalse << "\n";
-    genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or eax,edx\n";
+    genTruthToEax(rhs);
     code_ << "    cmp eax,0\n    je " << Lfalse << "\n";
     code_ << "    jmp " << Ltrue << "\n";
     code_ << Lfalse << ":\n    mov eax,0\n    jmp " << Ldone << "\n";
@@ -906,12 +1282,10 @@ void I386Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
 }
 
 void I386Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
-    genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or eax,edx\n";
+    genTruthToEax(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     code_ << "    cmp eax,0\n    jne " << Ltrue << "\n";
-    genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or eax,edx\n";
+    genTruthToEax(rhs);
     code_ << "    cmp eax,0\n    jne " << Ltrue << "\n";
     code_ << "    jmp " << Lfalse << "\n";
     code_ << Ltrue << ":\n    mov eax,1\n    jmp " << Ldone << "\n";
@@ -920,8 +1294,7 @@ void I386Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
 }
 
 void I386Codegen::genLogicalNot(const ir::Expr &rhs) {
-    genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or eax,edx\n";
+    genTruthToEax(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
     code_ << "    cmp eax,0\n    je " << Ltrue << "\n";
     code_ << "    mov eax,0\n    jmp " << Ldone << "\n";

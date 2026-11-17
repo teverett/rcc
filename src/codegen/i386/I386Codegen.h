@@ -30,7 +30,9 @@ class I386Codegen : public Backend {
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "i386"; }
     std::string description() const override { return "Intel 386"; }
-    TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8}; }
+    // floatUnits/doubleUnits=4/8: real x87 hardware floating point (see genFloatExpr()'s
+    // own header comment).
+    TypeWidths typeWidths() const override { return {1, 2, 4, 4, 8, 8, 0, 4, 8}; }
     std::string sourceExtension() const override { return ".s386"; }
     std::vector<std::string> assembledFormats() const override {
         return {"raw", "coff", "elf", "macho", "aout", "objraw"};
@@ -45,7 +47,12 @@ class I386Codegen : public Backend {
    private:
     void genFunction(const ir::FunctionBody &fn);
     void genStmt(const ir::Stmt &s);
-    void genExpr(const ir::Expr &e);  // leaves the result in eax
+    void genExpr(const ir::Expr &e);  // leaves the result in eax, or ST0 if e.type is float/double
+    // Evaluates `e` for its truth value (any C condition context - if/while/ternary/&&/||/!),
+    // leaving 0 or 1 in eax regardless of whether `e.type` is int or float/double.
+    void genTruthToEax(const ir::Expr &e);
+    void genCall(const ir::Expr &e);
+    void genCallPtr(const ir::Expr &e);
 
     void genBinary(const ir::Expr &e);
     void genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs);
@@ -75,8 +82,60 @@ class I386Codegen : public Backend {
     // already hold the resolved address on entry.
     void genCompoundThroughEbx(const ir::Expr &e);
 
+    // --- float/double (x87) -------------------------------------------------
+    //
+    // A real x87 FPU is the natural fit here (a real 386, not a bare-metal target with no
+    // FPU), so `float`/`double` get genuine hardware floating point rather than a software
+    // emulation layer. The FPU register stack (ST0-ST7) plays exactly the role eax already
+    // plays for int: genFloatExpr() always leaves its one result in ST0, and every
+    // binary/compound op spills its other operand through a freshly-allocated global
+    // scratch cell (allocFloatTemp()) rather than ever holding two live values across a
+    // nested genFloatExpr() call in registers - the same "spill to memory, not a second
+    // register" discipline the existing eax/ebx integer convention already uses, just via
+    // memory instead of ebx since x87 has no second accumulator register to play that role.
+    // This also means arithmetic only ever uses the memory-operand x87 instruction forms
+    // (`fadd qword [mem]`, never `fadd st0,st1`) - see I386Assembler.cpp's own comment on
+    // why no register-to-register x87 encoding exists in this dialect at all.
+    //
+    // Calling convention: a float/double argument's bit pattern is pushed onto the ordinary
+    // integer argument stack (one push for `float`, two for `double` - high dword first,
+    // exactly the existing wide-int convention already pushes a `long long` arg), and a
+    // float/double return value comes back in ST0 - real x87 cdecl, needing no special
+    // prologue/epilogue support at all (a `ret` doesn't touch ST0).
+    //
+    // Comparisons (`==`,`!=`,`<`,`<=`,`>`,`>=`) still land in eax as a plain 0/1, exactly
+    // like the integer path - only arithmetic (`+`,`-`,`*`,`/`) and a plain read/convert
+    // leave ST0.
+    bool isFloatType(Type t) const {
+        return !isPointer(t) && (t.base == BaseType::Float || t.base == BaseType::Double);
+    }
+    void genFloatExpr(const ir::Expr &e);  // leaves the result in ST0
+    void genFloatBinary(const ir::Expr &e);
+    void genFloatCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs);  // leaves 0/1 in eax
+    // Precondition: ST0 holds the left operand. Evaluates `rhs` fresh and combines with
+    // `op` (+,-,*,/), leaving the result in ST0. Shared by genFloatBinary and a compound
+    // float assignment's own "old op= rhs" combination.
+    void applyFloatOp(const std::string &op, const ir::Expr &rhs, Type resultType);
+    // int<->float/double and float<->double, in either direction - see its own .cpp comment.
+    void genFloatConvert(const ir::Expr &e);
+    // Loads `type` (float or double) from memory-operand text `mem` into ST0.
+    void loadFloatOperand(const std::string &mem, Type type);
+    // Stores ST0 into `mem` as `type`; pops ST0 if `pop` (the usual case - a fresh value
+    // being spilled out of the way), or leaves it in ST0 if not (an assignment's own store,
+    // whose result is the stored value itself, read back from ST0 rather than reloaded).
+    void storeFloatOperand(const std::string &mem, Type type, bool pop);
+    // Declares a fresh global scratch cell sized for `type` (never reused - see the class
+    // comment) and returns its bare label (not bracketed); the caller wraps it in "[...]"
+    // for loadFloatOperand()/storeFloatOperand().
+    std::string allocFloatTemp(Type type);
+    // ST0 holds a condition's float/double value; leaves 0 or 1 in eax per whether it's
+    // nonzero - the float counterpart of a plain "cmp eax,0" truth test.
+    void genFloatTruthToEax();
+
     int widthOfType(Type t) const { return rcc::widthOf(t, typeWidths()); }
-    bool isWide(Type t) const { return widthOfType(t) > widthOfType(Type{BaseType::Int, false}); }
+    bool isWide(Type t) const {
+        return !isFloatType(t) && widthOfType(t) > widthOfType(Type{BaseType::Int, false});
+    }
     // log2 of an element type's width, for the common power-of-two widths (1/2/4/8 bytes) -
     // an index is scaled by this many shifts when it applies. Returns -1 for any other width
     // (e.g. a struct's, packed or not - a struct size is only a power of two by coincidence),

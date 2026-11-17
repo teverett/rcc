@@ -26,6 +26,7 @@ std::string entryAsm() {
            "_start:\n"
            "    mov al,0xFF\n    out 0x21,al\n"
            "    mov al,0xFF\n    out 0xA1,al\n"
+           "    fninit\n"
            "    call fn_main\n"
            "    hlt\n"
            "halt:\n    jmp halt\n";

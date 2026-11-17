@@ -661,9 +661,21 @@ pair - see `docs/using.md`.
   instruction runs (confirmed against a real boot, reading `EAX`/`CS`
   over the monitor). The one thing this backend's own entry sequence
   still does is mask both real 8259 PICs (so `_ion()` never risks a
-  triple fault) before calling `main`. This is also the only target with
-  real **hosted** (real-OS) execution support — see `docs/using.md`'s
-  `--target=i386-linux`/`i386-windows` and `docs/hosted-linux.md`.
+  triple fault) and run `fninit` (so the x87 FPU starts from its
+  documented reset state) before calling `main`. This is also the only
+  target with real **hosted** (real-OS) execution support — see
+  `docs/using.md`'s `--target=i386-linux`/`i386-windows` and
+  `docs/hosted-linux.md`.
+
+  `float`/`double` use real x87 hardware floating point (`src/codegen/
+  i386/I386Codegen.cpp`'s `genFloatExpr()`): every float/double op leaves
+  its result on the FPU register stack (ST0), the same role `eax` plays
+  for `int`, and a binary op's other operand always spills through a
+  freshly-allocated memory scratch cell rather than a second FPU
+  register — this dialect has no register-to-register x87 encodings at
+  all. A float/double array is supported for a literal initializer, but
+  compound assignment through a float/double array element or pointer
+  (`arr[i] += x`, `*p += x`) is not implemented yet.
 - **armv7a** — real ARMv7-A A32 (32-bit ARM, not Thumb) assembly for an
   A-profile core such as the Cortex-A15: `r0`-`r12`, real `sp`/`lr`, a
   real hardware signed divide (`sdiv`, an optional ARMv7-A extension

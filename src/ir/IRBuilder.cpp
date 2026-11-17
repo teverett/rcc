@@ -908,8 +908,14 @@ class Builder {
     // CompoundDerefAssign/Ternary reject a wide target: they compute their
     // result in a normal native-width register, and a wide target would
     // need a multi-word instruction sequence per operator per backend that
-    // isn't implemented.
+    // isn't implemented. float/double are exempt even when their own
+    // storage width is 8 bytes: a backend that supports them at all computes
+    // through the FPU/float-emulation path, not a native-int register, so
+    // the "needs a multi-word integer sequence" concern this guards against
+    // doesn't apply - a backend with no float support rejects any use of
+    // float/double far earlier (see widths_.floatUnits/doubleUnits==0 above).
     bool isWideType(Type t) const {
+        if (t.base == BaseType::Float || t.base == BaseType::Double) return false;
         return widthOf(t, widths_) > widthOf(Type{BaseType::Int, false}, widths_);
     }
 

@@ -36,8 +36,11 @@ struct Operand {
     bool is8 = false;   // al
     bool is16 = false;  // ax
     // "byte [...]"/"word [...]" size override for a narrower-than-int load/store; None
-    // means the plain 32-bit form.
-    enum MemSize { None, Byte, Word } memSize = None;
+    // means the plain 32-bit form. "dword [...]"/"qword [...]" instead pick which x87
+    // memory-operand opcode form (m32real/m32int vs m64real) an "f"-mnemonic uses - the x87
+    // instructions are the only ones that ever look at Dword/Qword (an ordinary "mov"'s own
+    // 32-bit form never needs a size word at all, since that's just its unmarked default).
+    enum MemSize { None, Byte, Word, Dword, Qword } memSize = None;
     bool memHasEbx = false;
     bool memHasEbp = false;
     bool memHasDisp = false;
@@ -100,6 +103,10 @@ Operand buildOperand(RccAsmParser::OperandContext *ctx) {
                 op.memSize = Operand::Byte;
             } else if (sizeLower == "word") {
                 op.memSize = Operand::Word;
+            } else if (sizeLower == "dword") {
+                op.memSize = Operand::Dword;
+            } else if (sizeLower == "qword") {
+                op.memSize = Operand::Qword;
             } else {
                 fail("unrecognized memory operand size '" + ctx->size->getText() + "'");
             }
@@ -628,6 +635,77 @@ class Assembler {
             emit8(0x0F);
             emit8(it->second);
             emit32(targetAddr - (currentAddr() + 4));
+            return;
+        }
+        // x87: fixed 2-byte sequences with no ModRM at all - see I386Codegen.cpp's own
+        // comment on why no register-to-register x87 form (fadd st0,st1, ...) is needed
+        // here: every float op spills through memory instead, mirroring the existing
+        // eax/ebx integer convention.
+        static const std::unordered_map<std::string, std::pair<uint8_t, uint8_t>> x87Simple = {
+            {"fninit", {0xDB, 0xE3}}, {"fchs", {0xD9, 0xE0}},   {"fldz", {0xD9, 0xEE}},
+            {"fcompp", {0xDE, 0xD9}}, {"fnstsw", {0xDF, 0xE0}},
+            // "fstp st(0)" (real mnemonic "fdiscard" isn't; named this way here purely to
+            // keep "fstp" itself unambiguously a memory-operand mnemonic in this dialect,
+            // per the no-register-form x87 convention above) - pops ST0 without storing it
+            // anywhere, used to discard a float/double expression statement's unused value.
+            {"fdiscard", {0xDD, 0xD8}},
+        };
+        if (auto it = x87Simple.find(mnemonic); it != x87Simple.end()) {
+            if (!ops.empty()) fail("'" + mnemonic + "' takes no operand");
+            emit8(it->second.first);
+            emit8(it->second.second);
+            return;
+        }
+        if (mnemonic == "sahf") {
+            if (!ops.empty()) fail("'sahf' takes no operand");
+            emit8(0x9E);
+            return;
+        }
+        // x87 memory-operand forms: opcode byte + ModRM(+disp32), exactly like the integer
+        // instructions above via emitModRMMem() - only the (opcode, reg-field) pair differs
+        // per mnemonic, and per the operand's own "dword"/"qword" size word (m32real/m32int
+        // vs m64real - see docs/platforms.md's `i386` entry and Operand::MemSize's own
+        // comment). `reg` here is the x87 opcode's own sub-opcode extension (what a real x87
+        // disassembler calls "/0".."/7"), not a general-purpose register.
+        static const std::unordered_map<std::string, std::pair<uint8_t, uint8_t>> x87Mem32 = {
+            {"fadd", {0xD8, 0}}, {"fmul", {0xD8, 1}}, {"fcomp", {0xD8, 3}}, {"fsub", {0xD8, 4}},
+            {"fsubr", {0xD8, 5}}, {"fdiv", {0xD8, 6}}, {"fdivr", {0xD8, 7}},
+            {"fld", {0xD9, 0}}, {"fst", {0xD9, 2}}, {"fstp", {0xD9, 3}},
+            {"fild", {0xDB, 0}}, {"fistp", {0xDB, 3}},
+        };
+        static const std::unordered_map<std::string, std::pair<uint8_t, uint8_t>> x87Mem64 = {
+            {"fadd", {0xDC, 0}}, {"fmul", {0xDC, 1}}, {"fcomp", {0xDC, 3}}, {"fsub", {0xDC, 4}},
+            {"fsubr", {0xDC, 5}}, {"fdiv", {0xDC, 6}}, {"fdivr", {0xDC, 7}},
+            {"fld", {0xDD, 0}}, {"fst", {0xDD, 2}}, {"fstp", {0xDD, 3}},
+            {"fild", {0xDF, 5}},
+        };
+        // FSTCW/FLDCW: the one x87 memory form that's neither m32 nor m64 - a 2-byte
+        // control word, needed only to force round-toward-zero around a float->int
+        // conversion (see I386Codegen.cpp's genFloatConvert() comment) since FISTP
+        // otherwise rounds per the FPU's own default (round-to-nearest) rather than C's
+        // truncating cast semantics.
+        if (mnemonic == "fstcw" || mnemonic == "fldcw") {
+            const Operand &mem = requireOperand(ops, 0, mnemonic);
+            if (mem.kind != Operand::Mem || mem.memSize != Operand::Word) {
+                fail("'" + mnemonic + "' needs a 'word' memory operand");
+            }
+            emit8(0xD9);
+            emitModRMMem(mem, mnemonic == "fstcw" ? 7 : 5);
+            return;
+        }
+        if (x87Mem32.count(mnemonic) || x87Mem64.count(mnemonic)) {
+            const Operand &mem = requireOperand(ops, 0, mnemonic);
+            if (mem.kind != Operand::Mem) fail("'" + mnemonic + "' needs a memory operand");
+            bool is64 = mem.memSize == Operand::Qword;
+            bool is32 = mem.memSize == Operand::Dword;
+            if (!is32 && !is64) fail("'" + mnemonic + "' needs a 'dword' or 'qword' size prefix");
+            const auto &table = is64 ? x87Mem64 : x87Mem32;
+            auto found = table.find(mnemonic);
+            if (found == table.end()) {
+                fail("'" + mnemonic + "' has no " + std::string(is64 ? "qword" : "dword") + " form");
+            }
+            emit8(found->second.first);
+            emitModRMMem(mem, found->second.second);
             return;
         }
         fail("unsupported instruction '" + mnemonic + "'");
