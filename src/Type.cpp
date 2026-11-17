@@ -14,8 +14,12 @@ int rank(BaseType base) {
             return 3;
         case BaseType::LongLong:
             return 4;
-        case BaseType::Struct:
+        case BaseType::Float:
             return 5;
+        case BaseType::Double:
+            return 6;
+        case BaseType::Struct:
+            return 7;
     }
     return 2;
 }
@@ -33,6 +37,10 @@ int widthOf(Type t, const TypeWidths &widths) {
             return widths.longUnits;
         case BaseType::LongLong:
             return widths.longLongUnits;
+        case BaseType::Float:
+            return widths.floatUnits;
+        case BaseType::Double:
+            return widths.doubleUnits;
         case BaseType::Struct:
             return t.structSize;
     }

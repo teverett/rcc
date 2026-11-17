@@ -38,6 +38,8 @@ INT_KW    : 'int' ;
 CHAR_KW   : 'char' ;
 SHORT_KW  : 'short' ;
 LONG_KW   : 'long' ;
+FLOAT_KW  : 'float' ;
+DOUBLE_KW : 'double' ;
 UNSIGNED_KW : 'unsigned' ;
 VOID_KW   : 'void' ;
 STRUCT_KW : 'struct' ;
@@ -111,6 +113,11 @@ IDENT  : [A-Za-z_][A-Za-z0-9_]* ;
 // space, a '(', or another operator character right after it, so it
 // never matches this rule - see RccIRParser.g4's own comment.
 NUMBER : '-'? [0-9]+ ;
+// Same leading-'-'-fused-into-the-token convention as NUMBER above, for
+// IRPrinter.cpp's own FloatLit serialization (printExpr: always a decimal
+// point, via snprintf("%.17g", ...) - see that function's own comment for
+// why NaN/Infinity are never actually emitted here).
+FLOAT_NUMBER : '-'? [0-9]+ '.' [0-9]+ ([eE] [+-]? [0-9]+)? ;
 
 // No general `;`-starts-a-comment rule (unlike grammar/RccAsm.g4) -
 // IRPrinter.cpp never writes a trailing comment after real content,

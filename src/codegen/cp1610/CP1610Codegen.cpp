@@ -275,6 +275,8 @@ void CP1610Codegen::genWideSlotWordAddr(const ir::Slot *slot, int wordIndex) {
 
 void CP1610Codegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 genWideLoadLiteral(e.intValue, wordCountOf(e.type));

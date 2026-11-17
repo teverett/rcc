@@ -1,9 +1,8 @@
 # vex
 
-A "hello world" for Vex (`/Users/tom/projects/vex`), a minimal 32-bit stack machine with no
-general-purpose registers: prints `Hello, Vex!` via `vex_puts()` (see `src/rt/vex/vex.h`), which
-writes it to standard output one byte at a time through the machine's own console device
-(`DEO` to port `0x18`).
+A "hello world" for Vex (`/Users/tom/projects/vex`), an 8-register, 32-bit register machine:
+prints `Hello, Vex!` via `vex_puts()` (see `src/rt/vex/vex.h`), which writes it to standard
+output one byte at a time through the machine's own console device (`DEO` to port `0x18`).
 
 `make` runs the same object-then-link pipeline as `examples/6502-c64/`: `main.c` compiles on its
 own (`--target=vex --format=coff`), `src/rt/vex/vex.lib` is built (or reused) via that directory's

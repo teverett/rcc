@@ -17,6 +17,49 @@ ir::ExprPtr makeIntLit(long value, int line, Type type) {
     return lit;
 }
 
+ir::ExprPtr makeFloatLit(double value, int line, Type type) {
+    auto lit = std::make_unique<ir::Expr>();
+    lit->kind = ir::ExprKind::FloatLit;
+    lit->line = line;
+    lit->floatValue = value;
+    lit->type = type;
+    return lit;
+}
+
+std::optional<double> evalUnaryFloat(const std::string &op, double a) {
+    if (op == "-") return -a;
+    // "!" on a float yields a plain int (0/1), not a float - its own Expr
+    // node's type is already Int from IRBuilder, so folding it still needs
+    // makeIntLit, not makeFloatLit; left to the integer fold path by simply
+    // not handling it here (the caller only reaches this function when
+    // e->type.base is itself Float/Double).
+    return std::nullopt;  // "~"/"*"/"&" never apply to a float operand
+}
+
+// nullopt means "don't fold" (currently just unconditional pass-through
+// cases don't exist, but matches evalBinary's own optional shape for
+// symmetry and in case a future non-finite-guard needs one).
+std::optional<double> evalBinaryFloat(const std::string &op, double a, double b) {
+    if (op == "+") return a + b;
+    if (op == "-") return a - b;
+    if (op == "*") return a * b;
+    if (op == "/") return a / b;  // IEEE-754 division by zero yields +-Infinity/NaN, not UB
+    return std::nullopt;  // relational/equality ops below yield Int, handled separately
+}
+
+// Float/double relational and equality operators yield a plain int, unlike
+// the arithmetic ones above - same split evalBinary()'s own "==".."||"
+// cases make for the all-int case, just needing float-typed operands here.
+std::optional<long> evalBinaryFloatCompare(const std::string &op, double a, double b) {
+    if (op == "==") return a == b ? 1 : 0;
+    if (op == "!=") return a != b ? 1 : 0;
+    if (op == "<") return a < b ? 1 : 0;
+    if (op == "<=") return a <= b ? 1 : 0;
+    if (op == ">") return a > b ? 1 : 0;
+    if (op == ">=") return a >= b ? 1 : 0;
+    return std::nullopt;
+}
+
 std::optional<long> evalUnary(const std::string &op, long a) {
     if (op == "-") return -a;
     if (op == "!") return a == 0 ? 1 : 0;
@@ -67,12 +110,32 @@ void foldExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile) {
             e = makeIntLit(*v, e->line, e->type);
             changed = true;
         }
+    } else if (e->kind == ir::ExprKind::Unary && e->rhs->kind == ir::ExprKind::FloatLit) {
+        if (std::optional<double> v = evalUnaryFloat(e->op, e->rhs->floatValue)) {
+            std::cerr << sourceFile << ": constant-folding: line " << e->line << ": collapsed unary `" << e->op
+                       << e->rhs->floatValue << "` into the single literal `" << *v << "`\n";
+            e = makeFloatLit(*v, e->line, e->type);
+            changed = true;
+        }
     } else if (e->kind == ir::ExprKind::Binary && e->lhs->kind == ir::ExprKind::IntLit &&
                e->rhs->kind == ir::ExprKind::IntLit) {
         if (std::optional<long> v = evalBinary(e->op, e->lhs->intValue, e->rhs->intValue)) {
             std::cerr << sourceFile << ": constant-folding: line " << e->line << ": folded `" << e->lhs->intValue
                        << " " << e->op << " " << e->rhs->intValue << "` to `" << *v << "`\n";
             e = makeIntLit(*v, e->line, e->type);
+            changed = true;
+        }
+    } else if (e->kind == ir::ExprKind::Binary && e->lhs->kind == ir::ExprKind::FloatLit &&
+               e->rhs->kind == ir::ExprKind::FloatLit) {
+        if (std::optional<double> v = evalBinaryFloat(e->op, e->lhs->floatValue, e->rhs->floatValue)) {
+            std::cerr << sourceFile << ": constant-folding: line " << e->line << ": folded `" << e->lhs->floatValue
+                       << " " << e->op << " " << e->rhs->floatValue << "` to `" << *v << "`\n";
+            e = makeFloatLit(*v, e->line, e->type);
+            changed = true;
+        } else if (std::optional<long> cv = evalBinaryFloatCompare(e->op, e->lhs->floatValue, e->rhs->floatValue)) {
+            std::cerr << sourceFile << ": constant-folding: line " << e->line << ": folded `" << e->lhs->floatValue
+                       << " " << e->op << " " << e->rhs->floatValue << "` to `" << *cv << "`\n";
+            e = makeIntLit(*cv, e->line, e->type);
             changed = true;
         }
     }

@@ -128,6 +128,14 @@ std::string typeText(Type t) {
         case BaseType::LongLong:
             base = "long long";
             break;
+        case BaseType::Float:
+            prefix.clear();
+            base = "float";
+            break;
+        case BaseType::Double:
+            prefix.clear();
+            base = "double";
+            break;
         case BaseType::Struct:
             base = "struct " + t.structTag;
             break;
@@ -320,8 +328,21 @@ class Builder {
     // ptrDepth - base/structTag always describe the pointee, so a
     // pointer-to-struct's pointee is resolved the same way). A no-op for
     // every non-struct Type, so every call site below is safe to apply
-    // unconditionally.
+    // unconditionally. Also where every declared Float/Double type gets
+    // checked against this target's own TypeWidths: floatUnits/doubleUnits
+    // default to 0 (Backend::floatSupport()'s safe default, see
+    // codegen/Codegen.h), so a backend not explicitly migrated to support
+    // the type hard-fails here, once, before any Slot with that type ever
+    // reaches a backend's own codegen - rather than silently laying out a
+    // zero-width Global/Local/Param and letting the real bug surface as
+    // some unrelated, confusing failure downstream.
     Type resolveStructType(Type t, int line) {
+        if (t.base == BaseType::Float && widths_.floatUnits == 0) {
+            err(line, "'float' is not supported on this target");
+        }
+        if (t.base == BaseType::Double && widths_.doubleUnits == 0) {
+            err(line, "'double' is not supported on this target");
+        }
         if (t.base != BaseType::Struct) return t;
         auto it = structsByTag_.find(t.structTag);
         if (it == structsByTag_.end()) {
@@ -379,7 +400,18 @@ class Builder {
                              "declaration instead");
             }
             slot->hasInit = g.hasInit;
-            slot->initValue = g.initValue;
+            bool slotIsFloat = slot->type.base == BaseType::Float || slot->type.base == BaseType::Double;
+            // The initializer literal's own kind (int vs float syntax) doesn't have to match the
+            // declared type any more than it would in a general expr - 'double x = 5;'/'int x =
+            // 3.9;' are both ordinary implicit conversions in C, so coerce here rather than
+            // storing whichever literal kind the source happened to spell and leaving the other
+            // field at its default (reading the wrong one back as 0 - a silent miscompile, not a
+            // real conversion).
+            if (slotIsFloat) {
+                slot->floatInitValue = g.hasFloatInit ? g.floatInitValue : static_cast<double>(g.initValue);
+            } else {
+                slot->initValue = g.hasFloatInit ? static_cast<long>(g.floatInitValue) : g.initValue;
+            }
             // arrayInit is resolved in a second pass below, so a forward
             // reference to a later name in this file still resolves.
             slot->hasAddress = g.hasAddress;
@@ -450,7 +482,8 @@ class Builder {
         }
 
         for (const auto &g : prog.globals) {
-            globalByName_[g.name]->arrayInit = resolveArrayInit(g.arrayInit, g.line);
+            ir::Slot *slot = globalByName_[g.name];
+            slot->arrayInit = resolveArrayInit(g.arrayInit, slot->type, g.line);
         }
     }
 
@@ -460,13 +493,22 @@ class Builder {
     // error rather than a guess, since there's no way to tell a function
     // address from a data address apart otherwise — the file must declare
     // it 'extern'.
-    std::vector<ir::ArrayInitElem> resolveArrayInit(const std::vector<ArrayInitElem> &elems, int line) {
+    std::vector<ir::ArrayInitElem> resolveArrayInit(const std::vector<ArrayInitElem> &elems, Type elemType,
+                                                     int line) {
+        bool elemIsFloat = elemType.base == BaseType::Float || elemType.base == BaseType::Double;
         std::vector<ir::ArrayInitElem> out;
         out.reserve(elems.size());
         for (const auto &e : elems) {
             ir::ArrayInitElem ie;
             if (!e.isSymbol) {
-                ie.value = e.value;
+                // Same "the literal's own kind doesn't have to match the declared type" coercion
+                // as a scalar initializer's - see the Global/static-local coercion above.
+                if (elemIsFloat) {
+                    ie.isFloat = true;
+                    ie.floatValue = e.isFloat ? e.floatValue : static_cast<double>(e.value);
+                } else {
+                    ie.value = e.isFloat ? static_cast<long>(e.floatValue) : e.value;
+                }
                 out.push_back(ie);
                 continue;
             }
@@ -948,6 +990,18 @@ class Builder {
                 out->kind = ir::ExprKind::IntLit;
                 out->intValue = e.intValue;
                 out->type = literalType(e.intValue, e.type);
+                return out;
+            case ExprKind::FloatLit:
+                // e.type is Float or Double (BuildAst.cpp tags it from the
+                // literal's own 'f'/'F' suffix) - resolveStructType() is
+                // this codebase's one central "is this type supported on
+                // this target" check (see its own comment), so routing a
+                // literal through it here, same as every declared Slot
+                // already does, means a float-only program with no
+                // variable of that type anywhere still hard-fails.
+                out->kind = ir::ExprKind::FloatLit;
+                out->floatValue = e.floatValue;
+                out->type = resolveStructType(e.type, e.line);
                 return out;
             case ExprKind::Var: {
                 ir::Slot *slot = resolveVar(e.name, e.line);
@@ -1457,14 +1511,25 @@ class Builder {
                                          "variable is) - see docs/language.md's \"Structs\" section");
                     }
                     if (s.arraySize > 0) {
-                        slot->arrayInit = resolveArrayInit(s.arrayInit, s.line);
+                        slot->arrayInit = resolveArrayInit(s.arrayInit, slot->type, s.line);
                     } else if (s.initOrReturnOrExpr) {
                         // Grammar restricts a 'static' local's scalar initializer to a plain
                         // (optionally negated) literal - see CParser.g4's staticLocalDecl - so
-                        // this is always an already-built IntLit, never a runtime expr to
-                        // evaluate on every call.
+                        // this is always an already-built IntLit or FloatLit, never a runtime
+                        // expr to evaluate on every call. The literal's own kind doesn't have to
+                        // match the declared type any more than in a general expr ('double x =
+                        // 5;' is an ordinary implicit conversion) - see the matching Global
+                        // coercion above for why both directions are handled here.
                         slot->hasInit = true;
-                        slot->initValue = s.initOrReturnOrExpr->intValue;
+                        bool litIsFloat = s.initOrReturnOrExpr->kind == ExprKind::FloatLit;
+                        bool slotIsFloat = slot->type.base == BaseType::Float || slot->type.base == BaseType::Double;
+                        if (slotIsFloat) {
+                            slot->floatInitValue = litIsFloat ? s.initOrReturnOrExpr->floatValue
+                                                               : static_cast<double>(s.initOrReturnOrExpr->intValue);
+                        } else {
+                            slot->initValue = litIsFloat ? static_cast<long>(s.initOrReturnOrExpr->floatValue)
+                                                          : s.initOrReturnOrExpr->intValue;
+                        }
                     }
                     declareLocal(s.declName, slot, s.line);
                     out->kind = ir::StmtKind::Empty;
@@ -1489,7 +1554,7 @@ class Builder {
                                      "declaration instead");
                     }
                 } else {
-                    slot->arrayInit = resolveArrayInit(s.arrayInit, s.line);
+                    slot->arrayInit = resolveArrayInit(s.arrayInit, slot->type, s.line);
                 }
                 declareLocal(s.declName, slot, s.line);
                 out->declSlot = slot;

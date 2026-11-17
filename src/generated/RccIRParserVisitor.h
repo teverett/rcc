@@ -69,6 +69,8 @@ public:
 
     virtual std::any visitIntLitExpr(RccIRParser::IntLitExprContext *context) = 0;
 
+    virtual std::any visitFloatLitExpr(RccIRParser::FloatLitExprContext *context) = 0;
+
     virtual std::any visitCompoundIndexExpr(RccIRParser::CompoundIndexExprContext *context) = 0;
 
     virtual std::any visitCompoundAssignExpr(RccIRParser::CompoundAssignExprContext *context) = 0;

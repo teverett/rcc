@@ -366,6 +366,8 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
 
 void I8086Codegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 // Real 8086 has no PUSH imm16 - load each word into AX first.

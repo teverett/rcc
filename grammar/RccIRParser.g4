@@ -21,8 +21,8 @@ program
 
 // IRPrinter.cpp's own canonical spelling of a rcc::Type (see
 // typeSpecText() there) - always the shortest real-C spelling
-// ("int"/"unsigned int"/"char"/.../"long long"/"unsigned long long"),
-// never the source grammar's fuller combinatorial typeSpec (e.g.
+// ("int"/"unsigned int"/"char"/.../"long long"/"unsigned long long"/
+// "float"/"double"), never the source grammar's fuller combinatorial typeSpec (e.g.
 // "short int"/"signed short"), plus a trailing run of '*'s for a
 // pointer (see ../src/Type.h's Type::ptrDepth).
 typeSpec
@@ -31,6 +31,8 @@ typeSpec
       | UNSIGNED_KW? INT_KW
       | UNSIGNED_KW? LONG_KW LONG_KW
       | UNSIGNED_KW? LONG_KW
+      | FLOAT_KW
+      | DOUBLE_KW
       | STRUCT_KW IDENT
       ) STAR*
     ;
@@ -41,19 +43,20 @@ typeSpec
 // language requires a compile-time constant there - see
 // IRBuilder.h), never a general expr the way a LocalDecl's can be.
 globalDecl
-    : typeSpec ref (LBRACK NUMBER RBRACK (ASSIGN initList)? | (ASSIGN NUMBER)?) SEMI
+    : typeSpec ref (LBRACK NUMBER RBRACK (ASSIGN initList)? | (ASSIGN (NUMBER | FLOAT_NUMBER))?) SEMI
     ;
 
 initList
     : LBRACE (initElem (COMMA initElem)*)? RBRACE
     ;
 
-// A plain literal, or a symbol reference standing for that Slot's or
-// Function's own address (see IR.h's ArrayInitElem) - identical shape
-// to varExpr's bare `ref`, just not wrapped as a full `expr` since an
-// initList element is never anything else (no operators, no calls).
+// A plain literal (int or float/double), or a symbol reference standing for
+// that Slot's or Function's own address (see IR.h's ArrayInitElem) -
+// identical shape to varExpr's bare `ref`, just not wrapped as a full `expr`
+// since an initList element is never anything else (no operators, no calls).
 initElem
     : NUMBER
+    | FLOAT_NUMBER
     | ref
     ;
 
@@ -124,6 +127,7 @@ compoundOp
 
 expr
     : NUMBER                                                      # intLitExpr
+    | FLOAT_NUMBER                                                 # floatLitExpr
     // CompoundAssign/CompoundDerefAssign (IRPrinter.cpp's own case) -
     // OLDVAL_KW present only when `e.yieldOld` is true (a postfix
     // '++'/'--'); these three must be tried before indexExpr/

@@ -9,7 +9,8 @@ options { tokenVocab = CLexer; }
 // optionally pointer-typed (typeSpec's own trailing '*'s - see
 // ../src/Type.h's Type::ptrDepth), plus a narrower form of `struct`
 // and `enum` (see ../docs/language.md's own "Structs"/"Enums" sections)
-// - no unions/typedefs or floats; an array's initializer is
+// - no unions/typedefs; float/double are supported (neither signed nor
+// unsigned). An array's initializer is
 // always a literal list, never a general expression). This is a
 // from-scratch grammar sized for that
 // subset, not a full ISO C grammar - the same approach ../../pdp-assembler
@@ -30,8 +31,8 @@ program
 // (zero or more) makes it a pointer - 'int*' one level, 'int**' two,
 // etc; see ../src/Type.h's own Type::ptrDepth. No ambiguity with
 // mulExpr/parenExpr: baseTypeSpec always starts with one of
-// char/short/int/long/signed/unsigned, none of which can start an
-// expr, so ANTLR tells a cast/sizeof's parenthesized type apart from a
+// char/short/int/long/signed/unsigned/float/double, none of which can
+// start an expr, so ANTLR tells a cast/sizeof's parenthesized type apart from a
 // parenthesized expression by that first token alone, same as before
 // this rule grew its own trailing '*'s.
 typeSpec
@@ -48,6 +49,8 @@ baseTypeSpec
     | ('signed' | 'unsigned')? 'long' 'long' 'int'?           # longLongType
     | ('signed' | 'unsigned')? 'long' 'int'?                  # longType
     | ('signed' | 'unsigned')                                  # signedOrUnsignedType
+    | 'float'                                                  # floatType
+    | 'double'                                                 # doubleType
     // 'struct' is a fixed keyword, so this introduces no lookup-based
     // "is this identifier a type name" ambiguity - same disambiguation
     // invariant the other alternatives above already rely on.
@@ -182,7 +185,7 @@ globalDecl
     // The initializer is a plain (optionally negated) literal, or an
     // already-declared enum constant's bare name (identVal) - see
     // BuildAst.cpp's resolveConstOrEnum.
-    | stat='static'? cst='const'? typeSpec IDENT ('=' (sign='-'? val=NUMBER | identVal=IDENT))? ('@' addr=NUMBER)? ';'  # globalScalarDecl
+    | stat='static'? cst='const'? typeSpec IDENT ('=' (sign='-'? val=(NUMBER | FLOAT_NUMBER) | identVal=IDENT))? ('@' addr=NUMBER)? ';'  # globalScalarDecl
     ;
 
 // Elements are plain literals, optionally negated, or a bare function/
@@ -198,7 +201,7 @@ arrayInit
     ;
 
 arrayInitElem
-    : sign='-'? NUMBER   # numArrayElem
+    : sign='-'? (NUMBER | FLOAT_NUMBER)   # numArrayElem
     | IDENT    # symArrayElem
     ;
 
@@ -325,6 +328,7 @@ condExpr
     | IDENT '[' expr ']'                              # indexExpr
     | IDENT                                           # varExpr
     | NUMBER                                          # numExpr
+    | FLOAT_NUMBER                                    # floatNumExpr
     | CHARLIT                                         # charExpr
     | STRINGLIT                                       # stringLitExpr
     | '(' expr ')'                                    # parenExpr

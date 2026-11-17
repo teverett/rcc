@@ -778,6 +778,8 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
         return;
     }
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             code_ << "    mov a, " << e.intValue << "\n";
             return;

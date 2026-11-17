@@ -236,6 +236,8 @@ std::string ParrotVmCodegen::applyCompoundOp(const ir::Expr &e, const std::strin
 
 std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             std::string reg = newReg();
             code_ << "   " << reg << " = " << e.intValue << "\n";

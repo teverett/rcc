@@ -13,8 +13,11 @@ namespace {
 // too (see that function's own header comment).
 std::string entryAsm() {
     return "_start:\n"
-           "    lit FN_main\n"
-           "    cal\n"
+           "    ldi r5, " +
+           std::to_string(kVexStackTop) +
+           "\n"
+           "    ldi r2, FN_main\n"
+           "    cal r2\n"
            "    ret\n" +
            vexRuntimeAsm();
 }

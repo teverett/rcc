@@ -740,6 +740,8 @@ void AVRCodegen::genBinary(const ir::Expr &e) {
 
 void AVRCodegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             int w = widthOfType(e.type);
             loadImmediateInto(canonicalPlace(w), w, static_cast<uint64_t>(e.intValue));

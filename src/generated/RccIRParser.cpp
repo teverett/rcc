@@ -58,138 +58,141 @@ void rccirparserParserInitialize() {
     },
     std::vector<std::string>{
       "", "'; --- globals ---'", "'; --- functions ---'", "'int'", "'char'", 
-      "'short'", "'long'", "'unsigned'", "'void'", "'struct'", "'local'", 
-      "'if'", "'else'", "'while'", "'return'", "'break'", "'continue'", 
-      "'goto'", "'post'", "'oldval'", "'('", "')'", "'['", "']'", "'{'", 
-      "", "';'", "','", "'='", "'#'", "'*'", "'&'", "'-'", "'!'", "'~'", 
-      "'/'", "'%'", "'+'", "'<<'", "'>>'", "'<='", "'>='", "'<'", "'>'", 
-      "'=='", "'!='", "'^'", "'|'", "'&&'", "'||'", "'+='", "'-='", "'*='", 
-      "'/='", "'%='", "'&='", "'^='", "'|='", "'<<='", "'>>='", "'\\u003F'", 
-      "':'"
+      "'short'", "'long'", "'float'", "'double'", "'unsigned'", "'void'", 
+      "'struct'", "'local'", "'if'", "'else'", "'while'", "'return'", "'break'", 
+      "'continue'", "'goto'", "'post'", "'oldval'", "'('", "')'", "'['", 
+      "']'", "'{'", "", "';'", "','", "'='", "'#'", "'*'", "'&'", "'-'", 
+      "'!'", "'~'", "'/'", "'%'", "'+'", "'<<'", "'>>'", "'<='", "'>='", 
+      "'<'", "'>'", "'=='", "'!='", "'^'", "'|'", "'&&'", "'||'", "'+='", 
+      "'-='", "'*='", "'/='", "'%='", "'&='", "'^='", "'|='", "'<<='", "'>>='", 
+      "'\\u003F'", "':'"
     },
     std::vector<std::string>{
       "", "GLOBALS_HEADER", "FUNCTIONS_HEADER", "INT_KW", "CHAR_KW", "SHORT_KW", 
-      "LONG_KW", "UNSIGNED_KW", "VOID_KW", "STRUCT_KW", "LOCAL_KW", "IF_KW", 
-      "ELSE_KW", "WHILE_KW", "RETURN_KW", "BREAK_KW", "CONTINUE_KW", "GOTO_KW", 
-      "POST_KW", "OLDVAL_KW", "LPAREN", "RPAREN", "LBRACK", "RBRACK", "LBRACE", 
-      "RBRACE", "SEMI", "COMMA", "ASSIGN", "HASH", "STAR", "AMP", "MINUS", 
-      "BANG", "TILDE", "SLASH", "PERCENT", "PLUS", "SHL", "SHR", "LE", "GE", 
-      "LT", "GT", "EQ", "NE", "CARET", "PIPE", "ANDAND", "OROR", "PLUSEQ", 
-      "MINUSEQ", "STAREQ", "SLASHEQ", "PERCENTEQ", "AMPEQ", "CARETEQ", "PIPEEQ", 
-      "SHLEQ", "SHREQ", "QUESTION", "COLON", "IDENT", "NUMBER", "WS", "ASM_BEGIN", 
-      "ASM_TEXT", "ASM_END"
+      "LONG_KW", "FLOAT_KW", "DOUBLE_KW", "UNSIGNED_KW", "VOID_KW", "STRUCT_KW", 
+      "LOCAL_KW", "IF_KW", "ELSE_KW", "WHILE_KW", "RETURN_KW", "BREAK_KW", 
+      "CONTINUE_KW", "GOTO_KW", "POST_KW", "OLDVAL_KW", "LPAREN", "RPAREN", 
+      "LBRACK", "RBRACK", "LBRACE", "RBRACE", "SEMI", "COMMA", "ASSIGN", 
+      "HASH", "STAR", "AMP", "MINUS", "BANG", "TILDE", "SLASH", "PERCENT", 
+      "PLUS", "SHL", "SHR", "LE", "GE", "LT", "GT", "EQ", "NE", "CARET", 
+      "PIPE", "ANDAND", "OROR", "PLUSEQ", "MINUSEQ", "STAREQ", "SLASHEQ", 
+      "PERCENTEQ", "AMPEQ", "CARETEQ", "PIPEEQ", "SHLEQ", "SHREQ", "QUESTION", 
+      "COLON", "IDENT", "NUMBER", "FLOAT_NUMBER", "WS", "ASM_BEGIN", "ASM_TEXT", 
+      "ASM_END"
     }
   );
   static const int32_t serializedATNSegment[] = {
-  	4,1,67,316,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,6,2,
+  	4,1,70,320,2,0,7,0,2,1,7,1,2,2,7,2,2,3,7,3,2,4,7,4,2,5,7,5,2,6,7,6,2,
   	7,7,7,2,8,7,8,2,9,7,9,2,10,7,10,2,11,7,11,2,12,7,12,2,13,7,13,2,14,7,
   	14,2,15,7,15,1,0,1,0,5,0,35,8,0,10,0,12,0,38,9,0,1,0,1,0,5,0,42,8,0,10,
   	0,12,0,45,9,0,1,0,1,0,1,1,3,1,50,8,1,1,1,1,1,3,1,54,8,1,1,1,1,1,3,1,58,
-  	8,1,1,1,1,1,3,1,62,8,1,1,1,1,1,1,1,3,1,67,8,1,1,1,1,1,1,1,3,1,72,8,1,
-  	1,1,5,1,75,8,1,10,1,12,1,78,9,1,1,2,1,2,1,2,1,2,1,2,1,2,1,2,3,2,87,8,
-  	2,1,2,1,2,3,2,91,8,2,3,2,93,8,2,1,2,1,2,1,3,1,3,1,3,1,3,5,3,101,8,3,10,
-  	3,12,3,104,9,3,3,3,106,8,3,1,3,1,3,1,4,1,4,3,4,112,8,4,1,5,1,5,1,5,1,
-  	5,3,5,118,8,5,1,5,1,5,1,5,1,6,1,6,3,6,125,8,6,1,7,1,7,1,7,5,7,130,8,7,
-  	10,7,12,7,133,9,7,1,8,1,8,1,8,1,9,1,9,5,9,140,8,9,10,9,12,9,143,9,9,1,
-  	9,1,9,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,155,8,10,1,10,1,10,
-  	1,10,1,10,1,10,1,10,1,10,3,10,164,8,10,1,10,1,10,3,10,168,8,10,1,10,1,
-  	10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,183,8,
-  	10,1,10,1,10,3,10,187,8,10,3,10,189,8,10,1,10,1,10,1,10,1,10,1,10,1,10,
-  	1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,205,8,10,1,11,1,11,1,11,
-  	1,11,1,12,1,12,1,13,1,13,3,13,215,8,13,1,13,1,13,1,13,1,13,1,13,1,13,
-  	1,13,1,13,3,13,225,8,13,1,13,1,13,1,13,1,13,1,13,3,13,232,8,13,1,13,1,
-  	13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,3,13,247,8,
-  	13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,3,13,259,8,13,1,
-  	13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,
-  	13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,
-  	13,3,13,290,8,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,
-  	13,1,13,3,13,304,8,13,1,14,1,14,1,14,5,14,309,8,14,10,14,12,14,312,9,
-  	14,1,15,1,15,1,15,0,0,16,0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,0,
-  	3,1,0,50,59,1,0,31,34,2,0,30,32,35,49,360,0,32,1,0,0,0,2,71,1,0,0,0,4,
-  	79,1,0,0,0,6,96,1,0,0,0,8,111,1,0,0,0,10,113,1,0,0,0,12,124,1,0,0,0,14,
-  	126,1,0,0,0,16,134,1,0,0,0,18,137,1,0,0,0,20,204,1,0,0,0,22,206,1,0,0,
-  	0,24,210,1,0,0,0,26,303,1,0,0,0,28,305,1,0,0,0,30,313,1,0,0,0,32,36,5,
-  	1,0,0,33,35,3,4,2,0,34,33,1,0,0,0,35,38,1,0,0,0,36,34,1,0,0,0,36,37,1,
-  	0,0,0,37,39,1,0,0,0,38,36,1,0,0,0,39,43,5,2,0,0,40,42,3,10,5,0,41,40,
-  	1,0,0,0,42,45,1,0,0,0,43,41,1,0,0,0,43,44,1,0,0,0,44,46,1,0,0,0,45,43,
-  	1,0,0,0,46,47,5,0,0,1,47,1,1,0,0,0,48,50,5,7,0,0,49,48,1,0,0,0,49,50,
-  	1,0,0,0,50,51,1,0,0,0,51,72,5,4,0,0,52,54,5,7,0,0,53,52,1,0,0,0,53,54,
-  	1,0,0,0,54,55,1,0,0,0,55,72,5,5,0,0,56,58,5,7,0,0,57,56,1,0,0,0,57,58,
-  	1,0,0,0,58,59,1,0,0,0,59,72,5,3,0,0,60,62,5,7,0,0,61,60,1,0,0,0,61,62,
-  	1,0,0,0,62,63,1,0,0,0,63,64,5,6,0,0,64,72,5,6,0,0,65,67,5,7,0,0,66,65,
-  	1,0,0,0,66,67,1,0,0,0,67,68,1,0,0,0,68,72,5,6,0,0,69,70,5,9,0,0,70,72,
-  	5,62,0,0,71,49,1,0,0,0,71,53,1,0,0,0,71,57,1,0,0,0,71,61,1,0,0,0,71,66,
-  	1,0,0,0,71,69,1,0,0,0,72,76,1,0,0,0,73,75,5,30,0,0,74,73,1,0,0,0,75,78,
-  	1,0,0,0,76,74,1,0,0,0,76,77,1,0,0,0,77,3,1,0,0,0,78,76,1,0,0,0,79,80,
-  	3,2,1,0,80,92,3,22,11,0,81,82,5,22,0,0,82,83,5,63,0,0,83,86,5,23,0,0,
-  	84,85,5,28,0,0,85,87,3,6,3,0,86,84,1,0,0,0,86,87,1,0,0,0,87,93,1,0,0,
-  	0,88,89,5,28,0,0,89,91,5,63,0,0,90,88,1,0,0,0,90,91,1,0,0,0,91,93,1,0,
-  	0,0,92,81,1,0,0,0,92,90,1,0,0,0,93,94,1,0,0,0,94,95,5,26,0,0,95,5,1,0,
-  	0,0,96,105,5,24,0,0,97,102,3,8,4,0,98,99,5,27,0,0,99,101,3,8,4,0,100,
-  	98,1,0,0,0,101,104,1,0,0,0,102,100,1,0,0,0,102,103,1,0,0,0,103,106,1,
-  	0,0,0,104,102,1,0,0,0,105,97,1,0,0,0,105,106,1,0,0,0,106,107,1,0,0,0,
-  	107,108,5,25,0,0,108,7,1,0,0,0,109,112,5,63,0,0,110,112,3,22,11,0,111,
-  	109,1,0,0,0,111,110,1,0,0,0,112,9,1,0,0,0,113,114,3,12,6,0,114,115,3,
-  	22,11,0,115,117,5,20,0,0,116,118,3,14,7,0,117,116,1,0,0,0,117,118,1,0,
-  	0,0,118,119,1,0,0,0,119,120,5,21,0,0,120,121,3,18,9,0,121,11,1,0,0,0,
-  	122,125,3,2,1,0,123,125,5,8,0,0,124,122,1,0,0,0,124,123,1,0,0,0,125,13,
-  	1,0,0,0,126,131,3,16,8,0,127,128,5,27,0,0,128,130,3,16,8,0,129,127,1,
-  	0,0,0,130,133,1,0,0,0,131,129,1,0,0,0,131,132,1,0,0,0,132,15,1,0,0,0,
-  	133,131,1,0,0,0,134,135,3,2,1,0,135,136,3,22,11,0,136,17,1,0,0,0,137,
-  	141,5,24,0,0,138,140,3,20,10,0,139,138,1,0,0,0,140,143,1,0,0,0,141,139,
-  	1,0,0,0,141,142,1,0,0,0,142,144,1,0,0,0,143,141,1,0,0,0,144,145,5,25,
-  	0,0,145,19,1,0,0,0,146,205,3,18,9,0,147,148,5,11,0,0,148,149,5,20,0,0,
-  	149,150,3,26,13,0,150,151,5,21,0,0,151,154,3,20,10,0,152,153,5,12,0,0,
-  	153,155,3,20,10,0,154,152,1,0,0,0,154,155,1,0,0,0,155,205,1,0,0,0,156,
-  	157,5,13,0,0,157,158,5,20,0,0,158,159,3,26,13,0,159,160,5,21,0,0,160,
-  	163,3,20,10,0,161,162,5,18,0,0,162,164,3,20,10,0,163,161,1,0,0,0,163,
-  	164,1,0,0,0,164,205,1,0,0,0,165,167,5,14,0,0,166,168,3,26,13,0,167,166,
-  	1,0,0,0,167,168,1,0,0,0,168,169,1,0,0,0,169,205,5,26,0,0,170,171,5,15,
-  	0,0,171,205,5,26,0,0,172,173,5,16,0,0,173,205,5,26,0,0,174,175,5,10,0,
-  	0,175,176,3,2,1,0,176,188,3,22,11,0,177,178,5,22,0,0,178,179,5,63,0,0,
-  	179,182,5,23,0,0,180,181,5,28,0,0,181,183,3,6,3,0,182,180,1,0,0,0,182,
-  	183,1,0,0,0,183,189,1,0,0,0,184,185,5,28,0,0,185,187,3,26,13,0,186,184,
-  	1,0,0,0,186,187,1,0,0,0,187,189,1,0,0,0,188,177,1,0,0,0,188,186,1,0,0,
-  	0,189,190,1,0,0,0,190,191,5,26,0,0,191,205,1,0,0,0,192,193,5,65,0,0,193,
-  	194,5,66,0,0,194,205,5,67,0,0,195,205,5,26,0,0,196,197,5,62,0,0,197,205,
-  	5,61,0,0,198,199,5,17,0,0,199,200,5,62,0,0,200,205,5,26,0,0,201,202,3,
-  	26,13,0,202,203,5,26,0,0,203,205,1,0,0,0,204,146,1,0,0,0,204,147,1,0,
-  	0,0,204,156,1,0,0,0,204,165,1,0,0,0,204,170,1,0,0,0,204,172,1,0,0,0,204,
-  	174,1,0,0,0,204,192,1,0,0,0,204,195,1,0,0,0,204,196,1,0,0,0,204,198,1,
-  	0,0,0,204,201,1,0,0,0,205,21,1,0,0,0,206,207,5,62,0,0,207,208,5,29,0,
-  	0,208,209,5,63,0,0,209,23,1,0,0,0,210,211,7,0,0,0,211,25,1,0,0,0,212,
-  	304,5,63,0,0,213,215,5,19,0,0,214,213,1,0,0,0,214,215,1,0,0,0,215,216,
-  	1,0,0,0,216,217,3,22,11,0,217,218,5,22,0,0,218,219,3,26,13,0,219,220,
-  	5,23,0,0,220,221,3,24,12,0,221,222,3,26,13,0,222,304,1,0,0,0,223,225,
-  	5,19,0,0,224,223,1,0,0,0,224,225,1,0,0,0,225,226,1,0,0,0,226,227,3,22,
-  	11,0,227,228,3,24,12,0,228,229,3,26,13,0,229,304,1,0,0,0,230,232,5,19,
-  	0,0,231,230,1,0,0,0,231,232,1,0,0,0,232,233,1,0,0,0,233,234,5,30,0,0,
-  	234,235,5,20,0,0,235,236,3,26,13,0,236,237,5,21,0,0,237,238,3,24,12,0,
-  	238,239,3,26,13,0,239,304,1,0,0,0,240,241,3,22,11,0,241,242,5,22,0,0,
-  	242,243,3,26,13,0,243,246,5,23,0,0,244,245,5,28,0,0,245,247,3,26,13,0,
-  	246,244,1,0,0,0,246,247,1,0,0,0,247,304,1,0,0,0,248,249,3,22,11,0,249,
-  	250,5,28,0,0,250,251,3,26,13,0,251,304,1,0,0,0,252,253,5,30,0,0,253,254,
-  	5,20,0,0,254,255,3,26,13,0,255,258,5,21,0,0,256,257,5,28,0,0,257,259,
-  	3,26,13,0,258,256,1,0,0,0,258,259,1,0,0,0,259,304,1,0,0,0,260,261,7,1,
-  	0,0,261,262,5,20,0,0,262,263,3,26,13,0,263,264,5,21,0,0,264,304,1,0,0,
-  	0,265,266,5,20,0,0,266,267,3,26,13,0,267,268,3,30,15,0,268,269,3,26,13,
-  	0,269,270,5,21,0,0,270,304,1,0,0,0,271,272,5,20,0,0,272,273,3,26,13,0,
-  	273,274,5,60,0,0,274,275,3,26,13,0,275,276,5,61,0,0,276,277,3,26,13,0,
-  	277,278,5,21,0,0,278,304,1,0,0,0,279,280,5,20,0,0,280,281,3,2,1,0,281,
-  	282,5,21,0,0,282,283,5,20,0,0,283,284,3,26,13,0,284,285,5,21,0,0,285,
-  	304,1,0,0,0,286,287,3,22,11,0,287,289,5,20,0,0,288,290,3,28,14,0,289,
-  	288,1,0,0,0,289,290,1,0,0,0,290,291,1,0,0,0,291,292,5,21,0,0,292,304,
-  	1,0,0,0,293,294,5,20,0,0,294,295,3,26,13,0,295,296,5,21,0,0,296,297,5,
-  	20,0,0,297,298,5,21,0,0,298,304,1,0,0,0,299,300,5,62,0,0,300,301,5,20,
-  	0,0,301,304,5,21,0,0,302,304,3,22,11,0,303,212,1,0,0,0,303,214,1,0,0,
-  	0,303,224,1,0,0,0,303,231,1,0,0,0,303,240,1,0,0,0,303,248,1,0,0,0,303,
-  	252,1,0,0,0,303,260,1,0,0,0,303,265,1,0,0,0,303,271,1,0,0,0,303,279,1,
-  	0,0,0,303,286,1,0,0,0,303,293,1,0,0,0,303,299,1,0,0,0,303,302,1,0,0,0,
-  	304,27,1,0,0,0,305,310,3,26,13,0,306,307,5,27,0,0,307,309,3,26,13,0,308,
-  	306,1,0,0,0,309,312,1,0,0,0,310,308,1,0,0,0,310,311,1,0,0,0,311,29,1,
-  	0,0,0,312,310,1,0,0,0,313,314,7,2,0,0,314,31,1,0,0,0,34,36,43,49,53,57,
-  	61,66,71,76,86,90,92,102,105,111,117,124,131,141,154,163,167,182,186,
-  	188,204,214,224,231,246,258,289,303,310
+  	8,1,1,1,1,1,3,1,62,8,1,1,1,1,1,1,1,3,1,67,8,1,1,1,1,1,1,1,1,1,1,1,3,1,
+  	74,8,1,1,1,5,1,77,8,1,10,1,12,1,80,9,1,1,2,1,2,1,2,1,2,1,2,1,2,1,2,3,
+  	2,89,8,2,1,2,1,2,3,2,93,8,2,3,2,95,8,2,1,2,1,2,1,3,1,3,1,3,1,3,5,3,103,
+  	8,3,10,3,12,3,106,9,3,3,3,108,8,3,1,3,1,3,1,4,1,4,1,4,3,4,115,8,4,1,5,
+  	1,5,1,5,1,5,3,5,121,8,5,1,5,1,5,1,5,1,6,1,6,3,6,128,8,6,1,7,1,7,1,7,5,
+  	7,133,8,7,10,7,12,7,136,9,7,1,8,1,8,1,8,1,9,1,9,5,9,143,8,9,10,9,12,9,
+  	146,9,9,1,9,1,9,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,158,8,10,
+  	1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,167,8,10,1,10,1,10,3,10,171,8,
+  	10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,
+  	10,186,8,10,1,10,1,10,3,10,190,8,10,3,10,192,8,10,1,10,1,10,1,10,1,10,
+  	1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,1,10,3,10,208,8,10,1,11,
+  	1,11,1,11,1,11,1,12,1,12,1,13,1,13,1,13,3,13,219,8,13,1,13,1,13,1,13,
+  	1,13,1,13,1,13,1,13,1,13,3,13,229,8,13,1,13,1,13,1,13,1,13,1,13,3,13,
+  	236,8,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,
+  	1,13,3,13,251,8,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,
+  	3,13,263,8,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,
+  	1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,
+  	1,13,1,13,1,13,1,13,3,13,294,8,13,1,13,1,13,1,13,1,13,1,13,1,13,1,13,
+  	1,13,1,13,1,13,1,13,1,13,3,13,308,8,13,1,14,1,14,1,14,5,14,313,8,14,10,
+  	14,12,14,316,9,14,1,15,1,15,1,15,0,0,16,0,2,4,6,8,10,12,14,16,18,20,22,
+  	24,26,28,30,0,4,1,0,65,66,1,0,52,61,1,0,33,36,2,0,32,34,37,51,368,0,32,
+  	1,0,0,0,2,73,1,0,0,0,4,81,1,0,0,0,6,98,1,0,0,0,8,114,1,0,0,0,10,116,1,
+  	0,0,0,12,127,1,0,0,0,14,129,1,0,0,0,16,137,1,0,0,0,18,140,1,0,0,0,20,
+  	207,1,0,0,0,22,209,1,0,0,0,24,213,1,0,0,0,26,307,1,0,0,0,28,309,1,0,0,
+  	0,30,317,1,0,0,0,32,36,5,1,0,0,33,35,3,4,2,0,34,33,1,0,0,0,35,38,1,0,
+  	0,0,36,34,1,0,0,0,36,37,1,0,0,0,37,39,1,0,0,0,38,36,1,0,0,0,39,43,5,2,
+  	0,0,40,42,3,10,5,0,41,40,1,0,0,0,42,45,1,0,0,0,43,41,1,0,0,0,43,44,1,
+  	0,0,0,44,46,1,0,0,0,45,43,1,0,0,0,46,47,5,0,0,1,47,1,1,0,0,0,48,50,5,
+  	9,0,0,49,48,1,0,0,0,49,50,1,0,0,0,50,51,1,0,0,0,51,74,5,4,0,0,52,54,5,
+  	9,0,0,53,52,1,0,0,0,53,54,1,0,0,0,54,55,1,0,0,0,55,74,5,5,0,0,56,58,5,
+  	9,0,0,57,56,1,0,0,0,57,58,1,0,0,0,58,59,1,0,0,0,59,74,5,3,0,0,60,62,5,
+  	9,0,0,61,60,1,0,0,0,61,62,1,0,0,0,62,63,1,0,0,0,63,64,5,6,0,0,64,74,5,
+  	6,0,0,65,67,5,9,0,0,66,65,1,0,0,0,66,67,1,0,0,0,67,68,1,0,0,0,68,74,5,
+  	6,0,0,69,74,5,7,0,0,70,74,5,8,0,0,71,72,5,11,0,0,72,74,5,64,0,0,73,49,
+  	1,0,0,0,73,53,1,0,0,0,73,57,1,0,0,0,73,61,1,0,0,0,73,66,1,0,0,0,73,69,
+  	1,0,0,0,73,70,1,0,0,0,73,71,1,0,0,0,74,78,1,0,0,0,75,77,5,32,0,0,76,75,
+  	1,0,0,0,77,80,1,0,0,0,78,76,1,0,0,0,78,79,1,0,0,0,79,3,1,0,0,0,80,78,
+  	1,0,0,0,81,82,3,2,1,0,82,94,3,22,11,0,83,84,5,24,0,0,84,85,5,65,0,0,85,
+  	88,5,25,0,0,86,87,5,30,0,0,87,89,3,6,3,0,88,86,1,0,0,0,88,89,1,0,0,0,
+  	89,95,1,0,0,0,90,91,5,30,0,0,91,93,7,0,0,0,92,90,1,0,0,0,92,93,1,0,0,
+  	0,93,95,1,0,0,0,94,83,1,0,0,0,94,92,1,0,0,0,95,96,1,0,0,0,96,97,5,28,
+  	0,0,97,5,1,0,0,0,98,107,5,26,0,0,99,104,3,8,4,0,100,101,5,29,0,0,101,
+  	103,3,8,4,0,102,100,1,0,0,0,103,106,1,0,0,0,104,102,1,0,0,0,104,105,1,
+  	0,0,0,105,108,1,0,0,0,106,104,1,0,0,0,107,99,1,0,0,0,107,108,1,0,0,0,
+  	108,109,1,0,0,0,109,110,5,27,0,0,110,7,1,0,0,0,111,115,5,65,0,0,112,115,
+  	5,66,0,0,113,115,3,22,11,0,114,111,1,0,0,0,114,112,1,0,0,0,114,113,1,
+  	0,0,0,115,9,1,0,0,0,116,117,3,12,6,0,117,118,3,22,11,0,118,120,5,22,0,
+  	0,119,121,3,14,7,0,120,119,1,0,0,0,120,121,1,0,0,0,121,122,1,0,0,0,122,
+  	123,5,23,0,0,123,124,3,18,9,0,124,11,1,0,0,0,125,128,3,2,1,0,126,128,
+  	5,10,0,0,127,125,1,0,0,0,127,126,1,0,0,0,128,13,1,0,0,0,129,134,3,16,
+  	8,0,130,131,5,29,0,0,131,133,3,16,8,0,132,130,1,0,0,0,133,136,1,0,0,0,
+  	134,132,1,0,0,0,134,135,1,0,0,0,135,15,1,0,0,0,136,134,1,0,0,0,137,138,
+  	3,2,1,0,138,139,3,22,11,0,139,17,1,0,0,0,140,144,5,26,0,0,141,143,3,20,
+  	10,0,142,141,1,0,0,0,143,146,1,0,0,0,144,142,1,0,0,0,144,145,1,0,0,0,
+  	145,147,1,0,0,0,146,144,1,0,0,0,147,148,5,27,0,0,148,19,1,0,0,0,149,208,
+  	3,18,9,0,150,151,5,13,0,0,151,152,5,22,0,0,152,153,3,26,13,0,153,154,
+  	5,23,0,0,154,157,3,20,10,0,155,156,5,14,0,0,156,158,3,20,10,0,157,155,
+  	1,0,0,0,157,158,1,0,0,0,158,208,1,0,0,0,159,160,5,15,0,0,160,161,5,22,
+  	0,0,161,162,3,26,13,0,162,163,5,23,0,0,163,166,3,20,10,0,164,165,5,20,
+  	0,0,165,167,3,20,10,0,166,164,1,0,0,0,166,167,1,0,0,0,167,208,1,0,0,0,
+  	168,170,5,16,0,0,169,171,3,26,13,0,170,169,1,0,0,0,170,171,1,0,0,0,171,
+  	172,1,0,0,0,172,208,5,28,0,0,173,174,5,17,0,0,174,208,5,28,0,0,175,176,
+  	5,18,0,0,176,208,5,28,0,0,177,178,5,12,0,0,178,179,3,2,1,0,179,191,3,
+  	22,11,0,180,181,5,24,0,0,181,182,5,65,0,0,182,185,5,25,0,0,183,184,5,
+  	30,0,0,184,186,3,6,3,0,185,183,1,0,0,0,185,186,1,0,0,0,186,192,1,0,0,
+  	0,187,188,5,30,0,0,188,190,3,26,13,0,189,187,1,0,0,0,189,190,1,0,0,0,
+  	190,192,1,0,0,0,191,180,1,0,0,0,191,189,1,0,0,0,192,193,1,0,0,0,193,194,
+  	5,28,0,0,194,208,1,0,0,0,195,196,5,68,0,0,196,197,5,69,0,0,197,208,5,
+  	70,0,0,198,208,5,28,0,0,199,200,5,64,0,0,200,208,5,63,0,0,201,202,5,19,
+  	0,0,202,203,5,64,0,0,203,208,5,28,0,0,204,205,3,26,13,0,205,206,5,28,
+  	0,0,206,208,1,0,0,0,207,149,1,0,0,0,207,150,1,0,0,0,207,159,1,0,0,0,207,
+  	168,1,0,0,0,207,173,1,0,0,0,207,175,1,0,0,0,207,177,1,0,0,0,207,195,1,
+  	0,0,0,207,198,1,0,0,0,207,199,1,0,0,0,207,201,1,0,0,0,207,204,1,0,0,0,
+  	208,21,1,0,0,0,209,210,5,64,0,0,210,211,5,31,0,0,211,212,5,65,0,0,212,
+  	23,1,0,0,0,213,214,7,1,0,0,214,25,1,0,0,0,215,308,5,65,0,0,216,308,5,
+  	66,0,0,217,219,5,21,0,0,218,217,1,0,0,0,218,219,1,0,0,0,219,220,1,0,0,
+  	0,220,221,3,22,11,0,221,222,5,24,0,0,222,223,3,26,13,0,223,224,5,25,0,
+  	0,224,225,3,24,12,0,225,226,3,26,13,0,226,308,1,0,0,0,227,229,5,21,0,
+  	0,228,227,1,0,0,0,228,229,1,0,0,0,229,230,1,0,0,0,230,231,3,22,11,0,231,
+  	232,3,24,12,0,232,233,3,26,13,0,233,308,1,0,0,0,234,236,5,21,0,0,235,
+  	234,1,0,0,0,235,236,1,0,0,0,236,237,1,0,0,0,237,238,5,32,0,0,238,239,
+  	5,22,0,0,239,240,3,26,13,0,240,241,5,23,0,0,241,242,3,24,12,0,242,243,
+  	3,26,13,0,243,308,1,0,0,0,244,245,3,22,11,0,245,246,5,24,0,0,246,247,
+  	3,26,13,0,247,250,5,25,0,0,248,249,5,30,0,0,249,251,3,26,13,0,250,248,
+  	1,0,0,0,250,251,1,0,0,0,251,308,1,0,0,0,252,253,3,22,11,0,253,254,5,30,
+  	0,0,254,255,3,26,13,0,255,308,1,0,0,0,256,257,5,32,0,0,257,258,5,22,0,
+  	0,258,259,3,26,13,0,259,262,5,23,0,0,260,261,5,30,0,0,261,263,3,26,13,
+  	0,262,260,1,0,0,0,262,263,1,0,0,0,263,308,1,0,0,0,264,265,7,2,0,0,265,
+  	266,5,22,0,0,266,267,3,26,13,0,267,268,5,23,0,0,268,308,1,0,0,0,269,270,
+  	5,22,0,0,270,271,3,26,13,0,271,272,3,30,15,0,272,273,3,26,13,0,273,274,
+  	5,23,0,0,274,308,1,0,0,0,275,276,5,22,0,0,276,277,3,26,13,0,277,278,5,
+  	62,0,0,278,279,3,26,13,0,279,280,5,63,0,0,280,281,3,26,13,0,281,282,5,
+  	23,0,0,282,308,1,0,0,0,283,284,5,22,0,0,284,285,3,2,1,0,285,286,5,23,
+  	0,0,286,287,5,22,0,0,287,288,3,26,13,0,288,289,5,23,0,0,289,308,1,0,0,
+  	0,290,291,3,22,11,0,291,293,5,22,0,0,292,294,3,28,14,0,293,292,1,0,0,
+  	0,293,294,1,0,0,0,294,295,1,0,0,0,295,296,5,23,0,0,296,308,1,0,0,0,297,
+  	298,5,22,0,0,298,299,3,26,13,0,299,300,5,23,0,0,300,301,5,22,0,0,301,
+  	302,5,23,0,0,302,308,1,0,0,0,303,304,5,64,0,0,304,305,5,22,0,0,305,308,
+  	5,23,0,0,306,308,3,22,11,0,307,215,1,0,0,0,307,216,1,0,0,0,307,218,1,
+  	0,0,0,307,228,1,0,0,0,307,235,1,0,0,0,307,244,1,0,0,0,307,252,1,0,0,0,
+  	307,256,1,0,0,0,307,264,1,0,0,0,307,269,1,0,0,0,307,275,1,0,0,0,307,283,
+  	1,0,0,0,307,290,1,0,0,0,307,297,1,0,0,0,307,303,1,0,0,0,307,306,1,0,0,
+  	0,308,27,1,0,0,0,309,314,3,26,13,0,310,311,5,29,0,0,311,313,3,26,13,0,
+  	312,310,1,0,0,0,313,316,1,0,0,0,314,312,1,0,0,0,314,315,1,0,0,0,315,29,
+  	1,0,0,0,316,314,1,0,0,0,317,318,7,3,0,0,318,31,1,0,0,0,34,36,43,49,53,
+  	57,61,66,73,78,88,92,94,104,107,114,120,127,134,144,157,166,170,185,189,
+  	191,207,218,228,235,250,262,293,307,314
   };
   staticData->serializedATN = antlr4::atn::SerializedATNView(serializedATNSegment, sizeof(serializedATNSegment) / sizeof(serializedATNSegment[0]));
 
@@ -305,7 +308,7 @@ RccIRParser::ProgramContext* RccIRParser::program() {
     _errHandler->sync(this);
     _la = _input->LA(1);
     while ((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 760) != 0)) {
+      ((1ULL << _la) & 3064) != 0)) {
       setState(33);
       globalDecl();
       setState(38);
@@ -318,7 +321,7 @@ RccIRParser::ProgramContext* RccIRParser::program() {
     _errHandler->sync(this);
     _la = _input->LA(1);
     while ((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 1016) != 0)) {
+      ((1ULL << _la) & 4088) != 0)) {
       setState(40);
       funcDecl();
       setState(45);
@@ -362,6 +365,14 @@ std::vector<tree::TerminalNode *> RccIRParser::TypeSpecContext::LONG_KW() {
 
 tree::TerminalNode* RccIRParser::TypeSpecContext::LONG_KW(size_t i) {
   return getToken(RccIRParser::LONG_KW, i);
+}
+
+tree::TerminalNode* RccIRParser::TypeSpecContext::FLOAT_KW() {
+  return getToken(RccIRParser::FLOAT_KW, 0);
+}
+
+tree::TerminalNode* RccIRParser::TypeSpecContext::DOUBLE_KW() {
+  return getToken(RccIRParser::DOUBLE_KW, 0);
 }
 
 tree::TerminalNode* RccIRParser::TypeSpecContext::STRUCT_KW() {
@@ -411,7 +422,7 @@ RccIRParser::TypeSpecContext* RccIRParser::typeSpec() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(71);
+    setState(73);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 7, _ctx)) {
     case 1: {
@@ -488,8 +499,20 @@ RccIRParser::TypeSpecContext* RccIRParser::typeSpec() {
 
     case 6: {
       setState(69);
-      match(RccIRParser::STRUCT_KW);
+      match(RccIRParser::FLOAT_KW);
+      break;
+    }
+
+    case 7: {
       setState(70);
+      match(RccIRParser::DOUBLE_KW);
+      break;
+    }
+
+    case 8: {
+      setState(71);
+      match(RccIRParser::STRUCT_KW);
+      setState(72);
       match(RccIRParser::IDENT);
       break;
     }
@@ -497,13 +520,13 @@ RccIRParser::TypeSpecContext* RccIRParser::typeSpec() {
     default:
       break;
     }
-    setState(76);
+    setState(78);
     _errHandler->sync(this);
     _la = _input->LA(1);
     while (_la == RccIRParser::STAR) {
-      setState(73);
+      setState(75);
       match(RccIRParser::STAR);
-      setState(78);
+      setState(80);
       _errHandler->sync(this);
       _la = _input->LA(1);
     }
@@ -556,6 +579,10 @@ RccIRParser::InitListContext* RccIRParser::GlobalDeclContext::initList() {
   return getRuleContext<RccIRParser::InitListContext>(0);
 }
 
+tree::TerminalNode* RccIRParser::GlobalDeclContext::FLOAT_NUMBER() {
+  return getToken(RccIRParser::FLOAT_NUMBER, 0);
+}
+
 
 size_t RccIRParser::GlobalDeclContext::getRuleIndex() const {
   return RccIRParser::RuleGlobalDecl;
@@ -583,28 +610,28 @@ RccIRParser::GlobalDeclContext* RccIRParser::globalDecl() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(79);
+    setState(81);
     typeSpec();
-    setState(80);
+    setState(82);
     ref();
-    setState(92);
+    setState(94);
     _errHandler->sync(this);
     switch (_input->LA(1)) {
       case RccIRParser::LBRACK: {
-        setState(81);
-        match(RccIRParser::LBRACK);
-        setState(82);
-        match(RccIRParser::NUMBER);
         setState(83);
+        match(RccIRParser::LBRACK);
+        setState(84);
+        match(RccIRParser::NUMBER);
+        setState(85);
         match(RccIRParser::RBRACK);
-        setState(86);
+        setState(88);
         _errHandler->sync(this);
 
         _la = _input->LA(1);
         if (_la == RccIRParser::ASSIGN) {
-          setState(84);
+          setState(86);
           match(RccIRParser::ASSIGN);
-          setState(85);
+          setState(87);
           initList();
         }
         break;
@@ -612,15 +639,24 @@ RccIRParser::GlobalDeclContext* RccIRParser::globalDecl() {
 
       case RccIRParser::SEMI:
       case RccIRParser::ASSIGN: {
-        setState(90);
+        setState(92);
         _errHandler->sync(this);
 
         _la = _input->LA(1);
         if (_la == RccIRParser::ASSIGN) {
-          setState(88);
+          setState(90);
           match(RccIRParser::ASSIGN);
-          setState(89);
-          match(RccIRParser::NUMBER);
+          setState(91);
+          _la = _input->LA(1);
+          if (!(_la == RccIRParser::NUMBER
+
+          || _la == RccIRParser::FLOAT_NUMBER)) {
+          _errHandler->recoverInline(this);
+          }
+          else {
+            _errHandler->reportMatch(this);
+            consume();
+          }
         }
         break;
       }
@@ -628,7 +664,7 @@ RccIRParser::GlobalDeclContext* RccIRParser::globalDecl() {
     default:
       throw NoViableAltException(this);
     }
-    setState(94);
+    setState(96);
     match(RccIRParser::SEMI);
    
   }
@@ -698,31 +734,30 @@ RccIRParser::InitListContext* RccIRParser::initList() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(96);
+    setState(98);
     match(RccIRParser::LBRACE);
-    setState(105);
+    setState(107);
     _errHandler->sync(this);
 
     _la = _input->LA(1);
-    if (_la == RccIRParser::IDENT
-
-    || _la == RccIRParser::NUMBER) {
-      setState(97);
+    if (((((_la - 64) & ~ 0x3fULL) == 0) &&
+      ((1ULL << (_la - 64)) & 7) != 0)) {
+      setState(99);
       initElem();
-      setState(102);
+      setState(104);
       _errHandler->sync(this);
       _la = _input->LA(1);
       while (_la == RccIRParser::COMMA) {
-        setState(98);
+        setState(100);
         match(RccIRParser::COMMA);
-        setState(99);
+        setState(101);
         initElem();
-        setState(104);
+        setState(106);
         _errHandler->sync(this);
         _la = _input->LA(1);
       }
     }
-    setState(107);
+    setState(109);
     match(RccIRParser::RBRACE);
    
   }
@@ -743,6 +778,10 @@ RccIRParser::InitElemContext::InitElemContext(ParserRuleContext *parent, size_t 
 
 tree::TerminalNode* RccIRParser::InitElemContext::NUMBER() {
   return getToken(RccIRParser::NUMBER, 0);
+}
+
+tree::TerminalNode* RccIRParser::InitElemContext::FLOAT_NUMBER() {
+  return getToken(RccIRParser::FLOAT_NUMBER, 0);
 }
 
 RccIRParser::RefContext* RccIRParser::InitElemContext::ref() {
@@ -774,19 +813,26 @@ RccIRParser::InitElemContext* RccIRParser::initElem() {
     exitRule();
   });
   try {
-    setState(111);
+    setState(114);
     _errHandler->sync(this);
     switch (_input->LA(1)) {
       case RccIRParser::NUMBER: {
         enterOuterAlt(_localctx, 1);
-        setState(109);
+        setState(111);
         match(RccIRParser::NUMBER);
         break;
       }
 
-      case RccIRParser::IDENT: {
+      case RccIRParser::FLOAT_NUMBER: {
         enterOuterAlt(_localctx, 2);
-        setState(110);
+        setState(112);
+        match(RccIRParser::FLOAT_NUMBER);
+        break;
+      }
+
+      case RccIRParser::IDENT: {
+        enterOuterAlt(_localctx, 3);
+        setState(113);
         ref();
         break;
       }
@@ -862,24 +908,24 @@ RccIRParser::FuncDeclContext* RccIRParser::funcDecl() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(113);
+    setState(116);
     typeSpecOrVoid();
-    setState(114);
-    ref();
-    setState(115);
-    match(RccIRParser::LPAREN);
     setState(117);
+    ref();
+    setState(118);
+    match(RccIRParser::LPAREN);
+    setState(120);
     _errHandler->sync(this);
 
     _la = _input->LA(1);
     if ((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 760) != 0)) {
-      setState(116);
+      ((1ULL << _la) & 3064) != 0)) {
+      setState(119);
       paramList();
     }
-    setState(119);
+    setState(122);
     match(RccIRParser::RPAREN);
-    setState(120);
+    setState(123);
     block();
    
   }
@@ -931,24 +977,26 @@ RccIRParser::TypeSpecOrVoidContext* RccIRParser::typeSpecOrVoid() {
     exitRule();
   });
   try {
-    setState(124);
+    setState(127);
     _errHandler->sync(this);
     switch (_input->LA(1)) {
       case RccIRParser::INT_KW:
       case RccIRParser::CHAR_KW:
       case RccIRParser::SHORT_KW:
       case RccIRParser::LONG_KW:
+      case RccIRParser::FLOAT_KW:
+      case RccIRParser::DOUBLE_KW:
       case RccIRParser::UNSIGNED_KW:
       case RccIRParser::STRUCT_KW: {
         enterOuterAlt(_localctx, 1);
-        setState(122);
+        setState(125);
         typeSpec();
         break;
       }
 
       case RccIRParser::VOID_KW: {
         enterOuterAlt(_localctx, 2);
-        setState(123);
+        setState(126);
         match(RccIRParser::VOID_KW);
         break;
       }
@@ -1016,17 +1064,17 @@ RccIRParser::ParamListContext* RccIRParser::paramList() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(126);
+    setState(129);
     param();
-    setState(131);
+    setState(134);
     _errHandler->sync(this);
     _la = _input->LA(1);
     while (_la == RccIRParser::COMMA) {
-      setState(127);
+      setState(130);
       match(RccIRParser::COMMA);
-      setState(128);
+      setState(131);
       param();
-      setState(133);
+      setState(136);
       _errHandler->sync(this);
       _la = _input->LA(1);
     }
@@ -1081,9 +1129,9 @@ RccIRParser::ParamContext* RccIRParser::param() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(134);
+    setState(137);
     typeSpec();
-    setState(135);
+    setState(138);
     ref();
    
   }
@@ -1145,20 +1193,20 @@ RccIRParser::BlockContext* RccIRParser::block() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(137);
+    setState(140);
     match(RccIRParser::LBRACE);
-    setState(141);
+    setState(144);
     _errHandler->sync(this);
     _la = _input->LA(1);
-    while (((((_la - 10) & ~ 0x3fULL) == 0) &&
-      ((1ULL << (_la - 10)) & 49539595933665019) != 0)) {
-      setState(138);
+    while (((((_la - 12) & ~ 0x3fULL) == 0) &&
+      ((1ULL << (_la - 12)) & 103582791462110971) != 0)) {
+      setState(141);
       stmt();
-      setState(143);
+      setState(146);
       _errHandler->sync(this);
       _la = _input->LA(1);
     }
-    setState(144);
+    setState(147);
     match(RccIRParser::RBRACE);
    
   }
@@ -1503,13 +1551,13 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     exitRule();
   });
   try {
-    setState(204);
+    setState(207);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 25, _ctx)) {
     case 1: {
       _localctx = _tracker.createInstance<RccIRParser::BlockStmtContext>(_localctx);
       enterOuterAlt(_localctx, 1);
-      setState(146);
+      setState(149);
       block();
       break;
     }
@@ -1517,24 +1565,24 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 2: {
       _localctx = _tracker.createInstance<RccIRParser::IfStmtContext>(_localctx);
       enterOuterAlt(_localctx, 2);
-      setState(147);
-      match(RccIRParser::IF_KW);
-      setState(148);
-      match(RccIRParser::LPAREN);
-      setState(149);
-      expr();
       setState(150);
-      match(RccIRParser::RPAREN);
+      match(RccIRParser::IF_KW);
       setState(151);
-      stmt();
+      match(RccIRParser::LPAREN);
+      setState(152);
+      expr();
+      setState(153);
+      match(RccIRParser::RPAREN);
       setState(154);
+      stmt();
+      setState(157);
       _errHandler->sync(this);
 
       switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 19, _ctx)) {
       case 1: {
-        setState(152);
+        setState(155);
         match(RccIRParser::ELSE_KW);
-        setState(153);
+        setState(156);
         stmt();
         break;
       }
@@ -1548,24 +1596,24 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 3: {
       _localctx = _tracker.createInstance<RccIRParser::WhileStmtContext>(_localctx);
       enterOuterAlt(_localctx, 3);
-      setState(156);
-      match(RccIRParser::WHILE_KW);
-      setState(157);
-      match(RccIRParser::LPAREN);
-      setState(158);
-      expr();
       setState(159);
-      match(RccIRParser::RPAREN);
+      match(RccIRParser::WHILE_KW);
       setState(160);
-      stmt();
+      match(RccIRParser::LPAREN);
+      setState(161);
+      expr();
+      setState(162);
+      match(RccIRParser::RPAREN);
       setState(163);
+      stmt();
+      setState(166);
       _errHandler->sync(this);
 
       switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 20, _ctx)) {
       case 1: {
-        setState(161);
+        setState(164);
         match(RccIRParser::POST_KW);
-        setState(162);
+        setState(165);
         stmt();
         break;
       }
@@ -1579,18 +1627,18 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 4: {
       _localctx = _tracker.createInstance<RccIRParser::ReturnStmtContext>(_localctx);
       enterOuterAlt(_localctx, 4);
-      setState(165);
+      setState(168);
       match(RccIRParser::RETURN_KW);
-      setState(167);
+      setState(170);
       _errHandler->sync(this);
 
       _la = _input->LA(1);
-      if ((((_la & ~ 0x3fULL) == 0) &&
-        ((1ULL << _la) & -4611685985139818496) != 0)) {
-        setState(166);
+      if (((((_la - 21) & ~ 0x3fULL) == 0) &&
+        ((1ULL << (_la - 21)) & 61572651218947) != 0)) {
+        setState(169);
         expr();
       }
-      setState(169);
+      setState(172);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1598,9 +1646,9 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 5: {
       _localctx = _tracker.createInstance<RccIRParser::BreakStmtContext>(_localctx);
       enterOuterAlt(_localctx, 5);
-      setState(170);
+      setState(173);
       match(RccIRParser::BREAK_KW);
-      setState(171);
+      setState(174);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1608,9 +1656,9 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 6: {
       _localctx = _tracker.createInstance<RccIRParser::ContinueStmtContext>(_localctx);
       enterOuterAlt(_localctx, 6);
-      setState(172);
+      setState(175);
       match(RccIRParser::CONTINUE_KW);
-      setState(173);
+      setState(176);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1618,30 +1666,30 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 7: {
       _localctx = _tracker.createInstance<RccIRParser::LocalDeclStmtContext>(_localctx);
       enterOuterAlt(_localctx, 7);
-      setState(174);
+      setState(177);
       match(RccIRParser::LOCAL_KW);
-      setState(175);
+      setState(178);
       typeSpec();
-      setState(176);
+      setState(179);
       ref();
-      setState(188);
+      setState(191);
       _errHandler->sync(this);
       switch (_input->LA(1)) {
         case RccIRParser::LBRACK: {
-          setState(177);
+          setState(180);
           match(RccIRParser::LBRACK);
-          setState(178);
+          setState(181);
           match(RccIRParser::NUMBER);
-          setState(179);
-          match(RccIRParser::RBRACK);
           setState(182);
+          match(RccIRParser::RBRACK);
+          setState(185);
           _errHandler->sync(this);
 
           _la = _input->LA(1);
           if (_la == RccIRParser::ASSIGN) {
-            setState(180);
+            setState(183);
             match(RccIRParser::ASSIGN);
-            setState(181);
+            setState(184);
             initList();
           }
           break;
@@ -1649,14 +1697,14 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
 
         case RccIRParser::SEMI:
         case RccIRParser::ASSIGN: {
-          setState(186);
+          setState(189);
           _errHandler->sync(this);
 
           _la = _input->LA(1);
           if (_la == RccIRParser::ASSIGN) {
-            setState(184);
+            setState(187);
             match(RccIRParser::ASSIGN);
-            setState(185);
+            setState(188);
             expr();
           }
           break;
@@ -1665,7 +1713,7 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
       default:
         throw NoViableAltException(this);
       }
-      setState(190);
+      setState(193);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1673,11 +1721,11 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 8: {
       _localctx = _tracker.createInstance<RccIRParser::AsmStmtContext>(_localctx);
       enterOuterAlt(_localctx, 8);
-      setState(192);
+      setState(195);
       match(RccIRParser::ASM_BEGIN);
-      setState(193);
+      setState(196);
       match(RccIRParser::ASM_TEXT);
-      setState(194);
+      setState(197);
       match(RccIRParser::ASM_END);
       break;
     }
@@ -1685,7 +1733,7 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 9: {
       _localctx = _tracker.createInstance<RccIRParser::EmptyStmtContext>(_localctx);
       enterOuterAlt(_localctx, 9);
-      setState(195);
+      setState(198);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1693,9 +1741,9 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 10: {
       _localctx = _tracker.createInstance<RccIRParser::LabelStmtContext>(_localctx);
       enterOuterAlt(_localctx, 10);
-      setState(196);
+      setState(199);
       match(RccIRParser::IDENT);
-      setState(197);
+      setState(200);
       match(RccIRParser::COLON);
       break;
     }
@@ -1703,11 +1751,11 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 11: {
       _localctx = _tracker.createInstance<RccIRParser::GotoStmtContext>(_localctx);
       enterOuterAlt(_localctx, 11);
-      setState(198);
+      setState(201);
       match(RccIRParser::GOTO_KW);
-      setState(199);
+      setState(202);
       match(RccIRParser::IDENT);
-      setState(200);
+      setState(203);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1715,9 +1763,9 @@ RccIRParser::StmtContext* RccIRParser::stmt() {
     case 12: {
       _localctx = _tracker.createInstance<RccIRParser::ExprStmtContext>(_localctx);
       enterOuterAlt(_localctx, 12);
-      setState(201);
+      setState(204);
       expr();
-      setState(202);
+      setState(205);
       match(RccIRParser::SEMI);
       break;
     }
@@ -1780,11 +1828,11 @@ RccIRParser::RefContext* RccIRParser::ref() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(206);
+    setState(209);
     match(RccIRParser::IDENT);
-    setState(207);
+    setState(210);
     match(RccIRParser::HASH);
-    setState(208);
+    setState(211);
     match(RccIRParser::NUMBER);
    
   }
@@ -1870,10 +1918,10 @@ RccIRParser::CompoundOpContext* RccIRParser::compoundOp() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(210);
+    setState(213);
     _la = _input->LA(1);
     if (!((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 1151795604700004352) != 0))) {
+      ((1ULL << _la) & 4607182418800017408) != 0))) {
     _errHandler->recoverInline(this);
     }
     else {
@@ -2081,6 +2129,21 @@ RccIRParser::CallPtrExprContext::CallPtrExprContext(ExprContext *ctx) { copyFrom
 std::any RccIRParser::CallPtrExprContext::accept(tree::ParseTreeVisitor *visitor) {
   if (auto parserVisitor = dynamic_cast<RccIRParserVisitor*>(visitor))
     return parserVisitor->visitCallPtrExpr(this);
+  else
+    return visitor->visitChildren(this);
+}
+//----------------- FloatLitExprContext ------------------------------------------------------------------
+
+tree::TerminalNode* RccIRParser::FloatLitExprContext::FLOAT_NUMBER() {
+  return getToken(RccIRParser::FLOAT_NUMBER, 0);
+}
+
+RccIRParser::FloatLitExprContext::FloatLitExprContext(ExprContext *ctx) { copyFrom(ctx); }
+
+
+std::any RccIRParser::FloatLitExprContext::accept(tree::ParseTreeVisitor *visitor) {
+  if (auto parserVisitor = dynamic_cast<RccIRParserVisitor*>(visitor))
+    return parserVisitor->visitFloatLitExpr(this);
   else
     return visitor->visitChildren(this);
 }
@@ -2368,267 +2431,263 @@ RccIRParser::ExprContext* RccIRParser::expr() {
     exitRule();
   });
   try {
-    setState(303);
+    setState(307);
     _errHandler->sync(this);
     switch (getInterpreter<atn::ParserATNSimulator>()->adaptivePredict(_input, 32, _ctx)) {
     case 1: {
       _localctx = _tracker.createInstance<RccIRParser::IntLitExprContext>(_localctx);
       enterOuterAlt(_localctx, 1);
-      setState(212);
+      setState(215);
       match(RccIRParser::NUMBER);
       break;
     }
 
     case 2: {
-      _localctx = _tracker.createInstance<RccIRParser::CompoundIndexExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::FloatLitExprContext>(_localctx);
       enterOuterAlt(_localctx, 2);
-      setState(214);
-      _errHandler->sync(this);
-
-      _la = _input->LA(1);
-      if (_la == RccIRParser::OLDVAL_KW) {
-        setState(213);
-        match(RccIRParser::OLDVAL_KW);
-      }
       setState(216);
-      ref();
-      setState(217);
-      match(RccIRParser::LBRACK);
-      setState(218);
-      expr();
-      setState(219);
-      match(RccIRParser::RBRACK);
-      setState(220);
-      compoundOp();
-      setState(221);
-      expr();
+      match(RccIRParser::FLOAT_NUMBER);
       break;
     }
 
     case 3: {
-      _localctx = _tracker.createInstance<RccIRParser::CompoundAssignExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::CompoundIndexExprContext>(_localctx);
       enterOuterAlt(_localctx, 3);
-      setState(224);
+      setState(218);
       _errHandler->sync(this);
 
       _la = _input->LA(1);
       if (_la == RccIRParser::OLDVAL_KW) {
-        setState(223);
+        setState(217);
         match(RccIRParser::OLDVAL_KW);
       }
-      setState(226);
+      setState(220);
       ref();
-      setState(227);
+      setState(221);
+      match(RccIRParser::LBRACK);
+      setState(222);
+      expr();
+      setState(223);
+      match(RccIRParser::RBRACK);
+      setState(224);
       compoundOp();
-      setState(228);
+      setState(225);
       expr();
       break;
     }
 
     case 4: {
-      _localctx = _tracker.createInstance<RccIRParser::CompoundDerefExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::CompoundAssignExprContext>(_localctx);
       enterOuterAlt(_localctx, 4);
-      setState(231);
+      setState(228);
       _errHandler->sync(this);
 
       _la = _input->LA(1);
       if (_la == RccIRParser::OLDVAL_KW) {
-        setState(230);
+        setState(227);
         match(RccIRParser::OLDVAL_KW);
       }
-      setState(233);
-      match(RccIRParser::STAR);
-      setState(234);
-      match(RccIRParser::LPAREN);
-      setState(235);
-      expr();
-      setState(236);
-      match(RccIRParser::RPAREN);
-      setState(237);
+      setState(230);
+      ref();
+      setState(231);
       compoundOp();
-      setState(238);
+      setState(232);
       expr();
       break;
     }
 
     case 5: {
-      _localctx = _tracker.createInstance<RccIRParser::IndexExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::CompoundDerefExprContext>(_localctx);
       enterOuterAlt(_localctx, 5);
-      setState(240);
-      ref();
-      setState(241);
-      match(RccIRParser::LBRACK);
-      setState(242);
-      expr();
-      setState(243);
-      match(RccIRParser::RBRACK);
-      setState(246);
+      setState(235);
       _errHandler->sync(this);
 
       _la = _input->LA(1);
-      if (_la == RccIRParser::ASSIGN) {
-        setState(244);
-        match(RccIRParser::ASSIGN);
-        setState(245);
-        expr();
+      if (_la == RccIRParser::OLDVAL_KW) {
+        setState(234);
+        match(RccIRParser::OLDVAL_KW);
       }
+      setState(237);
+      match(RccIRParser::STAR);
+      setState(238);
+      match(RccIRParser::LPAREN);
+      setState(239);
+      expr();
+      setState(240);
+      match(RccIRParser::RPAREN);
+      setState(241);
+      compoundOp();
+      setState(242);
+      expr();
       break;
     }
 
     case 6: {
-      _localctx = _tracker.createInstance<RccIRParser::AssignExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::IndexExprContext>(_localctx);
       enterOuterAlt(_localctx, 6);
-      setState(248);
+      setState(244);
       ref();
-      setState(249);
-      match(RccIRParser::ASSIGN);
+      setState(245);
+      match(RccIRParser::LBRACK);
+      setState(246);
+      expr();
+      setState(247);
+      match(RccIRParser::RBRACK);
       setState(250);
-      expr();
-      break;
-    }
-
-    case 7: {
-      _localctx = _tracker.createInstance<RccIRParser::StarExprContext>(_localctx);
-      enterOuterAlt(_localctx, 7);
-      setState(252);
-      match(RccIRParser::STAR);
-      setState(253);
-      match(RccIRParser::LPAREN);
-      setState(254);
-      expr();
-      setState(255);
-      match(RccIRParser::RPAREN);
-      setState(258);
       _errHandler->sync(this);
 
       _la = _input->LA(1);
       if (_la == RccIRParser::ASSIGN) {
-        setState(256);
+        setState(248);
         match(RccIRParser::ASSIGN);
-        setState(257);
+        setState(249);
         expr();
       }
       break;
     }
 
+    case 7: {
+      _localctx = _tracker.createInstance<RccIRParser::AssignExprContext>(_localctx);
+      enterOuterAlt(_localctx, 7);
+      setState(252);
+      ref();
+      setState(253);
+      match(RccIRParser::ASSIGN);
+      setState(254);
+      expr();
+      break;
+    }
+
     case 8: {
-      _localctx = _tracker.createInstance<RccIRParser::UnaryExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::StarExprContext>(_localctx);
       enterOuterAlt(_localctx, 8);
-      setState(260);
+      setState(256);
+      match(RccIRParser::STAR);
+      setState(257);
+      match(RccIRParser::LPAREN);
+      setState(258);
+      expr();
+      setState(259);
+      match(RccIRParser::RPAREN);
+      setState(262);
+      _errHandler->sync(this);
+
+      _la = _input->LA(1);
+      if (_la == RccIRParser::ASSIGN) {
+        setState(260);
+        match(RccIRParser::ASSIGN);
+        setState(261);
+        expr();
+      }
+      break;
+    }
+
+    case 9: {
+      _localctx = _tracker.createInstance<RccIRParser::UnaryExprContext>(_localctx);
+      enterOuterAlt(_localctx, 9);
+      setState(264);
       _la = _input->LA(1);
       if (!((((_la & ~ 0x3fULL) == 0) &&
-        ((1ULL << _la) & 32212254720) != 0))) {
+        ((1ULL << _la) & 128849018880) != 0))) {
       _errHandler->recoverInline(this);
       }
       else {
         _errHandler->reportMatch(this);
         consume();
       }
-      setState(261);
-      match(RccIRParser::LPAREN);
-      setState(262);
-      expr();
-      setState(263);
-      match(RccIRParser::RPAREN);
-      break;
-    }
-
-    case 9: {
-      _localctx = _tracker.createInstance<RccIRParser::BinaryExprContext>(_localctx);
-      enterOuterAlt(_localctx, 9);
       setState(265);
       match(RccIRParser::LPAREN);
       setState(266);
       expr();
       setState(267);
-      binOp();
-      setState(268);
-      expr();
-      setState(269);
       match(RccIRParser::RPAREN);
       break;
     }
 
     case 10: {
-      _localctx = _tracker.createInstance<RccIRParser::TernaryExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::BinaryExprContext>(_localctx);
       enterOuterAlt(_localctx, 10);
-      setState(271);
+      setState(269);
       match(RccIRParser::LPAREN);
+      setState(270);
+      expr();
+      setState(271);
+      binOp();
       setState(272);
       expr();
       setState(273);
-      match(RccIRParser::QUESTION);
-      setState(274);
-      expr();
-      setState(275);
-      match(RccIRParser::COLON);
-      setState(276);
-      expr();
-      setState(277);
       match(RccIRParser::RPAREN);
       break;
     }
 
     case 11: {
-      _localctx = _tracker.createInstance<RccIRParser::ConvertExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::TernaryExprContext>(_localctx);
       enterOuterAlt(_localctx, 11);
-      setState(279);
+      setState(275);
       match(RccIRParser::LPAREN);
-      setState(280);
-      typeSpec();
-      setState(281);
-      match(RccIRParser::RPAREN);
-      setState(282);
-      match(RccIRParser::LPAREN);
-      setState(283);
+      setState(276);
       expr();
-      setState(284);
+      setState(277);
+      match(RccIRParser::QUESTION);
+      setState(278);
+      expr();
+      setState(279);
+      match(RccIRParser::COLON);
+      setState(280);
+      expr();
+      setState(281);
       match(RccIRParser::RPAREN);
       break;
     }
 
     case 12: {
-      _localctx = _tracker.createInstance<RccIRParser::CallExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::ConvertExprContext>(_localctx);
       enterOuterAlt(_localctx, 12);
-      setState(286);
-      ref();
-      setState(287);
+      setState(283);
       match(RccIRParser::LPAREN);
-      setState(289);
-      _errHandler->sync(this);
-
-      _la = _input->LA(1);
-      if ((((_la & ~ 0x3fULL) == 0) &&
-        ((1ULL << _la) & -4611685985139818496) != 0)) {
-        setState(288);
-        argList();
-      }
-      setState(291);
+      setState(284);
+      typeSpec();
+      setState(285);
+      match(RccIRParser::RPAREN);
+      setState(286);
+      match(RccIRParser::LPAREN);
+      setState(287);
+      expr();
+      setState(288);
       match(RccIRParser::RPAREN);
       break;
     }
 
     case 13: {
-      _localctx = _tracker.createInstance<RccIRParser::CallPtrExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::CallExprContext>(_localctx);
       enterOuterAlt(_localctx, 13);
+      setState(290);
+      ref();
+      setState(291);
+      match(RccIRParser::LPAREN);
       setState(293);
-      match(RccIRParser::LPAREN);
-      setState(294);
-      expr();
+      _errHandler->sync(this);
+
+      _la = _input->LA(1);
+      if (((((_la - 21) & ~ 0x3fULL) == 0) &&
+        ((1ULL << (_la - 21)) & 61572651218947) != 0)) {
+        setState(292);
+        argList();
+      }
       setState(295);
-      match(RccIRParser::RPAREN);
-      setState(296);
-      match(RccIRParser::LPAREN);
-      setState(297);
       match(RccIRParser::RPAREN);
       break;
     }
 
     case 14: {
-      _localctx = _tracker.createInstance<RccIRParser::IntrinsicExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::CallPtrExprContext>(_localctx);
       enterOuterAlt(_localctx, 14);
+      setState(297);
+      match(RccIRParser::LPAREN);
+      setState(298);
+      expr();
       setState(299);
-      match(RccIRParser::IDENT);
+      match(RccIRParser::RPAREN);
       setState(300);
       match(RccIRParser::LPAREN);
       setState(301);
@@ -2637,9 +2696,21 @@ RccIRParser::ExprContext* RccIRParser::expr() {
     }
 
     case 15: {
-      _localctx = _tracker.createInstance<RccIRParser::VarExprContext>(_localctx);
+      _localctx = _tracker.createInstance<RccIRParser::IntrinsicExprContext>(_localctx);
       enterOuterAlt(_localctx, 15);
-      setState(302);
+      setState(303);
+      match(RccIRParser::IDENT);
+      setState(304);
+      match(RccIRParser::LPAREN);
+      setState(305);
+      match(RccIRParser::RPAREN);
+      break;
+    }
+
+    case 16: {
+      _localctx = _tracker.createInstance<RccIRParser::VarExprContext>(_localctx);
+      enterOuterAlt(_localctx, 16);
+      setState(306);
       ref();
       break;
     }
@@ -2707,17 +2778,17 @@ RccIRParser::ArgListContext* RccIRParser::argList() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(305);
+    setState(309);
     expr();
-    setState(310);
+    setState(314);
     _errHandler->sync(this);
     _la = _input->LA(1);
     while (_la == RccIRParser::COMMA) {
-      setState(306);
+      setState(310);
       match(RccIRParser::COMMA);
-      setState(307);
+      setState(311);
       expr();
-      setState(312);
+      setState(316);
       _errHandler->sync(this);
       _la = _input->LA(1);
     }
@@ -2837,10 +2908,10 @@ RccIRParser::BinOpContext* RccIRParser::binOp() {
   });
   try {
     enterOuterAlt(_localctx, 1);
-    setState(313);
+    setState(317);
     _la = _input->LA(1);
     if (!((((_la & ~ 0x3fULL) == 0) &&
-      ((1ULL << _la) & 1125873063297024) != 0))) {
+      ((1ULL << _la) & 4503492253188096) != 0))) {
     _errHandler->recoverInline(this);
     }
     else {

@@ -24,14 +24,30 @@ std::string toLower(std::string s) {
     return s;
 }
 
-// The opcode (bits 4:0) for every mnemonic this dialect accepts, before any `.r` suffix is
-// considered - see docs/SPEC.md section 2's own table.
+// The opcode for every mnemonic this dialect accepts - see docs/SPEC.md section 2's own table.
 const std::unordered_map<std::string, uint8_t> &opcodes() {
     static const std::unordered_map<std::string, uint8_t> table = {
-        {"ret", 0x00}, {"lit", 0x01}, {"ld", 0x02}, {"st", 0x03}, {"dei", 0x04}, {"deo", 0x05},
-        {"jmp", 0x06}, {"jcn", 0x07}, {"cal", 0x08}, {"add", 0x09}, {"sub", 0x0A}, {"mul", 0x0B},
-        {"div", 0x0C}, {"and", 0x0D}, {"ora", 0x0E}, {"xor", 0x0F}, {"equ", 0x10}, {"lth", 0x11},
-        {"push", 0x13}, {"pop", 0x14}, {"lds", 0x15}, {"sts", 0x16},
+        {"ret", 0x00}, {"ldi", 0x01}, {"mov", 0x02}, {"ld", 0x03}, {"st", 0x04}, {"dei", 0x05},
+        {"deo", 0x06}, {"jmp", 0x07}, {"jcn", 0x08}, {"cal", 0x09}, {"add", 0x0A}, {"sub", 0x0B},
+        {"mul", 0x0C}, {"div", 0x0D}, {"and", 0x0E}, {"ora", 0x0F}, {"xor", 0x10}, {"ceq", 0x11},
+        {"clt", 0x12}, {"nop", 0x13},
+    };
+    return table;
+}
+
+// How many plain register operands each mnemonic takes, and whether a trailing 4-byte
+// immediate (LDI only) follows them - docs/SPEC.md section 2's own per-opcode shape.
+struct OpShape {
+    int regCount;
+    bool hasImmediate;
+};
+const std::unordered_map<std::string, OpShape> &opShapes() {
+    static const std::unordered_map<std::string, OpShape> table = {
+        {"ret", {0, false}}, {"ldi", {1, true}}, {"mov", {2, false}}, {"ld", {2, false}},
+        {"st", {2, false}}, {"dei", {2, false}}, {"deo", {2, false}}, {"jmp", {1, false}},
+        {"jcn", {2, false}}, {"cal", {1, false}}, {"add", {3, false}}, {"sub", {3, false}},
+        {"mul", {3, false}}, {"div", {3, false}}, {"and", {3, false}}, {"ora", {3, false}},
+        {"xor", {3, false}}, {"ceq", {3, false}}, {"clt", {3, false}}, {"nop", {0, false}},
     };
     return table;
 }
@@ -49,9 +65,9 @@ struct Line {
     std::vector<std::string> labels;
     enum Kind { None, Org, Byte, Short, Word, Zero, Instr } kind = None;
     std::vector<std::vector<Syllable>> exprList;  // Org (1) / Byte|Short|Word (N) / Zero (1)
-    std::string mnemonic;                          // Instr - already lowercased, `.r` stripped
-    bool relFlag = false;                          // Instr - `.r` suffix was present
-    std::vector<std::vector<Syllable>> operands;    // Instr - "lit" only, exactly one
+    std::string mnemonic;                          // Instr - already lowercased
+    std::vector<uint8_t> regOperands;               // Instr - resolved register numbers, in order
+    std::vector<Syllable> immOperand;               // Instr - "ldi" only, its trailing imm32
 };
 
 class ThrowingErrorListener : public antlr4::BaseErrorListener {
@@ -84,15 +100,20 @@ std::vector<Syllable> operandExpr(RccAsmParser::OperandContext *ctx, const std::
     return exprToSyllables(ctx->expr());
 }
 
-// Splits a trailing ".r" (case-insensitive) off an already-lowercased mnemonic, e.g.
-// "jmp.r" -> ("jmp", true). The shared grammar's IDENT already accepts '.' mid-token, so the
-// suffix arrives as part of one token, not a separate one.
-std::pair<std::string, bool> splitRelSuffix(const std::string &mnemonic) {
-    const std::string suffix = ".r";
-    if (mnemonic.size() > suffix.size() && mnemonic.compare(mnemonic.size() - suffix.size(), suffix.size(), suffix) == 0) {
-        return {mnemonic.substr(0, mnemonic.size() - suffix.size()), true};
+// A register operand must spell exactly `r0`..`r7` (case-insensitive) as one bare, unsigned
+// identifier syllable - never resolved against the label table the way LDI's immediate is, so
+// this is checked and converted right here at parse time, not deferred to the two-pass
+// label-resolution pass below.
+uint8_t parseRegisterOperand(RccAsmParser::OperandContext *ctx, const std::string &mnemonic) {
+    std::vector<Syllable> syls = operandExpr(ctx, mnemonic);
+    if (syls.size() != 1 || syls[0].sign != 0 || syls[0].kind != SylKind::Symbol) {
+        fail("'" + mnemonic + "': expected a plain register operand (r0-r7)");
     }
-    return {mnemonic, false};
+    std::string text = toLower(syls[0].text);
+    if (text.size() == 2 && text[0] == 'r' && text[1] >= '0' && text[1] <= '7') {
+        return static_cast<uint8_t>(text[1] - '0');
+    }
+    fail("'" + mnemonic + "': '" + syls[0].text + "' isn't a valid register (expected r0-r7)");
 }
 
 Line buildLine(RccAsmParser::LineContext *ctx) {
@@ -145,17 +166,22 @@ Line buildLine(RccAsmParser::LineContext *ctx) {
         return line;
     }
 
-    auto [mnemonic, relFlag] = splitRelSuffix(word);
-    if (!opcodes().count(mnemonic)) fail("unsupported instruction '" + instr->mnemonic->getText() + "'");
+    auto shapeIt = opShapes().find(word);
+    if (shapeIt == opShapes().end()) fail("unsupported instruction '" + instr->mnemonic->getText() + "'");
+    const OpShape &shape = shapeIt->second;
+    size_t wantOperands = static_cast<size_t>(shape.regCount) + (shape.hasImmediate ? 1 : 0);
+    if (instr->operand().size() != wantOperands) {
+        fail("'" + word + "' needs exactly " + std::to_string(wantOperands) + " operand(s), got " +
+             std::to_string(instr->operand().size()));
+    }
 
     line.kind = Line::Instr;
-    line.mnemonic = mnemonic;
-    line.relFlag = relFlag;
-    for (auto *op : instr->operand()) line.operands.push_back(operandExpr(op, mnemonic));
-    if (mnemonic == "lit") {
-        if (line.operands.size() != 1) fail("'lit" + std::string(relFlag ? ".r" : "") + "' needs exactly one operand");
-    } else if (!line.operands.empty()) {
-        fail("'" + mnemonic + (relFlag ? ".r" : "") + "' takes no operand - every other operand lives on the stack");
+    line.mnemonic = word;
+    for (int i = 0; i < shape.regCount; i++) {
+        line.regOperands.push_back(parseRegisterOperand(instr->operand(static_cast<size_t>(i)), word));
+    }
+    if (shape.hasImmediate) {
+        line.immOperand = operandExpr(instr->operand(static_cast<size_t>(shape.regCount)), word);
     }
     return line;
 }
@@ -292,7 +318,7 @@ class Assembler {
     }
 
     // `n` bytes, big-endian. A symbolic/external value is only meaningful in a full 4-byte
-    // field (every address this backend ever stores - `.word`, or `LIT`'s own immediate - is
+    // field (every address this backend ever stores - `.word`, or `LDI`'s own immediate - is
     // 4 bytes; see VexCodegen.h), so stage 2 rejects one anywhere narrower instead of silently
     // truncating a relocation that would only ever patch a 4-byte site.
     void emitN(const std::vector<Syllable> &e, int n) {
@@ -301,7 +327,7 @@ class Assembler {
         uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
         if (stage_ == 2) {
             if (n < 4 && (needsBaseShift || !externalName.empty())) {
-                fail("a label address needs a 4-byte field (.word or 'lit'), not " + std::to_string(n) +
+                fail("a label address needs a 4-byte field (.word or 'ldi'), not " + std::to_string(n) +
                      " byte(s)");
             }
             if (n < 4) {
@@ -315,15 +341,14 @@ class Assembler {
         for (int i = n - 1; i >= 0; i--) emit8(static_cast<uint8_t>((v >> (8 * i)) & 0xFF));
     }
 
-    // The 4-byte big-endian `LIT` immediate - the one relocatable field this dialect's own
+    // The 4-byte big-endian `LDI` immediate - the one relocatable field this dialect's own
     // instructions (as opposed to its data directives) ever have.
-    void emitLit(const std::vector<Syllable> &e) { emitN(e, 4); }
+    void emitImmediate(const std::vector<Syllable> &e) { emitN(e, 4); }
 
     void encodeInstr(const Line &line) {
-        uint8_t opcode = opcodes().at(line.mnemonic);
-        uint8_t r = line.relFlag ? 0x20 : 0x00;
-        emit8(static_cast<uint8_t>(r | opcode));
-        if (line.mnemonic == "lit") emitLit(line.operands.at(0));
+        emit8(opcodes().at(line.mnemonic));
+        for (uint8_t reg : line.regOperands) emit8(reg);
+        if (line.mnemonic == "ldi") emitImmediate(line.immOperand);
     }
 
     std::vector<uint8_t> bytes_;

@@ -425,6 +425,8 @@ void MCS51Codegen::requireNarrow(const ir::Expr &e) const {
 void MCS51Codegen::genExpr(const ir::Expr &e) {
     requireNarrow(e);
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
             code_ << "    movai " << (v16 & 0xFF) << "\n    movd ac\n";

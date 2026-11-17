@@ -9,10 +9,10 @@ int vex_scratch;
 void device_putc(unsigned char c) {
     vex_scratch = c;
     asm {
-        lit G_vex_scratch
-        ld
-        lit 0x18
-        deo
+        ldi r0, G_vex_scratch
+        ld r0, r0
+        ldi r1, 0x18
+        deo r1, r0
     }
 }
 

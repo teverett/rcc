@@ -211,6 +211,8 @@ void TMS9900Codegen::genStmt(const ir::Stmt &s) {
 
 void TMS9900Codegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) failWide(e.line);
             code_ << "    li r0," << static_cast<int16_t>(e.intValue) << "\n";

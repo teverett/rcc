@@ -192,6 +192,11 @@ void propagateExpr(ir::ExprPtr &e, KnownMap &known, const std::unordered_set<ir:
     // ExprKind::Assign/CompoundAssign in IR.h).
     if (e->kind == ir::ExprKind::Assign && !e->lhs && e->slot && isCandidateSlot(e->slot) &&
         !addressTaken.count(e->slot)) {
+        // A FloatLit rhs falls to the erase branch below (this pass only
+        // tracks int-valued constants, deliberately - KnownMap is long-
+        // valued, not a Float/Double pair) - never wrong, just not
+        // optimized: the slot simply stops looking "known" rather than
+        // getting an incorrectly-typed int value recorded for it.
         if (e->rhs && e->rhs->kind == ir::ExprKind::IntLit) {
             known[e->slot] = e->rhs->intValue;
         } else {

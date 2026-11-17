@@ -3,6 +3,37 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## `--optimize` on any target can delete a `switch` case's own label when an earlier case ends in `return`, miscompiling or hard-failing to assemble
+
+Affects `src/optimizers/dead_code_elimination/DeadCodeElimination.cpp`'s
+`removeUnreachable()` (the `StmtKind::Block` case, around line 78): it
+truncates a block's statement list right after the first `Return` it
+finds, with no check for whether any of the truncated trailing statements
+is a `StmtKind::Label` - a valid jump target, since `IRBuilder.cpp`'s own
+`buildSwitch()` (see its own header comment) lowers `switch` into a flat
+sequence of comparisons followed by `L1: B1  L2: B2  Ldefault: B3  Lend:`
+all in one block, dispatched into via `goto`, not via nested `if`/`else`.
+A `switch` whose first case's body ends in `return` (or `break`, also a
+`Goto`) is exactly this shape: `removeUnreachable()` sees the `Return`,
+then deletes every following case's `Label`/body/the final `Lend:` too,
+even though they're the real targets of the comparison chain's own
+`goto`s above it.
+
+Discovered on `tests/enum_basic.c` (a `switch` whose first case is `return
+1;`) while rewriting the `vex` backend for its new register-machine ISA
+(unrelated) - confirmed cross-target, not vex-specific: both `vex`
+(`VexAssembler`: `undefined symbol 'Jn'` - the now-undefined label a
+dropped `Goto`'s target used to resolve to) and `i386` (same silently-
+dropped labels; a real link/assemble step, not just `--format=asm`,
+is needed to notice) reproduce it with `--optimize`. Likely every backend
+is affected identically, since the pruning happens once, backend-
+independent, on the shared IR.
+
+Not yet fixed - `removeUnreachable()` needs to stop truncating as soon as
+any remaining statement (recursively, including inside a nested `Block`)
+contains a `Label`, not just blindly cut everything after the first
+`Return` in the immediate block.
+
 ## `--target=z80-coleco` programs that multiply/divide/modulo/shift-by-variable, or deref through a pointer that spills, write through compiler-internal scratch cells placed in the same ROM-mapped cartridge image as code
 
 Affects `src/codegen/z80/Z80Codegen.cpp`'s `declareTemp()`-based scratch

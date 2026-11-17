@@ -22,12 +22,20 @@ struct Function;
 
 // Array initializer element: a literal value, or a symbol's address (the
 // dispatch-table idiom); when isSymbol, exactly one of slot/func is set,
-// matching whether the name resolved to a variable or a function.
+// matching whether the name resolved to a variable or a function. isFloat
+// means this element belongs to a float/double array and floatValue (not
+// value) holds it - never both at once.
 struct ArrayInitElem {
     bool isSymbol = false;
     long value = 0;
     Slot *slot = nullptr;
     Function *func = nullptr;
+    // Appended, not inserted earlier, so existing positional aggregate-init
+    // call sites (e.g. `ArrayInitElem{false, 'h', nullptr, nullptr}` in a
+    // test) keep compiling - same reasoning as TypeWidths's own
+    // floatUnits/doubleUnits placement in Type.h.
+    bool isFloat = false;
+    double floatValue = 0;
 };
 
 // One storage location for a scalar, or arraySize of them. `sourceName` is
@@ -40,6 +48,7 @@ struct Slot {
     int arraySize = 0;                 // 0 = scalar
     bool hasInit = false;               // scalar: literal initializer given
     long initValue = 0;                  // scalar initializer value
+    double floatInitValue = 0;           // scalar initializer value when type.base is Float/Double
     std::vector<ArrayInitElem> arrayInit;  // array initializer, global or local - see ArrayInitElem
 
     // '@' addr from source; Global only. Pins storage to an exact address,
@@ -176,6 +185,7 @@ struct Function {
 
 enum class ExprKind {
     IntLit,
+    FloatLit,     // floatValue, type.base is Float or Double
     Var,          // scalar read, or slot used bare as &-operand's target
     Index,        // slot[lhs]
     Assign,       // slot = rhs, or slot[lhs] = rhs if lhs set
@@ -213,7 +223,8 @@ struct Expr {
     ExprKind kind;
     int line = 0;
 
-    long intValue = 0;  // IntLit
+    long intValue = 0;      // IntLit
+    double floatValue = 0;  // FloatLit
     Type type;             // this expression's own resolved type (every kind has one)
     bool yieldOld = false;  // CompoundAssign/CompoundDerefAssign: true only for postfix '++'/'--'
     Slot *slot = nullptr;  // Var / Index / Assign(CompoundAssign) target (never null for those kinds)

@@ -310,6 +310,8 @@ void VaxCodegen::genStmt(const ir::Stmt &s) {
 
 void VaxCodegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 auto v = static_cast<uint64_t>(e.intValue);

@@ -1608,10 +1608,10 @@ check_armv8a() {
 
 # vex has a real reference interpreter (vendored at ../tests/sim/vex/vex.c, built once into
 # $vex_interp above), so this runs a genuine simulator, not a from-scratch core. `main`'s return
-# value sits untouched on top of the data stack at the normal halt VexCodegen.cpp's own entry
-# sequence produces (see that file's own class comment) - read back via the interpreter's own
-# `-d` dump flag rather than its exit status, since the exit status is only ever the low byte of
-# an explicit `DEO`-to-port-0 (see docs/SPEC.md), not wide enough for every EXPECT value here.
+# value sits untouched in R0 at the normal halt VexCodegen.cpp's own entry sequence produces (see
+# that file's own class comment) - read back via the interpreter's own `-d` dump flag rather than
+# its exit status, since the exit status is only ever the low byte of an explicit `DEO`-to-port-0
+# (see docs/SPEC.md), not wide enough for every EXPECT value here.
 check_vex() {
     local src="$1" name="$2"
     local romfile="$tmpdir/$name.rom"
@@ -1625,26 +1625,23 @@ check_vex() {
 
     local dump
     dump="$(run_with_timeout 10 "$vex_interp" -d -s 20000000 "$romfile" 2>&1 >/dev/null)"
-    local ds_line
-    ds_line="$(printf '%s\n' "$dump" | grep '^ds: ')"
-    if [ -z "$ds_line" ]; then
+    local regs_line
+    regs_line="$(printf '%s\n' "$dump" | grep '^regs: ')"
+    if [ -z "$regs_line" ]; then
         echo "FAIL $name: interpreter didn't halt normally"
         printf '%s\n' "$dump" | sed 's/^/    /'
         return 1
     fi
-    local ds_hex="${ds_line#ds: }"
-    if [ "${#ds_hex}" -lt 8 ]; then
-        echo "FAIL $name: data stack empty at halt - no return value from main()"
-        return 1
-    fi
-    local top_hex="${ds_hex: -8}"
-    local top_dec=$((16#$top_hex))
-    top_dec="$(to_signed "$top_dec" 32)"
-    if [ "$top_dec" -eq "$expect" ]; then
-        echo "PASS $name (ds top=$top_dec)"
+    # "regs: xxxxxxxx xxxxxxxx ..." - R0 (main's return value) is the first one.
+    local r0_hex
+    r0_hex="$(printf '%s\n' "$regs_line" | awk '{print $2}')"
+    local r0_dec=$((16#$r0_hex))
+    r0_dec="$(to_signed "$r0_dec" 32)"
+    if [ "$r0_dec" -eq "$expect" ]; then
+        echo "PASS $name (r0=$r0_dec)"
         return 0
     fi
-    echo "FAIL $name: expected $expect, got $top_dec (ds: $ds_hex)"
+    echo "FAIL $name: expected $expect, got $r0_dec (regs: $regs_line)"
     return 1
 }
 
@@ -2924,12 +2921,6 @@ is_known_unsupported() {
         # convention beyond `main` (see VexCodegen.h's class comment).
         vex:identical_code_folding_addr_exclusion.c) return 0 ;;
         vex:place.c) return 0 ;;
-        # An array/struct Local/Param (or one whose address is taken) inside a function that's
-        # actually part of a recursion cycle can't be stored on vex's own return stack, which
-        # isn't addressable memory at all - see VexCodegen.h's class comment.
-        vex:local_array_recur.c) return 0 ;;
-        vex:recursion_array.c) return 0 ;;
-        vex:recursion_local_array.c) return 0 ;;
         # Both read a plain C string as a byte-granular run (walking `char*`/an untyped `int`
         # holding an address one byte at a time, or asserting `sizeof(char) == 1`) - this
         # backend's own `char` occupies one full 32-bit cell, not one byte (vex's `LD`/`ST`

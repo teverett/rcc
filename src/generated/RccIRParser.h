@@ -13,17 +13,18 @@ class  RccIRParser : public antlr4::Parser {
 public:
   enum {
     GLOBALS_HEADER = 1, FUNCTIONS_HEADER = 2, INT_KW = 3, CHAR_KW = 4, SHORT_KW = 5, 
-    LONG_KW = 6, UNSIGNED_KW = 7, VOID_KW = 8, STRUCT_KW = 9, LOCAL_KW = 10, 
-    IF_KW = 11, ELSE_KW = 12, WHILE_KW = 13, RETURN_KW = 14, BREAK_KW = 15, 
-    CONTINUE_KW = 16, GOTO_KW = 17, POST_KW = 18, OLDVAL_KW = 19, LPAREN = 20, 
-    RPAREN = 21, LBRACK = 22, RBRACK = 23, LBRACE = 24, RBRACE = 25, SEMI = 26, 
-    COMMA = 27, ASSIGN = 28, HASH = 29, STAR = 30, AMP = 31, MINUS = 32, 
-    BANG = 33, TILDE = 34, SLASH = 35, PERCENT = 36, PLUS = 37, SHL = 38, 
-    SHR = 39, LE = 40, GE = 41, LT = 42, GT = 43, EQ = 44, NE = 45, CARET = 46, 
-    PIPE = 47, ANDAND = 48, OROR = 49, PLUSEQ = 50, MINUSEQ = 51, STAREQ = 52, 
-    SLASHEQ = 53, PERCENTEQ = 54, AMPEQ = 55, CARETEQ = 56, PIPEEQ = 57, 
-    SHLEQ = 58, SHREQ = 59, QUESTION = 60, COLON = 61, IDENT = 62, NUMBER = 63, 
-    WS = 64, ASM_BEGIN = 65, ASM_TEXT = 66, ASM_END = 67
+    LONG_KW = 6, FLOAT_KW = 7, DOUBLE_KW = 8, UNSIGNED_KW = 9, VOID_KW = 10, 
+    STRUCT_KW = 11, LOCAL_KW = 12, IF_KW = 13, ELSE_KW = 14, WHILE_KW = 15, 
+    RETURN_KW = 16, BREAK_KW = 17, CONTINUE_KW = 18, GOTO_KW = 19, POST_KW = 20, 
+    OLDVAL_KW = 21, LPAREN = 22, RPAREN = 23, LBRACK = 24, RBRACK = 25, 
+    LBRACE = 26, RBRACE = 27, SEMI = 28, COMMA = 29, ASSIGN = 30, HASH = 31, 
+    STAR = 32, AMP = 33, MINUS = 34, BANG = 35, TILDE = 36, SLASH = 37, 
+    PERCENT = 38, PLUS = 39, SHL = 40, SHR = 41, LE = 42, GE = 43, LT = 44, 
+    GT = 45, EQ = 46, NE = 47, CARET = 48, PIPE = 49, ANDAND = 50, OROR = 51, 
+    PLUSEQ = 52, MINUSEQ = 53, STAREQ = 54, SLASHEQ = 55, PERCENTEQ = 56, 
+    AMPEQ = 57, CARETEQ = 58, PIPEEQ = 59, SHLEQ = 60, SHREQ = 61, QUESTION = 62, 
+    COLON = 63, IDENT = 64, NUMBER = 65, FLOAT_NUMBER = 66, WS = 67, ASM_BEGIN = 68, 
+    ASM_TEXT = 69, ASM_END = 70
   };
 
   enum {
@@ -95,6 +96,8 @@ public:
     antlr4::tree::TerminalNode *INT_KW();
     std::vector<antlr4::tree::TerminalNode *> LONG_KW();
     antlr4::tree::TerminalNode* LONG_KW(size_t i);
+    antlr4::tree::TerminalNode *FLOAT_KW();
+    antlr4::tree::TerminalNode *DOUBLE_KW();
     antlr4::tree::TerminalNode *STRUCT_KW();
     antlr4::tree::TerminalNode *IDENT();
     std::vector<antlr4::tree::TerminalNode *> STAR();
@@ -120,6 +123,7 @@ public:
     antlr4::tree::TerminalNode *RBRACK();
     antlr4::tree::TerminalNode *ASSIGN();
     InitListContext *initList();
+    antlr4::tree::TerminalNode *FLOAT_NUMBER();
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
@@ -151,6 +155,7 @@ public:
     InitElemContext(antlr4::ParserRuleContext *parent, size_t invokingState);
     virtual size_t getRuleIndex() const override;
     antlr4::tree::TerminalNode *NUMBER();
+    antlr4::tree::TerminalNode *FLOAT_NUMBER();
     RefContext *ref();
 
 
@@ -514,6 +519,15 @@ public:
     ExprContext *expr();
     std::vector<antlr4::tree::TerminalNode *> RPAREN();
     antlr4::tree::TerminalNode* RPAREN(size_t i);
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  FloatLitExprContext : public ExprContext {
+  public:
+    FloatLitExprContext(ExprContext *ctx);
+
+    antlr4::tree::TerminalNode *FLOAT_NUMBER();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };

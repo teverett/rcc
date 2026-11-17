@@ -1,17 +1,17 @@
 /*
  * Vendored, unmodified, from the vex project's own interpreter/vex.c (same author/project as
- * this one) - the real simulator tests/run_tests.sh's own check_vex() and examples/vex/test.py
- * run every compiled vex program under. Vendored rather than built against that sibling repo
- * directly so CI needs no extra clone/checkout step and stays pinned to one known-matching
- * interpreter version instead of whatever that repo's own `interpreter/vex.c` happens to be on
- * a given day.
+ * this one) - the real simulator tests/run_tests.sh's own check_vex() and examples/vex/
+ * Makefile's own `test` target run every compiled vex program under. Vendored rather than
+ * built against that sibling repo directly so CI needs no extra clone/checkout step and stays
+ * pinned to one known-matching interpreter version instead of whatever that repo's own
+ * `interpreter/vex.c` happens to be on a given day.
  *
- * vex.c - reference interpreter for the Vex virtual machine (spec v0.4).
+ * vex.c - reference interpreter for the Vex virtual machine (spec v1.1).
  * See docs/SPEC.md for the machine definition.
  *
  * Usage: vex [-t] [-d] [-s steps] program.rom
  *   -t        trace every instruction to stderr
- *   -d        dump the final data and return stacks to stderr
+ *   -d        dump the final registers and return stack to stderr
  *   -s N      stop with status 3 after N instructions (0 = unlimited)
  *
  * The ROM is loaded at 0x0100 and execution starts there.
@@ -32,24 +32,24 @@
 
 #define MEM_SIZE  UINT64_C(0x100000000)
 #define LOAD_ADDR 0x0100
-#define DS_SIZE   1024
 #define RS_SIZE   512
+#define NREGS     8
 
-/* 18 (0x12) was GTH ("a > b" is "b < a" with no opcode of its own - see
- * docs/SPEC.md section 7), now unassigned; PUSH..STS keep their numbers
- * rather than shifting down to fill the hole. */
 enum {
-    OP_RET, OP_LIT, OP_LD, OP_ST, OP_DEI, OP_DEO, OP_JMP, OP_JCN, OP_CAL,
+    OP_RET, OP_LDI, OP_MOV, OP_LD, OP_ST, OP_DEI, OP_DEO, OP_JMP, OP_JCN, OP_CAL,
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_AND, OP_ORA, OP_XOR,
-    OP_EQU, OP_LTH,
-    OP_PUSH = 19, OP_POP, OP_LDS, OP_STS,
+    OP_CEQ, OP_CLT, OP_NOP,
     OP_COUNT
 };
 
+/* total instruction length in bytes, including the opcode byte itself */
+static const uint8_t OPLEN[OP_COUNT] = {
+    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1
+};
+
 static const char *const OPNAME[OP_COUNT] = {
-    "RET", "LIT", "LD", "ST", "DEI", "DEO", "JMP", "JCN", "CAL",
-    "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR",
-    "EQU", "LTH", "", "PUSH", "POP", "LDS", "STS"
+    "RET", "LDI", "MOV", "LD", "ST", "DEI", "DEO", "JMP", "JCN", "CAL",
+    "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR", "CEQ", "CLT", "NOP"
 };
 
 typedef struct {
@@ -60,10 +60,10 @@ typedef struct {
 } Stack;
 
 typedef struct {
-    uint8_t mem[MEM_SIZE];
-    uint8_t dbuf[DS_SIZE];
-    uint8_t rbuf[RS_SIZE];
-    Stack ds, rs;
+    uint8_t  mem[MEM_SIZE];
+    uint8_t  rbuf[RS_SIZE];
+    Stack    rs;
+    uint32_t regs[NREGS];
     uint32_t pc;     /* address of the next instruction */
     uint32_t ipc;    /* address of the instruction being executed */
     int halted;
@@ -87,7 +87,7 @@ static void fault(VM *m, const char *fmt, ...)
     longjmp(m->trap, 1);
 }
 
-/* ---- stacks: big-endian, byte granular ---- */
+/* ---- the return stack: big-endian, byte granular ---- */
 
 static uint32_t spop(VM *m, Stack *s, int n)
 {
@@ -174,27 +174,33 @@ static void dev_out(VM *m, uint8_t port, uint8_t v)
 
 /* ---- execution ---- */
 
-static void jump(VM *m, uint32_t operand, int rel)
+/* Fetches one byte at pc and advances it - used for the opcode byte and
+ * for every register operand byte. */
+static uint8_t fetch_byte(VM *m)
 {
-    m->pc = rel ? (uint32_t)(m->pc + (int32_t)operand) : operand;
+    uint8_t b = (uint8_t)mrd(m, m->pc, 1);
+    m->pc++;
+    return b;
+}
+
+/* A register operand (docs/SPEC.md section 2): bits 2-0 select R0-R7,
+ * bits 7-3 are reserved and must be 0. */
+static uint8_t fetch_reg(VM *m)
+{
+    uint8_t b = fetch_byte(m);
+    if (b & 0xF8)
+        fault(m, "reserved bits set in register operand 0x%02x", b);
+    return b;
 }
 
 static void step(VM *m)
 {
     m->ipc = m->pc;
-    uint8_t ins = (uint8_t)mrd(m, m->pc, 1);
-    m->pc++;
-
-    int reserved = ins >> 6;
-    int r = (ins >> 5) & 1;
-    int op = ins & 31;
-    if (reserved != 0)
-        fault(m, "reserved bits set in opcode 0x%02x", ins);
+    uint8_t op = fetch_byte(m);
     if (op >= OP_COUNT)
-        fault(m, "unknown opcode 0x%02x", ins);
+        fault(m, "unknown opcode 0x%02x", op);
 
-    uint32_t a, b, res;
-    uint32_t addr;
+    uint8_t rd, ra, rb;
 
     switch (op) {
     case OP_RET:
@@ -205,55 +211,50 @@ static void step(VM *m)
             m->pc = spop(m, &m->rs, 4);
         }
         break;
-    case OP_LIT:
-        a = mrd(m, m->pc, 4);
-        m->pc = (uint32_t)(m->pc + 4);
-        spush(m, &m->ds, a, 4);
+    case OP_LDI:
+        rd = fetch_reg(m);
+        m->regs[rd] = mrd(m, m->pc, 4);
+        m->pc += 4;
+        break;
+    case OP_MOV:
+        rd = fetch_reg(m); ra = fetch_reg(m);
+        m->regs[rd] = m->regs[ra];
         break;
     case OP_LD:
-        addr = spop(m, &m->ds, 4);
-        if (r)
-            addr = (uint32_t)(m->pc + (int32_t)addr);
-        spush(m, &m->ds, mrd(m, addr, 4), 4);
+        rd = fetch_reg(m); ra = fetch_reg(m);
+        m->regs[rd] = mrd(m, m->regs[ra], 4);
         break;
     case OP_ST:
-        addr = spop(m, &m->ds, 4);
-        if (r)
-            addr = (uint32_t)(m->pc + (int32_t)addr);
-        a = spop(m, &m->ds, 4);
-        mwr(m, addr, a, 4);
+        ra = fetch_reg(m); rb = fetch_reg(m);
+        mwr(m, m->regs[ra], m->regs[rb], 4);
         break;
-    case OP_DEI: {
-        uint8_t port = (uint8_t)spop(m, &m->ds, 4);
-        spush(m, &m->ds, dev_in(port), 4);
+    case OP_DEI:
+        rd = fetch_reg(m); ra = fetch_reg(m);
+        m->regs[rd] = dev_in((uint8_t)m->regs[ra]);
         break;
-    }
-    case OP_DEO: {
-        uint8_t port = (uint8_t)spop(m, &m->ds, 4);
-        uint8_t v = (uint8_t)spop(m, &m->ds, 4);
-        dev_out(m, port, v);
+    case OP_DEO:
+        ra = fetch_reg(m); rb = fetch_reg(m);
+        dev_out(m, (uint8_t)m->regs[ra], (uint8_t)m->regs[rb]);
         break;
-    }
     case OP_JMP:
-        addr = spop(m, &m->ds, 4);
-        jump(m, addr, r);
+        ra = fetch_reg(m);
+        m->pc = m->regs[ra];
         break;
     case OP_JCN:
-        addr = spop(m, &m->ds, 4);
-        a = spop(m, &m->ds, 4);
-        if (a)
-            jump(m, addr, r);
+        ra = fetch_reg(m); rb = fetch_reg(m);
+        if (m->regs[rb])
+            m->pc = m->regs[ra];
         break;
     case OP_CAL:
-        addr = spop(m, &m->ds, 4);
+        ra = fetch_reg(m);
         spush(m, &m->rs, m->pc, 4);
-        jump(m, addr, r);
+        m->pc = m->regs[ra];
         break;
 
     case OP_ADD: case OP_SUB: case OP_MUL: case OP_DIV:
-    case OP_AND: case OP_ORA: case OP_XOR:
-        b = spop(m, &m->ds, 4);
-        a = spop(m, &m->ds, 4);
+    case OP_AND: case OP_ORA: case OP_XOR: {
+        rd = fetch_reg(m); ra = fetch_reg(m); rb = fetch_reg(m);
+        uint32_t a = m->regs[ra], b = m->regs[rb], res;
         switch (op) {
         case OP_ADD: res = a + b; break;
         case OP_SUB: res = a - b; break;
@@ -263,64 +264,21 @@ static void step(VM *m)
         case OP_ORA: res = a | b; break;
         default:     res = a ^ b; break;
         }
-        spush(m, &m->ds, res, 4);
-        break;
-
-    case OP_EQU: case OP_LTH:
-        b = spop(m, &m->ds, 4);
-        a = spop(m, &m->ds, 4);
-        res = (op == OP_EQU) ? (a == b) : (a < b);
-        spush(m, &m->ds, res, 4);
-        break;
-
-    case OP_PUSH:
-        if (m->ds.sp < 4)
-            fault(m, "data stack underflow");
-        if (m->rs.sp + 4 > m->rs.cap)
-            fault(m, "return stack overflow");
-        memcpy(m->rs.b + m->rs.sp, m->ds.b + m->ds.sp - 4, 4);
-        m->ds.sp -= 4;
-        m->rs.sp += 4;
-        break;
-    case OP_POP:
-        if (m->rs.sp < 4)
-            fault(m, "return stack underflow");
-        if (m->ds.sp + 4 > m->ds.cap)
-            fault(m, "data stack overflow");
-        memcpy(m->ds.b + m->ds.sp, m->rs.b + m->rs.sp - 4, 4);
-        m->rs.sp -= 4;
-        m->ds.sp += 4;
-        break;
-
-    case OP_LDS: {
-        uint32_t off = spop(m, &m->ds, 4) * 4;  /* cells -> bytes */
-        Stack *s = r ? &m->rs : &m->ds;
-        uint8_t tmp[4];
-        if (off + 4 > (uint32_t)s->sp)
-            fault(m, "LDS offset %u beyond %s stack (depth %d cells)", off / 4, s->name, s->sp / 4);
-        memcpy(tmp, s->b + s->sp - off - 4, 4);
-        if (m->ds.sp + 4 > m->ds.cap)
-            fault(m, "data stack overflow");
-        memcpy(m->ds.b + m->ds.sp, tmp, 4);
-        m->ds.sp += 4;
+        m->regs[rd] = res;
         break;
     }
-    case OP_STS: {
-        uint32_t off = spop(m, &m->ds, 4) * 4;  /* cells -> bytes */
-        Stack *s;
-        uint8_t tmp[4];
-        if (m->ds.sp < 4)
-            fault(m, "data stack underflow");
-        memcpy(tmp, m->ds.b + m->ds.sp - 4, 4);
-        m->ds.sp -= 4;
-        s = r ? &m->rs : &m->ds;
-        if (off + 4 > (uint32_t)s->sp)
-            fault(m, "STS offset %u beyond %s stack (depth %d cells)", off / 4, s->name, s->sp / 4);
-        memcpy(s->b + s->sp - off - 4, tmp, 4);
+
+    case OP_CEQ: case OP_CLT:
+        rd = fetch_reg(m); ra = fetch_reg(m); rb = fetch_reg(m);
+        m->regs[rd] = (op == OP_CEQ) ? (m->regs[ra] == m->regs[rb])
+                                      : (m->regs[ra] <  m->regs[rb]);
         break;
-    }
+
+    case OP_NOP:
+        break;
+
     default:
-        fault(m, "unknown opcode 0x%02x", ins);
+        fault(m, "unknown opcode 0x%02x", op);
     }
 }
 
@@ -335,32 +293,39 @@ static void print_stack(FILE *f, const Stack *s)
 static void trace_line(const VM *m)
 {
     uint32_t pc = m->pc;
-    uint8_t ins = m->mem[pc];
-    int reserved = ins >> 6, r = (ins >> 5) & 1, op = ins & 31;
-    char text[48];
+    uint8_t op = m->mem[pc];
+    char text[64];
 
-    if (reserved == 0 && op < OP_COUNT && OPNAME[op][0] != '\0') {
-        int len = snprintf(text, sizeof text, "%s%s", OPNAME[op], r ? ".r" : "");
-        if (op == OP_LIT && (uint64_t)pc + 1 + 4 <= MEM_SIZE) {
-            len += snprintf(text + len, sizeof text - (size_t)len, " 0x");
-            for (int i = 0; i < 4; i++)
-                len += snprintf(text + len, sizeof text - (size_t)len, "%02x", m->mem[pc + 1 + i]);
+    if (op < OP_COUNT) {
+        int len = snprintf(text, sizeof text, "%s", OPNAME[op]);
+        uint8_t instrlen = OPLEN[op];
+        if (op == OP_LDI) {
+            uint8_t rd = m->mem[pc + 1] & 7;
+            uint32_t imm = ((uint32_t)m->mem[pc + 2] << 24) | ((uint32_t)m->mem[pc + 3] << 16)
+                         | ((uint32_t)m->mem[pc + 4] << 8)  | m->mem[pc + 5];
+            len += snprintf(text + len, sizeof text - (size_t)len, " R%u,0x%08x", rd, imm);
+        } else {
+            for (int i = 1; i < instrlen; i++)
+                len += snprintf(text + len, sizeof text - (size_t)len, " R%u", m->mem[pc + i] & 7);
         }
     } else {
-        snprintf(text, sizeof text, "??? 0x%02x", ins);
+        snprintf(text, sizeof text, "??? 0x%02x", op);
     }
-    fprintf(stderr, "%08x  %-18s ds=", pc, text);
-    print_stack(stderr, &m->ds);
-    fprintf(stderr, "  rs=");
+    fprintf(stderr, "%08x  %-24s regs=", pc, text);
+    for (int i = 0; i < NREGS; i++)
+        fprintf(stderr, "%08x ", m->regs[i]);
+    fprintf(stderr, "rs=");
     print_stack(stderr, &m->rs);
     fputc('\n', stderr);
 }
 
 static void dump(const VM *m)
 {
-    fprintf(stderr, "ds: ");
-    print_stack(stderr, &m->ds);
-    fprintf(stderr, "\nrs: ");
+    fprintf(stderr, "regs:");
+    for (int i = 0; i < NREGS; i++)
+        fprintf(stderr, " %08x", m->regs[i]);
+    fputc('\n', stderr);
+    fprintf(stderr, "rs: ");
     print_stack(stderr, &m->rs);
     fputc('\n', stderr);
 }
@@ -434,7 +399,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    vm.ds = (Stack){ vm.dbuf, 0, DS_SIZE, "data" };
     vm.rs = (Stack){ vm.rbuf, 0, RS_SIZE, "return" };
     vm.pc = LOAD_ADDR;
 

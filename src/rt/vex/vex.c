@@ -10,20 +10,20 @@ int vex_rt_a;
 void vex_putc(unsigned char c) {
     vex_rt_a = c;
     asm {
-        lit G_vex_rt_a
-        ld
-        lit 0x18
-        deo
+        ldi r0, G_vex_rt_a
+        ld r0, r0
+        ldi r1, 0x18
+        deo r1, r0
     }
 }
 
 void vex_eputc(unsigned char c) {
     vex_rt_a = c;
     asm {
-        lit G_vex_rt_a
-        ld
-        lit 0x19
-        deo
+        ldi r0, G_vex_rt_a
+        ld r0, r0
+        ldi r1, 0x19
+        deo r1, r0
     }
 }
 
@@ -43,20 +43,20 @@ void vex_eputs(char *s) {
 
 unsigned char vex_getc() {
     asm {
-        lit 0x10
-        dei
-        lit G_vex_rt_a
-        st
+        ldi r0, 0x10
+        dei r1, r0
+        ldi r0, G_vex_rt_a
+        st r0, r1
     }
     return vex_rt_a;
 }
 
 unsigned char vex_eof() {
     asm {
-        lit 0x11
-        dei
-        lit G_vex_rt_a
-        st
+        ldi r0, 0x11
+        dei r1, r0
+        ldi r0, G_vex_rt_a
+        st r0, r1
     }
     return vex_rt_a;
 }
@@ -64,9 +64,9 @@ unsigned char vex_eof() {
 void vex_exit(int code) {
     vex_rt_a = code;
     asm {
-        lit G_vex_rt_a
-        ld
-        lit 0
-        deo
+        ldi r0, G_vex_rt_a
+        ld r0, r0
+        ldi r1, 0
+        deo r1, r0
     }
 }

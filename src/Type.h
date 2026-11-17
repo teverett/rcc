@@ -4,12 +4,13 @@
 
 namespace rcc {
 
-// Fixed ISO C conversion-rank order (char .. long long), used by
+// Fixed ISO C conversion-rank order (char .. long long .. double), used by
 // commonType(), independent of any target's actual storage widths. Struct
 // is never an arithmetic operand (buildExpr rejects that before rank() or
 // commonType() would see it), so its placement in the rank order is
-// otherwise unused.
-enum class BaseType { Char, Short, Int, Long, LongLong, Struct };
+// otherwise unused. Float/Double outrank every integer type per the usual
+// arithmetic conversions, with Double outranking Float.
+enum class BaseType { Char, Short, Int, Long, LongLong, Float, Double, Struct };
 
 // A pointer is the same Type as its ultimate pointee, with `ptrDepth`
 // counting levels of pointer-to (char* = {Char, false, 1}, int** =
@@ -45,6 +46,12 @@ struct Type {
 
 // One target's storage unit for each type: bytes for a byte-addressable
 // backend, or the native word for a word-addressed one (e.g. pdp7).
+//
+// floatUnits/doubleUnits default to 0, meaning "this backend doesn't support
+// the type" (see Backend::floatSupport() in codegen/Codegen.h) - a backend
+// that does support float/double must set these explicitly; the 0 default
+// means every backend not yet migrated hard-fails on float/double rather
+// than silently miscompiling.
 struct TypeWidths {
     int charUnits;
     int shortUnits;
@@ -53,9 +60,11 @@ struct TypeWidths {
     int longLongUnits;
     int unitBits = 8;  // bits in one storage unit
     int pointerUnits = 0;  // 0 uses intUnits
+    int floatUnits = 0;    // 0 = float unsupported on this backend
+    int doubleUnits = 0;   // 0 = double unsupported on this backend
 };
 
-// Char=0 .. LongLong=4.
+// Char=0 .. Double=6 (Struct is never ranked - see BaseType's own comment).
 int rank(BaseType base);
 
 // Storage units of type `t` on this target. A pointer always occupies one

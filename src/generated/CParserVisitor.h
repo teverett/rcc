@@ -35,6 +35,10 @@ public:
 
     virtual std::any visitSignedOrUnsignedType(CParser::SignedOrUnsignedTypeContext *context) = 0;
 
+    virtual std::any visitFloatType(CParser::FloatTypeContext *context) = 0;
+
+    virtual std::any visitDoubleType(CParser::DoubleTypeContext *context) = 0;
+
     virtual std::any visitStructType(CParser::StructTypeContext *context) = 0;
 
     virtual std::any visitEnumType(CParser::EnumTypeContext *context) = 0;
@@ -162,6 +166,8 @@ public:
     virtual std::any visitRelExpr(CParser::RelExprContext *context) = 0;
 
     virtual std::any visitBitAndExpr(CParser::BitAndExprContext *context) = 0;
+
+    virtual std::any visitFloatNumExpr(CParser::FloatNumExprContext *context) = 0;
 
     virtual std::any visitCharExpr(CParser::CharExprContext *context) = 0;
 

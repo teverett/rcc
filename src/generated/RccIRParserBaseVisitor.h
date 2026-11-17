@@ -115,6 +115,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitFloatLitExpr(RccIRParser::FloatLitExprContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitCompoundIndexExpr(RccIRParser::CompoundIndexExprContext *ctx) override {
     return visitChildren(ctx);
   }

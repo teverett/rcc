@@ -433,6 +433,8 @@ void PIC18Codegen::genConvert(const ir::Expr &e) {
 void PIC18Codegen::genExpr(const ir::Expr &e) {
     requireNarrow(e);
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
             code_ << "    movlw " << (v16 & 0xFF) << "\n    movwf ac\n";

@@ -16,6 +16,8 @@ INT_KW   : 'int' ;
 CHAR_KW  : 'char' ;
 SHORT_KW : 'short' ;
 LONG_KW  : 'long' ;
+FLOAT_KW : 'float' ;
+DOUBLE_KW: 'double' ;
 SIGNED_KW: 'signed' ;
 UNSIGNED_KW: 'unsigned' ;
 VOID_KW  : 'void' ;
@@ -97,6 +99,20 @@ IDENT   : [a-zA-Z_][a-zA-Z_0-9]* ;
 // the suffix text itself; this rule only admits the syntax, same as
 // every other token here that defers meaning to BuildAst.
 NUMBER  : ( '0' [xX] [0-9a-fA-F]+ | '0' [0-7]* | [1-9] [0-9]* ) [uUlL]* ;
+// ISO C's floating-constant rule, trimmed to what this subset supports: a
+// fractional-constant or a digit-sequence with a mandatory exponent (never
+// both digits and no '.'/exponent at all - that's just NUMBER above), plus
+// an optional 'f'/'F' suffix (float) with no suffix meaning double; no 'l'/
+// 'L' (long double) suffix, since this subset has no long double. Declared
+// after NUMBER but matches first whenever it applies: ANTLR4 picks the
+// longest match, and a '.'/exponent always makes this the longer one.
+FLOAT_NUMBER
+    : FLOAT_DIGITS* '.' FLOAT_DIGITS+ FLOAT_EXP? [fF]?
+    | FLOAT_DIGITS+ '.' FLOAT_DIGITS* FLOAT_EXP? [fF]?
+    | FLOAT_DIGITS+ FLOAT_EXP [fF]?
+    ;
+fragment FLOAT_DIGITS : [0-9] ;
+fragment FLOAT_EXP : [eE] [+-]? FLOAT_DIGITS+ ;
 // A single character, no escapes - enough for ASCII-arithmetic use
 // like '0' + digit; see ../README.md's "Scope and limitations".
 CHARLIT : '\'' ~['\r\n] '\'' ;

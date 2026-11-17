@@ -60,6 +60,8 @@ std::string exprKey(const ir::Expr *e) {
     switch (e->kind) {
         case ir::ExprKind::IntLit:
             return "I" + std::to_string(e->intValue);
+        case ir::ExprKind::FloatLit:
+            return "F" + std::to_string(e->floatValue);
         case ir::ExprKind::Var:
             return "V" + std::to_string(e->slot->id);
         case ir::ExprKind::Index:

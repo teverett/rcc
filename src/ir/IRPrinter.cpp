@@ -1,10 +1,26 @@
 #include "IRPrinter.h"
 
+#include <cmath>
+#include <cstdio>
 #include <sstream>
 
 namespace rcc {
 
 namespace {
+
+// A round-trippable decimal spelling that grammar/RccIRLexer.g4's own
+// FLOAT_NUMBER rule always accepts - fixed-point (%f), never scientific
+// notation, since that rule requires a literal '.' and doesn't accept a
+// dot-less exponent form. No "inf"/"nan" either (this printer only exists
+// for validateIRSyntax()'s print-then-reparse self-check, never for a real
+// value a backend reads, so clamping a non-finite floatValue to a finite
+// placeholder costs nothing real).
+std::string floatLitText(double v) {
+    if (!std::isfinite(v)) v = 0.0;
+    char buf[400];
+    std::snprintf(buf, sizeof buf, "%.6f", v);
+    return buf;
+}
 
 std::string slotRef(const ir::Slot *s) { return s->sourceName + "#" + std::to_string(s->id); }
 std::string funcRef(const ir::Function *f) { return f->sourceName + "#" + std::to_string(f->id); }
@@ -30,6 +46,14 @@ std::string typeSpecText(Type t) {
         case BaseType::LongLong:
             base = "long long";
             break;
+        case BaseType::Float:
+            prefix.clear();
+            base = "float";
+            break;
+        case BaseType::Double:
+            prefix.clear();
+            base = "double";
+            break;
         case BaseType::Struct:
             base = "struct " + t.structTag;
             break;
@@ -38,7 +62,9 @@ std::string typeSpecText(Type t) {
 }
 
 void printArrayElem(const ir::ArrayInitElem &e, std::ostream &out) {
-    if (!e.isSymbol) {
+    if (e.isFloat) {
+        out << floatLitText(e.floatValue);
+    } else if (!e.isSymbol) {
         out << e.value;
     } else if (e.slot) {
         out << slotRef(e.slot);
@@ -51,6 +77,9 @@ void printExpr(const ir::Expr &e, std::ostream &out) {
     switch (e.kind) {
         case ir::ExprKind::IntLit:
             out << e.intValue;
+            return;
+        case ir::ExprKind::FloatLit:
+            out << floatLitText(e.floatValue);
             return;
         case ir::ExprKind::Var:
             out << slotRef(e.slot);
@@ -243,7 +272,8 @@ std::string printIR(const ir::Program &prog, const std::string &sourceFile) {
                 out << "}";
             }
         } else if (slot->hasInit) {
-            out << " = " << slot->initValue;
+            bool isFloatSlot = slot->type.base == BaseType::Float || slot->type.base == BaseType::Double;
+            out << " = " << (isFloatSlot ? floatLitText(slot->floatInitValue) : std::to_string(slot->initValue));
         }
         out << ";\n";
     }

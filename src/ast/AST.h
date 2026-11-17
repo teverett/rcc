@@ -12,6 +12,7 @@ namespace rcc {
 
 enum class ExprKind {
     IntLit,
+    FloatLit,
     Var,
     Index,        // name[lhs]
     Assign,       // name = rhs, or name[lhs] = rhs if lhs is set
@@ -46,7 +47,8 @@ struct Expr {
     int line = 0;
 
     long intValue = 0;        // IntLit
-    Type type;                 // IntLit's suffix type; Cast/Sizeof's operand/measured type
+    double floatValue = 0;      // FloatLit
+    Type type;                 // IntLit/FloatLit's suffix type; Cast/Sizeof's operand/measured type
     bool sizeofIsType = false;  // Sizeof: true -> `type` is measured, false -> `rhs` is (unevaluated)
     bool yieldOld = false;      // CompoundAssign(DerefAssign): true only for postfix '++'/'--'
     bool viaPointer = false;    // MemberAccess/MemberAssign(CompoundMemberAssign): '->' vs '.'
@@ -74,8 +76,10 @@ using ExprPtr = std::unique_ptr<Expr>;
 // that function/global's own address (the dispatch-table idiom).
 struct ArrayInitElem {
     bool isSymbol = false;
-    long value = 0;            // literal value, when !isSymbol
+    long value = 0;            // literal value, when !isSymbol && !isFloat
     std::string symbolName;     // identifier text, when isSymbol
+    bool isFloat = false;       // value is a float/double literal, when !isSymbol
+    double floatValue = 0;      // literal value, when !isSymbol && isFloat
 };
 
 enum class StmtKind {
@@ -173,7 +177,9 @@ struct GlobalVar {
     std::string name;
     Type type;                     // scalar type, or array element type
     bool hasInit = false;
+    bool hasFloatInit = false;   // the initializer literal was spelled as a float (has a '.'/exponent)
     long initValue = 0;
+    double floatInitValue = 0;   // valid only when hasFloatInit
     int line = 0;
     int arraySize = 0;            // >0 means an array of this many words
     std::vector<ArrayInitElem> arrayInit;  // array initializer (padded with 0s); unused for scalars

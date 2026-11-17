@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdlib>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
@@ -114,6 +115,52 @@ long resolveConstOrEnum(antlr4::Token *numTok, antlr4::Token *signTok, antlr4::T
     long value = parsePlainNumber(numTok, ctx, what);
     if (signTok != nullptr) value = -value;
     return value;
+}
+
+// Splits a FLOAT_NUMBER token's text into its value and its type (Float if
+// it ends in 'f'/'F', Double otherwise - ISO C's own default-is-double
+// rule for an unsuffixed floating-constant). No 'l'/'L' (long double)
+// suffix exists in this subset's grammar at all, so there's nothing else
+// to check here, unlike parseNumberSuffix()'s integer counterpart.
+void parseFloatLiteral(const std::string &text, double &value, Type &type) {
+    bool isFloat = !text.empty() && (text.back() == 'f' || text.back() == 'F');
+    std::string digits = isFloat ? text.substr(0, text.size() - 1) : text;
+    value = std::strtod(digits.c_str(), nullptr);
+    type = Type{isFloat ? BaseType::Float : BaseType::Double, false};
+}
+
+// Resolves a static/global scalar initializer: a plain (optionally
+// negated) NUMBER or FLOAT_NUMBER, or an already-declared enum constant's
+// bare name. Exactly one of valTok/identTok is non-null, per the grammar
+// alternative that called this; valTok's own token type (NUMBER vs
+// FLOAT_NUMBER - both come through the same set-labeled `val=` field)
+// picks int vs float.
+struct ConstInit {
+    bool isFloat = false;
+    long intValue = 0;
+    double floatValue = 0;
+    Type floatType;  // valid only when isFloat - Float or Double, per the literal's own suffix
+};
+
+ConstInit resolveConstOrEnumInit(antlr4::Token *valTok, antlr4::Token *signTok, antlr4::Token *identTok,
+                                 antlr4::ParserRuleContext *ctx, const char *what) {
+    if (identTok != nullptr) {
+        auto it = g_enumConstants.find(identTok->getText());
+        if (it == g_enumConstants.end()) {
+            err(ctx, std::string(what) + " '" + identTok->getText() + "' isn't a known enum constant");
+        }
+        return {false, it->second, 0, Type{}};
+    }
+    if (valTok->getType() == CParser::FLOAT_NUMBER) {
+        double value;
+        Type type;
+        parseFloatLiteral(valTok->getText(), value, type);
+        if (signTok != nullptr) value = -value;
+        return {true, 0, value, type};
+    }
+    long value = parsePlainNumber(valTok, ctx, what);
+    if (signTok != nullptr) value = -value;
+    return {false, value, 0, Type{}};
 }
 
 // Parses a NUMBER token's integer suffix (ISO C spelling: u/U once, l/L
@@ -245,6 +292,12 @@ Type buildBaseType(CParser::BaseTypeSpecContext *ctx) {
         isUnsigned = c->UNSIGNED_KW() != nullptr;
         return Type{BaseType::Int, isUnsigned};
     }
+    if (dynamic_cast<CParser::FloatTypeContext *>(ctx) != nullptr) {
+        return Type{BaseType::Float, false};
+    }
+    if (dynamic_cast<CParser::DoubleTypeContext *>(ctx) != nullptr) {
+        return Type{BaseType::Double, false};
+    }
     if (auto *c = dynamic_cast<CParser::StructTypeContext *>(ctx)) {
         // Only the tag is recorded here - this layer has no TypeWidths, so
         // size/alignment resolution (and checking the tag is actually
@@ -287,8 +340,15 @@ std::vector<ArrayInitElem> buildArrayInit(CParser::ArrayInitContext *ctx) {
     for (auto *elem : ctx->elem) {
         ArrayInitElem e;
         if (auto *num = dynamic_cast<CParser::NumArrayElemContext *>(elem)) {
-            e.value = parsePlainNumber(num->NUMBER()->getSymbol(), num, "an array initializer element");
-            if (num->sign) e.value = -e.value;
+            if (num->FLOAT_NUMBER() != nullptr) {
+                e.isFloat = true;
+                Type type;
+                parseFloatLiteral(num->FLOAT_NUMBER()->getText(), e.floatValue, type);
+                if (num->sign) e.floatValue = -e.floatValue;
+            } else {
+                e.value = parsePlainNumber(num->NUMBER()->getSymbol(), num, "an array initializer element");
+                if (num->sign) e.value = -e.value;
+            }
         } else if (auto *sym = dynamic_cast<CParser::SymArrayElemContext *>(elem)) {
             e.isSymbol = true;
             e.symbolName = sym->IDENT()->getText();
@@ -419,6 +479,13 @@ ExprPtr buildCondExpr(CParser::CondExprContext *ctx) {
         e->kind = ExprKind::IntLit;
         e->line = c->getStart()->getLine();
         parseIntLiteral(c->NUMBER()->getText(), c, e->intValue, e->type);
+        return e;
+    }
+    if (auto *c = dynamic_cast<CParser::FloatNumExprContext *>(ctx)) {
+        auto e = std::make_unique<Expr>();
+        e->kind = ExprKind::FloatLit;
+        e->line = c->getStart()->getLine();
+        parseFloatLiteral(c->FLOAT_NUMBER()->getText(), e->floatValue, e->type);
         return e;
     }
     if (auto *c = dynamic_cast<CParser::CharExprContext *>(ctx)) {
@@ -678,10 +745,17 @@ StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
         s->type = buildType(c->typeSpec());
         s->isConst = c->cst != nullptr;
         if (c->val || c->identVal) {
+            ConstInit init = resolveConstOrEnumInit(c->val, c->sign, c->identVal, c, "a static local initializer");
             auto lit = std::make_unique<Expr>();
-            lit->kind = ExprKind::IntLit;
             lit->line = c->getStart()->getLine();
-            lit->intValue = resolveConstOrEnum(c->val, c->sign, c->identVal, c, "a static local initializer");
+            if (init.isFloat) {
+                lit->kind = ExprKind::FloatLit;
+                lit->floatValue = init.floatValue;
+                lit->type = init.floatType;
+            } else {
+                lit->kind = ExprKind::IntLit;
+                lit->intValue = init.intValue;
+            }
             s->initOrReturnOrExpr = std::move(lit);
         } else if (s->isConst) {
             err(c, "a 'const' local must have an initializer");
@@ -984,8 +1058,14 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                 g.isStatic = sc->stat != nullptr;
                 g.isConst = sc->cst != nullptr;
                 if (sc->val || sc->identVal) {
+                    ConstInit init = resolveConstOrEnumInit(sc->val, sc->sign, sc->identVal, sc, "a global initializer");
                     g.hasInit = true;
-                    g.initValue = resolveConstOrEnum(sc->val, sc->sign, sc->identVal, sc, "a global initializer");
+                    g.hasFloatInit = init.isFloat;
+                    if (init.isFloat) {
+                        g.floatInitValue = init.floatValue;
+                    } else {
+                        g.initValue = init.intValue;
+                    }
                 }
                 if (g.isConst && !g.hasInit) {
                     err(sc, "a 'const' global must have an initializer");

@@ -647,6 +647,8 @@ void M6809Codegen::genStmt(const ir::Stmt &s) {
 
 void M6809Codegen::genExpr(const ir::Expr &e) {
     switch (e.kind) {
+        case ir::ExprKind::FloatLit:
+            err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 genWideLoadLiteral(e.intValue, wordCountOf(e.type));

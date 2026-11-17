@@ -47,6 +47,14 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitFloatType(CParser::FloatTypeContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitDoubleType(CParser::DoubleTypeContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitStructType(CParser::StructTypeContext *ctx) override {
     return visitChildren(ctx);
   }
@@ -300,6 +308,10 @@ public:
   }
 
   virtual std::any visitBitAndExpr(CParser::BitAndExprContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitFloatNumExpr(CParser::FloatNumExprContext *ctx) override {
     return visitChildren(ctx);
   }
 

@@ -14,118 +14,143 @@ std::string bytesOf(std::initializer_list<unsigned char> bs) {
     return std::string(bs.begin(), bs.end());
 }
 
-// A 4-byte big-endian value, as every `LIT` immediate and `.word` cell is encoded.
+// A 4-byte big-endian value, as every `LDI` immediate and `.word` cell is encoded.
 std::string be32(uint32_t v) {
     std::string s(4, '\0');
     for (int i = 0; i < 4; i++) s[i] = static_cast<char>((v >> (24 - 8 * i)) & 0xFF);
     return s;
 }
 
-// Every one of the 22 real opcodes (docs/SPEC.md section 2's own table), bare, in numeric order -
-// `lit` alone needs an operand, so it gets its own immediate right after its opcode byte.
-void testEveryOpcodeBareEncoding() {
+// Every one of the 20 real opcodes (docs/SPEC.md section 2's own table), with the exact
+// register-operand count (and, for `ldi`, the trailing immediate) its own shape needs, in
+// numeric order.
+void testEveryOpcodeEncoding() {
     std::string asmText =
         "ret\n"
-        "lit 1\n"
-        "ld\n"
-        "st\n"
-        "dei\n"
-        "deo\n"
-        "jmp\n"
-        "jcn\n"
-        "cal\n"
-        "add\n"
-        "sub\n"
-        "mul\n"
-        "div\n"
-        "and\n"
-        "ora\n"
-        "xor\n"
-        "equ\n"
-        "lth\n"
-        "push\n"
-        "pop\n"
-        "lds\n"
-        "sts\n";
+        "ldi r0, 1\n"
+        "mov r1, r2\n"
+        "ld r0, r1\n"
+        "st r0, r1\n"
+        "dei r0, r1\n"
+        "deo r0, r1\n"
+        "jmp r0\n"
+        "jcn r0, r1\n"
+        "cal r0\n"
+        "add r0, r1, r2\n"
+        "sub r0, r1, r2\n"
+        "mul r0, r1, r2\n"
+        "div r0, r1, r2\n"
+        "and r0, r1, r2\n"
+        "ora r0, r1, r2\n"
+        "xor r0, r1, r2\n"
+        "ceq r0, r1, r2\n"
+        "clt r0, r1, r2\n"
+        "nop\n";
     std::string bytes = rcc::assembleVex(asmText);
-    std::string expected = bytesOf({0x00, 0x01}) + be32(1) +
-                            bytesOf({0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E,
-                                     0x0F, 0x10, 0x11, 0x13, 0x14, 0x15, 0x16});
-    require(bytes == expected, "the 22 bare opcodes didn't encode to their own spec-table values in order");
+    std::string expected = bytesOf({0x00}) + bytesOf({0x01, 0x00}) + be32(1) + bytesOf({0x02, 0x01, 0x02}) +
+                            bytesOf({0x03, 0x00, 0x01}) + bytesOf({0x04, 0x00, 0x01}) + bytesOf({0x05, 0x00, 0x01}) +
+                            bytesOf({0x06, 0x00, 0x01}) + bytesOf({0x07, 0x00}) + bytesOf({0x08, 0x00, 0x01}) +
+                            bytesOf({0x09, 0x00}) + bytesOf({0x0A, 0x00, 0x01, 0x02}) +
+                            bytesOf({0x0B, 0x00, 0x01, 0x02}) + bytesOf({0x0C, 0x00, 0x01, 0x02}) +
+                            bytesOf({0x0D, 0x00, 0x01, 0x02}) + bytesOf({0x0E, 0x00, 0x01, 0x02}) +
+                            bytesOf({0x0F, 0x00, 0x01, 0x02}) + bytesOf({0x10, 0x00, 0x01, 0x02}) +
+                            bytesOf({0x11, 0x00, 0x01, 0x02}) + bytesOf({0x12, 0x00, 0x01, 0x02}) + bytesOf({0x13});
+    require(bytes == expected, "the 20 opcodes didn't encode to their own spec-table shape/values in order");
 }
 
-// The `.r` suffix sets bit 5 (0x20) on every mnemonic that has one - including the ones the
-// machine itself ignores it on (docs/SPEC.md section 2: "All other instructions ignore it"),
-// since encoding it is this assembler's job, not deciding whether it matters.
-void testRelFlagSetsBit5OnEveryMnemonic() {
-    std::string bytes = rcc::assembleVex(
-        "ret.r\n"
-        "ld.r\n"
-        "st.r\n"
-        "jmp.r\n"
-        "jcn.r\n"
-        "cal.r\n"
-        "add.r\n"
-        "lds.r\n"
-        "sts.r\n");
-    std::string expected = bytesOf({0x20, 0x22, 0x23, 0x26, 0x27, 0x28, 0x29, 0x35, 0x36});
-    require(bytes == expected, "'.r' should OR 0x20 into every one of these mnemonics' opcode byte");
-}
-
-void testUpperCaseMnemonicsAccepted() {
-    std::string bytes = rcc::assembleVex("RET\nLIT 5\nADD\n");
-    std::string expected = bytesOf({0x00, 0x01}) + be32(5) + bytesOf({0x09});
-    require(bytes == expected, "mnemonics should be case-insensitive");
-}
-
-void testLitTakesExactlyOneOperand() {
+void testNopTakesNoOperand() {
     bool threw = false;
     try {
-        rcc::assembleVex("lit\n");
+        rcc::assembleVex("nop r0\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
-    require(threw, "'lit' with no operand should be rejected");
+    require(threw, "'nop' takes no operand at all");
+}
+
+void testUpperCaseMnemonicsAndRegistersAccepted() {
+    std::string bytes = rcc::assembleVex("RET\nLDI R0, 5\nADD R0, R1, R2\n");
+    std::string expected = bytesOf({0x00}) + bytesOf({0x01, 0x00}) + be32(5) + bytesOf({0x0A, 0x00, 0x01, 0x02});
+    require(bytes == expected, "mnemonics and register names should both be case-insensitive");
+}
+
+void testRegisterOperandOutOfRangeRejected() {
+    bool threw = false;
+    try {
+        rcc::assembleVex("jmp r8\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'r8' isn't a valid register (only r0-r7 exist) and should be rejected");
+}
+
+void testRegisterOperandMustBePlain() {
+    // A register operand is never resolved against the label table or label arithmetic the
+    // way `ldi`'s immediate is - a label name, a number out of r0-r7 shape, or `reg+1` must
+    // all be rejected at parse time, not treated as a (wrong) register.
+    bool threw = false;
+    try {
+        rcc::assembleVex("jmp some_label\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "a label name isn't a valid register operand");
 
     threw = false;
     try {
-        rcc::assembleVex("lit 1, 2\n");
+        rcc::assembleVex("jmp r0+1\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
-    require(threw, "'lit' with two operands should be rejected");
+    require(threw, "'r0+1' (label-arithmetic shape) isn't a valid plain register operand");
 }
 
-void testBareMnemonicRejectsAnOperand() {
+void testWrongOperandCountRejected() {
     bool threw = false;
     try {
-        rcc::assembleVex("add 5\n");
+        rcc::assembleVex("ldi r0\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
-    require(threw, "'add' takes no operand - every operand of a non-'lit' instruction lives on the stack");
+    require(threw, "'ldi' with no immediate should be rejected");
+
+    threw = false;
+    try {
+        rcc::assembleVex("add r0, r1\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'add' with only two operands (needs three) should be rejected");
+
+    threw = false;
+    try {
+        rcc::assembleVex("ret r0\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'ret' takes no operand at all");
 }
 
 void testUnassignedOpcodeRejected() {
-    // 0x12 (the old GTH slot) and 0x17-0x1F are unassigned per docs/SPEC.md section 2 - this
-    // dialect has no mnemonic for them at all, so they're rejected at parse time, not encoded.
+    // 0x14-0xFF are unassigned per docs/SPEC.md section 2 - this dialect has no mnemonic for
+    // them at all, so they're rejected at parse time, not encoded.
     bool threw = false;
     try {
-        rcc::assembleVex("gth\n");
+        rcc::assembleVex("cgt r0, r1, r2\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
-    require(threw, "'gth' isn't a real vex mnemonic and should be rejected");
+    require(threw, "'cgt' isn't a real vex mnemonic (CLT with swapped operands covers it) and should be rejected");
 }
 
 // `.org` pads forward with zero bytes and only ever moves forward (docs/ASSEMBLER.md). A
 // whole-program compile's offsets are counted from kVexBaseAddress (0x0100) - see
 // VexAssembler.h's own comment - so `.org` targets an absolute address here, not a file-relative
-// one: `add` (one byte) at 0x0100 leaves the next offset at 0x0101, and `.org 0x0105` pads
+// one: `ret` (one byte) at 0x0100 leaves the next offset at 0x0101, and `.org 0x0105` pads
 // exactly 4 bytes to reach it.
 void testOrgPadsForward() {
-    std::string bytes = rcc::assembleVex("add\n.org 0x0105\nsub\n");
-    std::string expected = bytesOf({0x09, 0x00, 0x00, 0x00, 0x00, 0x0A});
+    std::string bytes = rcc::assembleVex("ret\n.org 0x0105\nret\n");
+    std::string expected = bytesOf({0x00, 0x00, 0x00, 0x00, 0x00, 0x00});
     require(bytes == expected, "'.org' should pad with exactly the right number of zero bytes");
 }
 
@@ -162,16 +187,18 @@ void testZeroDirective() {
     require(bytes == expected, "'.zero 3' should emit exactly 3 zero bytes before 'ret'");
 }
 
-// Label arithmetic (`label+4`, `label-1`) and forward references, resolved in a second pass.
+// Label arithmetic (`label+4`, `label-1`) and forward references, resolved in a second pass -
+// only ever inside `ldi`'s own immediate, never a register operand (see
+// testRegisterOperandMustBePlain()).
 void testLabelArithmeticAndForwardReference() {
     std::string bytes = rcc::assembleVex(
-        "lit target+4\n"
-        "jmp\n"
+        "ldi r0, target+4\n"
+        "jmp r0\n"
         "target: .zero 4\n"
         "ret\n");
-    // lit(1)+imm(4)+jmp(1) = 6 bytes after kVexBaseAddress; target sits at base+6, so
-    // target+4 = base+10.
-    std::string expected = bytesOf({0x01}) + be32(rcc::kVexBaseAddress + 10) + bytesOf({0x06}) +
+    // ldi(2 bytes)+imm(4)+jmp(2) = 8 bytes after kVexBaseAddress; target sits at base+8, so
+    // target+4 = base+12.
+    std::string expected = bytesOf({0x01, 0x00}) + be32(rcc::kVexBaseAddress + 12) + bytesOf({0x07, 0x00}) +
                             bytesOf({0x00, 0x00, 0x00, 0x00}) + bytesOf({0x00});
     require(bytes == expected, "label arithmetic/forward reference didn't resolve to the expected absolute address");
 }
@@ -179,7 +206,7 @@ void testLabelArithmeticAndForwardReference() {
 void testUndefinedSymbolThrowsInPlainMode() {
     bool threw = false;
     try {
-        rcc::assembleVex("lit FN_other\ncal\n");
+        rcc::assembleVex("ldi r2, FN_other\ncal r2\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
@@ -191,9 +218,9 @@ void testUndefinedSymbolThrowsInPlainMode() {
 // labels here resolve relative to offset 0 until GenericLinker adds the real base in.
 void testObjectModeRelocations() {
     rcc::ObjectFile obj = rcc::assembleVexObject(
-        "here: lit here\n"
-        "lit FN_other\n"
-        "cal\n");
+        "here: ldi r0, here\n"
+        "ldi r2, FN_other\n"
+        "cal r2\n");
     require(obj.relocations.size() == 2, "expected exactly two relocations: '..' for 'here', and 'FN_other' itself");
     bool sawDotDot = false, sawOther = false;
     for (const auto &r : obj.relocations) {
@@ -201,7 +228,7 @@ void testObjectModeRelocations() {
         if (r.symbolName == "..") sawDotDot = true;
         if (r.symbolName == "FN_other") sawOther = true;
     }
-    require(sawDotDot, "a same-object label used in a 'lit' should get a '..' base-shift relocation");
+    require(sawDotDot, "a same-object label used in an 'ldi' should get a '..' base-shift relocation");
     require(sawOther, "an undefined symbol should become a relocation, not a hard error, in object mode");
 
     bool foundOther = false;
@@ -217,7 +244,7 @@ void testObjectModeRelocations() {
 void testNoBracketedOperand() {
     bool threw = false;
     try {
-        rcc::assembleVex("lit [5]\n");
+        rcc::assembleVex("ldi r0, [5]\n");
     } catch (const std::runtime_error &) {
         threw = true;
     }
@@ -228,12 +255,13 @@ void testNoBracketedOperand() {
 
 int main() {
     try {
-        testEveryOpcodeBareEncoding();
-        testRelFlagSetsBit5OnEveryMnemonic();
-        testUpperCaseMnemonicsAccepted();
-        testLitTakesExactlyOneOperand();
-        testBareMnemonicRejectsAnOperand();
+        testEveryOpcodeEncoding();
+        testUpperCaseMnemonicsAndRegistersAccepted();
+        testRegisterOperandOutOfRangeRejected();
+        testRegisterOperandMustBePlain();
+        testWrongOperandCountRejected();
         testUnassignedOpcodeRejected();
+        testNopTakesNoOperand();
         testOrgPadsForward();
         testOrgCannotMoveBackward();
         testByteShortWordDirectives();

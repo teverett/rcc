@@ -502,5 +502,6 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	./tests/run_zx81_rt_tests.sh $(TARGET)
 	./tests/run_const_tests.sh $(TARGET)
 	./tests/run_register_tests.sh $(TARGET)
+	./tests/run_float_tests.sh $(TARGET)
 	./tests/run_tests.sh $(TARGET) --target=vex
 	$(MAKE) -C examples/vex test

@@ -55,7 +55,8 @@ std::string canonArrayInit(const std::vector<ir::ArrayInitElem> &init, CanonCtx 
     std::string out = "{";
     for (const auto &elem : init) {
         out += elem.isSymbol ? (elem.slot ? "s" + canonSlot(elem.slot, ctx) : "f" + canonFunc(elem.func, ctx))
-                              : "v" + std::to_string(elem.value);
+                              : elem.isFloat ? "vf" + std::to_string(elem.floatValue)
+                                             : "v" + std::to_string(elem.value);
         out += ",";
     }
     return out + "}";
@@ -67,6 +68,9 @@ std::string canonExpr(const ir::Expr *e, CanonCtx &ctx) {
     switch (e->kind) {
         case ir::ExprKind::IntLit:
             out = "I" + std::to_string(e->intValue);
+            break;
+        case ir::ExprKind::FloatLit:
+            out = "FL" + std::to_string(e->floatValue);
             break;
         case ir::ExprKind::Var:
             out = "V" + canonSlot(e->slot, ctx);
@@ -143,10 +147,13 @@ std::string canonStmt(const ir::Stmt *s, CanonCtx &ctx) {
             return "continue";
         case ir::StmtKind::LocalDecl: {
             const ir::Slot *d = s->declSlot;
+            bool isFloatDecl = d->type.base == BaseType::Float || d->type.base == BaseType::Double;
             std::string out = "decl" + canonSlot(d, ctx) + "#" + typeKey(d->type) + "#" +
                                std::to_string(d->arraySize) + "#" +
-                               (d->hasInit ? "i" + std::to_string(d->initValue) : "n") + "#" +
-                               canonArrayInit(d->arrayInit, ctx);
+                               (d->hasInit ? "i" + (isFloatDecl ? std::to_string(d->floatInitValue)
+                                                                : std::to_string(d->initValue))
+                                           : "n") +
+                               "#" + canonArrayInit(d->arrayInit, ctx);
             if (s->initOrReturnOrExpr) out += "=" + canonExpr(s->initOrReturnOrExpr.get(), ctx);
             return out;
         }
