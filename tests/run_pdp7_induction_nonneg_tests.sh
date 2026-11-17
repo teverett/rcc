@@ -10,7 +10,7 @@
 # its address taken, somewhere else in the function) must still pay the
 # original 2 (the outer sign check, plus the subtract path's own).
 #
-# Three tests:
+# Five tests:
 #   test_safe_for_loop_skips_outer_sign_check - the plain idiom, nothing
 #       else touches `i` - expects exactly 1 `sma` and the pass's own
 #       diagnostic.
@@ -21,6 +21,15 @@
 #   test_address_taken_keeps_outer_sign_check - `&i` is taken (passed to
 #       another function) after the loop - expects the same decline, since
 #       the callee could leave `i` negative.
+#   test_decrementing_loop_skips_outer_sign_check - the decrementing
+#       counterpart, `for(i=N; i>0; i=i-1)` - the `i>0` guard forces `i`
+#       high enough to absorb a step-1 decrement without crossing zero, so
+#       this is just as safe as the incrementing idiom - expects the same
+#       1 `sma` and diagnostic.
+#   test_decrementing_loop_insufficient_bound_keeps_outer_sign_check - same
+#       shape, but the decrement step (2) is bigger than what the guard
+#       (`i>0`) proves `i` is at least (1) - `i` really can go negative here
+#       (10,8,...,2,0,-2 checked against >0), so the pass must decline.
 #
 # Usage: tests/run_pdp7_induction_nonneg_tests.sh [path/to/rcc]
 
@@ -150,8 +159,80 @@ EOF
     return 0
 }
 
+test_decrementing_loop_skips_outer_sign_check() {
+    local dir="$tmpdir/decr"
+    mkdir -p "$dir"
+    cat >"$dir/t.c" <<'EOF'
+int main() {
+    int i;
+    int sum;
+    sum = 0;
+    for (i = 10; i > 0; i = i - 1) {
+        sum = sum + i;
+    }
+    return sum;
+}
+EOF
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+        echo "FAIL test_decrementing_loop_skips_outer_sign_check: fixture failed to compile"
+        cat "$dir/log"
+        return 1
+    fi
+    if ! grep -q "induction-nonneg: fn main: proved \`i\` stays non-negative" "$dir/log"; then
+        echo "FAIL test_decrementing_loop_skips_outer_sign_check: expected the pass's own diagnostic, got:"
+        cat "$dir/log"
+        return 1
+    fi
+    local smaCount
+    smaCount="$(grep -c 'sma' "$dir/t.s")"
+    if [ "$smaCount" -ne 1 ]; then
+        echo "FAIL test_decrementing_loop_skips_outer_sign_check: expected exactly 1 'sma', found $smaCount"
+        return 1
+    fi
+    echo "PASS test_decrementing_loop_skips_outer_sign_check (1 occurrence of 'sma', diagnostic present)"
+    return 0
+}
+
+test_decrementing_loop_insufficient_bound_keeps_outer_sign_check() {
+    local dir="$tmpdir/decrbound"
+    mkdir -p "$dir"
+    cat >"$dir/t.c" <<'EOF'
+int main() {
+    int i;
+    int sum;
+    sum = 0;
+    for (i = 10; i > 0; i = i - 2) {
+        sum = sum + i;
+    }
+    return sum;
+}
+EOF
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+        echo "FAIL test_decrementing_loop_insufficient_bound_keeps_outer_sign_check: fixture failed to compile"
+        cat "$dir/log"
+        return 1
+    fi
+    if grep -q "induction-nonneg" "$dir/log"; then
+        echo "FAIL test_decrementing_loop_insufficient_bound_keeps_outer_sign_check: pass fired despite" \
+             "a decrement step (2) bigger than the guard (i>0) proves (1):"
+        cat "$dir/log"
+        return 1
+    fi
+    local smaCount
+    smaCount="$(grep -c 'sma' "$dir/t.s")"
+    if [ "$smaCount" -ne 2 ]; then
+        echo "FAIL test_decrementing_loop_insufficient_bound_keeps_outer_sign_check: expected the" \
+             "original 2 'sma' occurrences (unsafe to drop the outer sign check), found $smaCount"
+        return 1
+    fi
+    echo "PASS test_decrementing_loop_insufficient_bound_keeps_outer_sign_check (2 occurrences of 'sma', no diagnostic)"
+    return 0
+}
+
 test_safe_for_loop_skips_outer_sign_check || fail=1
 test_reassigned_induction_variable_keeps_outer_sign_check || fail=1
 test_address_taken_keeps_outer_sign_check || fail=1
+test_decrementing_loop_skips_outer_sign_check || fail=1
+test_decrementing_loop_insufficient_bound_keeps_outer_sign_check || fail=1
 
 exit $fail

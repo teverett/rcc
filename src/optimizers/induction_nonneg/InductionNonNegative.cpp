@@ -42,6 +42,56 @@ ir::Expr *matchIncrement(ir::Stmt *post, ir::Slot *slot) {
     return nullptr;
 }
 
+// `slot = slot - <positive literal>` (only this operand order - subtraction
+// isn't commutative, so `<lit> - slot` is not a decrement of `slot`), or the
+// equivalent `slot -= <positive literal>` CompoundAssign. Returns the
+// matched Expr the same way matchIncrement() does, and the literal step
+// subtracted each time.
+ir::Expr *matchDecrement(ir::Stmt *post, ir::Slot *slot, long &step) {
+    if (!post || post->kind != ir::StmtKind::ExprStmt) return nullptr;
+    ir::Expr *e = post->initOrReturnOrExpr.get();
+    if (!e) return nullptr;
+    if (e->kind == ir::ExprKind::CompoundAssign && isDirectWrite(*e, slot) && e->op == "-" &&
+        isPositiveIntLit(e->rhs.get())) {
+        step = e->rhs->intValue;
+        return e;
+    }
+    if (e->kind == ir::ExprKind::Assign && isDirectWrite(*e, slot) && e->rhs && e->rhs->kind == ir::ExprKind::Binary &&
+        e->rhs->op == "-") {
+        const ir::Expr *lhs = e->rhs->lhs.get();
+        const ir::Expr *rhs = e->rhs->rhs.get();
+        bool lhsIsSlot = lhs && lhs->kind == ir::ExprKind::Var && lhs->slot == slot;
+        if (lhsIsSlot && isPositiveIntLit(rhs)) {
+            step = rhs->intValue;
+            return e;
+        }
+    }
+    return nullptr;
+}
+
+// A decrementing loop's guard, `slot > <literal>` or `slot >= <literal>`,
+// proves `slot` stays non-negative after a matched decrement only if the
+// guard already forces `slot` high enough to absorb that decrement without
+// crossing zero: whenever the guard lets the body (and so the decrement)
+// run, `slot` is at least `bound` - `C+1` for `slot > C`, `C` for
+// `slot >= C`. The caller still has to check `bound >= step` itself.
+bool matchDecrementGuardBound(const ir::Expr *cond, const ir::Slot *slot, long &bound) {
+    if (!cond || cond->kind != ir::ExprKind::Binary) return false;
+    const ir::Expr *lhs = cond->lhs.get();
+    const ir::Expr *rhs = cond->rhs.get();
+    if (!lhs || lhs->kind != ir::ExprKind::Var || lhs->slot != slot) return false;
+    if (!rhs || rhs->kind != ir::ExprKind::IntLit) return false;
+    if (cond->op == ">") {
+        bound = rhs->intValue + 1;
+        return true;
+    }
+    if (cond->op == ">=") {
+        bound = rhs->intValue;
+        return true;
+    }
+    return false;
+}
+
 bool exprReferencesSlot(const ir::Expr *e, const ir::Slot *slot) {
     if (!e) return false;
     if (e->slot == slot) return true;
@@ -86,6 +136,15 @@ void findCandidates(ir::Stmt *s, std::vector<Candidate> &out) {
                         if (exprReferencesSlot(whileStmt->cond.get(), slot)) {
                             if (ir::Expr *incExpr = matchIncrement(whileStmt->postStmt.get(), slot)) {
                                 out.push_back({slot, initExpr, incExpr});
+                            } else {
+                                long step = 0;
+                                if (ir::Expr *decExpr = matchDecrement(whileStmt->postStmt.get(), slot, step)) {
+                                    long bound = 0;
+                                    if (matchDecrementGuardBound(whileStmt->cond.get(), slot, bound) &&
+                                        bound >= step) {
+                                        out.push_back({slot, initExpr, decExpr});
+                                    }
+                                }
                             }
                         }
                     }

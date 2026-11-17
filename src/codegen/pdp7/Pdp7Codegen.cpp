@@ -1,6 +1,7 @@
 #include "Pdp7Codegen.h"
 
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 #include "Pdp7Assembler.h"
@@ -1846,10 +1847,21 @@ void Pdp7Codegen::genCompareCells(const ir::Expr &a, const ir::Expr &b, bool uns
         if (unsignedCmp) code_ << "   xor " << literalLabel(0400000L) << "\n";
     };
     // Whether `e`'s sign is knowable with no runtime cost at all - a
-    // literal, or a slot the induction-nonneg pass proved non-negative
-    // (see IR.h's own `knownNonNegative`).
+    // literal, a slot the induction-nonneg pass proved non-negative (see
+    // IR.h's own `knownNonNegative`), or a boolean-valued expression (a
+    // comparison/logical operator, or `!`), which always evaluates to 0 or
+    // 1 regardless of its own operands' values. Only consulted as the
+    // *other* operand in ready()'s own gate below, never to make `e` itself
+    // a ready cell - simpleCell() still can't produce one for a Binary/
+    // Unary node, so this only ever changes whether a sibling operand's
+    // already-known sign gets applied, never what that sign is.
+    static const std::unordered_set<std::string> kBoolOps = {"==", "!=", "<", "<=", ">", ">=", "&&", "||"};
     auto hasStaticSign = [&](const ir::Expr &e) {
-        return e.kind == ir::ExprKind::IntLit || (e.kind == ir::ExprKind::Var && e.slot && e.slot->knownNonNegative);
+        if (e.kind == ir::ExprKind::IntLit) return true;
+        if (e.kind == ir::ExprKind::Var && e.slot && e.slot->knownNonNegative) return true;
+        if (e.kind == ir::ExprKind::Unary && e.op == "!") return true;
+        if (e.kind == ir::ExprKind::Binary && kBoolOps.count(e.op)) return true;
+        return false;
     };
     // A cell already holding the operand's comparison value: a
     // constant (flipped at compile time) or, for a signed comparison,
