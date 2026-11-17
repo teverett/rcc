@@ -21,7 +21,7 @@ std::string be32(uint32_t v) {
     return s;
 }
 
-// Every one of the 20 real opcodes (docs/SPEC.md section 2's own table), with the exact
+// Every one of the 25 real opcodes (docs/SPEC.md section 2's own table), with the exact
 // register-operand count (and, for `ldi`, the trailing immediate) its own shape needs, in
 // numeric order.
 void testEveryOpcodeEncoding() {
@@ -45,7 +45,12 @@ void testEveryOpcodeEncoding() {
         "xor r0, r1, r2\n"
         "ceq r0, r1, r2\n"
         "clt r0, r1, r2\n"
-        "nop\n";
+        "nop\n"
+        "psh r0\n"
+        "pop r1\n"
+        "iret\n"
+        "sei\n"
+        "cli\n";
     std::string bytes = rcc::assembleVex(asmText);
     std::string expected = bytesOf({0x00}) + bytesOf({0x01, 0x00}) + be32(1) + bytesOf({0x02, 0x01, 0x02}) +
                             bytesOf({0x03, 0x00, 0x01}) + bytesOf({0x04, 0x00, 0x01}) + bytesOf({0x05, 0x00, 0x01}) +
@@ -54,8 +59,10 @@ void testEveryOpcodeEncoding() {
                             bytesOf({0x0B, 0x00, 0x01, 0x02}) + bytesOf({0x0C, 0x00, 0x01, 0x02}) +
                             bytesOf({0x0D, 0x00, 0x01, 0x02}) + bytesOf({0x0E, 0x00, 0x01, 0x02}) +
                             bytesOf({0x0F, 0x00, 0x01, 0x02}) + bytesOf({0x10, 0x00, 0x01, 0x02}) +
-                            bytesOf({0x11, 0x00, 0x01, 0x02}) + bytesOf({0x12, 0x00, 0x01, 0x02}) + bytesOf({0x13});
-    require(bytes == expected, "the 20 opcodes didn't encode to their own spec-table shape/values in order");
+                            bytesOf({0x11, 0x00, 0x01, 0x02}) + bytesOf({0x12, 0x00, 0x01, 0x02}) +
+                            bytesOf({0x13}) + bytesOf({0x14, 0x00}) + bytesOf({0x15, 0x01}) + bytesOf({0x16}) +
+                            bytesOf({0x17}) + bytesOf({0x18});
+    require(bytes == expected, "the 25 opcodes didn't encode to their own spec-table shape/values in order");
 }
 
 void testNopTakesNoOperand() {
@@ -132,7 +139,7 @@ void testWrongOperandCountRejected() {
 }
 
 void testUnassignedOpcodeRejected() {
-    // 0x14-0xFF are unassigned per docs/SPEC.md section 2 - this dialect has no mnemonic for
+    // 0x19-0xFF are unassigned per docs/SPEC.md section 2 - this dialect has no mnemonic for
     // them at all, so they're rejected at parse time, not encoded.
     bool threw = false;
     try {
@@ -141,6 +148,39 @@ void testUnassignedOpcodeRejected() {
         threw = true;
     }
     require(threw, "'cgt' isn't a real vex mnemonic (CLT with swapped operands covers it) and should be rejected");
+}
+
+// `PSH`/`POP` each take exactly one register operand (`Ra`/`Rd` respectively) - docs/SPEC.md
+// section 2's own length table, added in v1.2.
+void testPshPopTakeExactlyOneOperand() {
+    bool threw = false;
+    try {
+        rcc::assembleVex("psh r0, r1\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'psh' with two operands (takes exactly one) should be rejected");
+
+    threw = false;
+    try {
+        rcc::assembleVex("pop\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'pop' with no operand (takes exactly one) should be rejected");
+}
+
+// `IRET`/`SEI`/`CLI` all take no operands at all - same shape as `RET`/`NOP`.
+void testIretSeiCliTakeNoOperand() {
+    for (const char *mnemonic : {"iret", "sei", "cli"}) {
+        bool threw = false;
+        try {
+            rcc::assembleVex(std::string(mnemonic) + " r0\n");
+        } catch (const std::runtime_error &) {
+            threw = true;
+        }
+        require(threw, "an operand on a zero-operand mnemonic should be rejected");
+    }
 }
 
 // `.org` pads forward with zero bytes and only ever moves forward (docs/ASSEMBLER.md). A
@@ -262,6 +302,8 @@ int main() {
         testWrongOperandCountRejected();
         testUnassignedOpcodeRejected();
         testNopTakesNoOperand();
+        testPshPopTakeExactlyOneOperand();
+        testIretSeiCliTakeNoOperand();
         testOrgPadsForward();
         testOrgCannotMoveBackward();
         testByteShortWordDirectives();

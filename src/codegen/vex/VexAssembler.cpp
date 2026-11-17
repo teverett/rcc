@@ -30,7 +30,8 @@ const std::unordered_map<std::string, uint8_t> &opcodes() {
         {"ret", 0x00}, {"ldi", 0x01}, {"mov", 0x02}, {"ld", 0x03}, {"st", 0x04}, {"dei", 0x05},
         {"deo", 0x06}, {"jmp", 0x07}, {"jcn", 0x08}, {"cal", 0x09}, {"add", 0x0A}, {"sub", 0x0B},
         {"mul", 0x0C}, {"div", 0x0D}, {"and", 0x0E}, {"ora", 0x0F}, {"xor", 0x10}, {"ceq", 0x11},
-        {"clt", 0x12}, {"nop", 0x13},
+        {"clt", 0x12}, {"nop", 0x13}, {"psh", 0x14}, {"pop", 0x15}, {"iret", 0x16}, {"sei", 0x17},
+        {"cli", 0x18},
     };
     return table;
 }
@@ -48,6 +49,8 @@ const std::unordered_map<std::string, OpShape> &opShapes() {
         {"jcn", {2, false}}, {"cal", {1, false}}, {"add", {3, false}}, {"sub", {3, false}},
         {"mul", {3, false}}, {"div", {3, false}}, {"and", {3, false}}, {"ora", {3, false}},
         {"xor", {3, false}}, {"ceq", {3, false}}, {"clt", {3, false}}, {"nop", {0, false}},
+        {"psh", {1, false}}, {"pop", {1, false}}, {"iret", {0, false}}, {"sei", {0, false}},
+        {"cli", {0, false}},
     };
     return table;
 }

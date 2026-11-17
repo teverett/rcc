@@ -63,22 +63,8 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Install ANTLR C++ runtime and target simulators (Homebrew)
-        run: brew install antlr4-cpp-runtime open-simh qemu moarvm
-
-      # The "Run rcc's own test suite..." step below drives real,
-      # independent CPU cores for the 6502/65c02 (py65) and 8080/z80
-      # (z80-python) targets - see tests/run_tests.sh's own per-target
-      # comments for why each one needs its own PyPI package rather
-      # than a from-scratch emulator. `--break-system-packages`: this
-      # runner's system
-      # Python is PEP 668 "externally managed" (confirmed directly -
-      # a plain `pip3 install` here fails with exactly that error),
-      # and a dedicated venv would be one more thing to keep in sync
-      # for no real benefit - nothing else on this runner depends on
-      # its system Python packages.
-      - name: Install Python simulator packages (py65, z80-python)
-        run: pip3 install --break-system-packages py65 z80-python
+      - name: Install ANTLR C++ runtime (Homebrew)
+        run: brew install antlr4-cpp-runtime
 
       - name: Build
         run: make
@@ -88,35 +74,6 @@ jobs:
 
       - name: Test internal hosted linkers and macOS runtime
         run: bash tests/run_hosted_macos_link_tests.sh build/bin/rcc
-
-      # Drives a real, independent CPU core for every target
-      # tests/run_tests.sh has one wired up for - this is what the
-      # Homebrew formulas/PyPI packages installed above are actually
-      # for; until now nothing in this job called them. `--target=8086`
-      # is skipped: its execution is deliberately disabled (no boot-
-      # sector image to run it under - see docs/known-bugs.md's own
-      # entry on this), so `make test`'s own recipe hard-fails there;
-      # every target after it in that same recipe passes cleanly on
-      # its own (confirmed directly, same package versions as above).
-      - name: Run rcc's own test suite against every simulator-backed target
-        run: |
-          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
-            echo "::group::--target=$target"
-            ./tests/run_tests.sh build/bin/rcc --target="$target"
-            echo "::endgroup::"
-          done
-
-      # Same battery, with --optimize passed through to every compile (see
-      # docs/optimization.md) - confirms the IR optimizer pipeline never
-      # changes a program's own observable result, on the same real CPU
-      # cores as the unoptimized run above.
-      - name: Run rcc's own test suite against every simulator-backed target, with --optimize
-        run: |
-          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
-            echo "::group::--target=$target --optimize"
-            ./tests/run_tests.sh build/bin/rcc --target="$target" --optimize
-            echo "::endgroup::"
-          done
 
       # `rcc` is dynamically linked against Homebrew's own
       # libantlr4-runtime.dylib, at that formula's own absolute
@@ -176,6 +133,43 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential patchelf libc6-dev-i386
 
+      # `qemu-system` (meta-package) covers every qemu-system-* binary
+      # tests/run_tests.sh drives (qemu-system-i386 for `i386`,
+      # qemu-system-m68k for `68000`/`mc68328`, qemu-system-arm for
+      # `stm32`, by way of the qemu-system-misc/qemu-system-x86/
+      # qemu-system-arm sub-packages it pulls in). The two PyPI
+      # packages below drive real, independent CPU cores for the
+      # 6502/65c02 (py65) and 8080/z80 (z80-python) targets, same
+      # reasoning as tests/run_tests.sh's own per-target comments.
+      # `--break-system-packages`: ubuntu-latest's system Python is
+      # PEP 668 "externally managed" the same way the macOS runner's
+      # is, and nothing else on this runner depends on its system
+      # Python packages.
+      - name: Install target simulators (qemu, py65, z80-python)
+        run: |
+          sudo apt-get install -y --no-install-recommends qemu-system
+          pip3 install --break-system-packages py65 z80-python
+
+      # No Ubuntu/Debian package ships the open-simh (4.x) fork
+      # tests/run_tests.sh's `pdp1`/`pdp7` targets need - only the much
+      # older "classic" 3.8.1 `simh` package exists in apt, which this
+      # project doesn't target - so this builds the exact same upstream
+      # release the macOS job's Homebrew formula does, straight from
+      # its own makefile (`CFLAGS_G=-fcommon`: this codebase predates
+      # C23's implicit-`extern` default that modern GCC otherwise
+      # rejects). The optional display/network libraries (libpng, vde,
+      # pcap) that formula also depends on are for simulators'
+      # interactive/GUI features this project's own tests never touch
+      # (plain tape-boot, no console/network device), and open-simh's
+      # own makefile already auto-detects and skips each one that isn't
+      # present rather than failing the whole build - so they're left
+      # off here rather than chased down by exact apt package name.
+      - name: Install open-simh (pdp1/pdp7 emulator, built from source)
+        run: |
+          git clone --branch v3.12-3 --depth 1 https://github.com/open-simh/simh.git /tmp/open-simh
+          make -C /tmp/open-simh GCC=gcc CFLAGS_G=-fcommon all
+          echo "/tmp/open-simh/BIN" >> "$GITHUB_PATH"
+
       - name: Test QEMU monitor harness
         run: python3 tests/qemu_wait_test.py
 
@@ -213,8 +207,38 @@ jobs:
         shell: bash -el {0}
         run: bash tests/run_hosted_windows_link_tests.sh build/bin/rcc
 
-      # Full simulator-backed suites run in the macOS job; monitor
-      # protocol tests use an independent fake monitor on every OS.
+      # Drives a real, independent CPU core for every target
+      # tests/run_tests.sh has one wired up for - this is what the
+      # simulators installed above are actually for. `--target=8086` is
+      # skipped: its execution is deliberately disabled (no boot-sector
+      # image to run it under - see docs/known-bugs.md's own entry on
+      # this), so `make test`'s own recipe hard-fails there; every
+      # target after it in that same recipe passes cleanly on its own.
+      # `shell: bash -el {0}`: rcc isn't bundled with its own copy of
+      # the conda-forge antlr4 runtime yet (that happens below), so it
+      # still needs the conda environment active to resolve it at
+      # runtime, same as the hosted-link tests above.
+      - name: Run rcc's own test suite against every simulator-backed target
+        shell: bash -el {0}
+        run: |
+          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
+            echo "::group::--target=$target"
+            ./tests/run_tests.sh build/bin/rcc --target="$target"
+            echo "::endgroup::"
+          done
+
+      # Same battery, with --optimize passed through to every compile (see
+      # docs/optimization.md) - confirms the IR optimizer pipeline never
+      # changes a program's own observable result, on the same real CPU
+      # cores as the unoptimized run above.
+      - name: Run rcc's own test suite against every simulator-backed target, with --optimize
+        shell: bash -el {0}
+        run: |
+          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
+            echo "::group::--target=$target --optimize"
+            ./tests/run_tests.sh build/bin/rcc --target="$target" --optimize
+            echo "::endgroup::"
+          done
 
       # Bundle non-system libraries and set an executable-relative rpath.
       # The final check verifies resolution without the conda environment.
@@ -281,7 +305,8 @@ jobs:
       - name: Test internal hosted linkers and Windows runtime
         run: bash tests/run_hosted_windows_link_tests.sh build/bin/rcc.exe
 
-      # Full simulator-backed suites run in the macOS job.
+      # Full simulator-backed suites run in the Linux job; monitor
+      # protocol tests use an independent fake monitor on every OS.
 
       # rcc.exe is dynamically linked against several UCRT64 DLLs
       # (libgcc_s_seh-1.dll, libwinpthread-1.dll, libstdc++-6.dll,

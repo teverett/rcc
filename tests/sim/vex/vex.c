@@ -6,13 +6,17 @@
  * pinned to one known-matching interpreter version instead of whatever that repo's own
  * `interpreter/vex.c` happens to be on a given day.
  *
- * vex.c - reference interpreter for the Vex virtual machine (spec v1.1).
+ * vex.c - reference interpreter for the Vex virtual machine (spec v1.2).
  * See docs/SPEC.md for the machine definition.
  *
- * Usage: vex [-t] [-d] [-s steps] program.rom
+ * Usage: vex [-t] [-d] [-s steps] [-i period] [-n count] program.rom
  *   -t        trace every instruction to stderr
  *   -d        dump the final registers and return stack to stderr
  *   -s N      stop with status 3 after N instructions (0 = unlimited)
+ *   -i N      raise the maskable interrupt every N instructions (0 = off)
+ *   -n N      raise NMI once, immediately before instruction N executes
+ *             (a test hook standing in for a real board's NMI pin - see
+ *             docs/SPEC.md section 3, "Interrupts")
  *
  * The ROM is loaded at 0x0100 and execution starts there.
  * Exit status: 0 normal halt, N from "DEO 0x00" (value & 0xFF),
@@ -35,21 +39,28 @@
 #define RS_SIZE   512
 #define NREGS     8
 
+/* Interrupt vectors: fixed memory words below LOAD_ADDR (free memory, docs/SPEC.md
+ * section 1), read once per interrupt delivery - see docs/SPEC.md section 3,
+ * "Interrupts". A program that never enables interrupts never touches them. */
+#define NMI_VECTOR 0x0000
+#define IRQ_VECTOR 0x0004
+
 enum {
     OP_RET, OP_LDI, OP_MOV, OP_LD, OP_ST, OP_DEI, OP_DEO, OP_JMP, OP_JCN, OP_CAL,
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_AND, OP_ORA, OP_XOR,
-    OP_CEQ, OP_CLT, OP_NOP,
+    OP_CEQ, OP_CLT, OP_NOP, OP_PSH, OP_POP, OP_IRET, OP_SEI, OP_CLI,
     OP_COUNT
 };
 
 /* total instruction length in bytes, including the opcode byte itself */
 static const uint8_t OPLEN[OP_COUNT] = {
-    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1
+    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 2, 2, 1, 1, 1
 };
 
 static const char *const OPNAME[OP_COUNT] = {
     "RET", "LDI", "MOV", "LD", "ST", "DEI", "DEO", "JMP", "JCN", "CAL",
-    "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR", "CEQ", "CLT", "NOP"
+    "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR", "CEQ", "CLT", "NOP",
+    "PSH", "POP", "IRET", "SEI", "CLI"
 };
 
 typedef struct {
@@ -60,7 +71,7 @@ typedef struct {
 } Stack;
 
 typedef struct {
-    uint8_t  mem[MEM_SIZE];
+    uint8_t *mem;    /* MEM_SIZE bytes, heap-allocated - see main() */
     uint8_t  rbuf[RS_SIZE];
     Stack    rs;
     uint32_t regs[NREGS];
@@ -69,6 +80,12 @@ typedef struct {
     int halted;
     int exit_code;
     long steps;
+    int ie;          /* maskable-interrupt enable, cleared by CLI/entry */
+    int ie_pending;  /* SEI's one-instruction-delayed commit into ie - see run() */
+    int nmi_pending;
+    int irq_pending;
+    long irq_period; /* raise IRQ every N instructions; 0 = off (see -i) */
+    long nmi_at;     /* raise NMI once, right before this step count; -1 = off (see -n) */
     jmp_buf trap;
     char err[160];
 } VM;
@@ -277,9 +294,45 @@ static void step(VM *m)
     case OP_NOP:
         break;
 
+    case OP_PSH:
+        ra = fetch_reg(m);
+        spush(m, &m->rs, m->regs[ra], 4);
+        break;
+    case OP_POP:
+        rd = fetch_reg(m);
+        m->regs[rd] = spop(m, &m->rs, 4);
+        break;
+    case OP_IRET:
+        m->pc = spop(m, &m->rs, 4);
+        break;
+    case OP_SEI:
+        /* Takes effect after the *next* instruction, not immediately -
+         * see run()'s commit-or-discard logic below. Lets a SEI;IRET
+         * pair stay atomic even if an interrupt is already pending the
+         * moment SEI runs (docs/SPEC.md section 3, "SEI's effect is
+         * delayed by one instruction"). */
+        m->ie_pending = 1;
+        break;
+    case OP_CLI:
+        m->ie = 0;
+        break;
+
     default:
         fault(m, "unknown opcode 0x%02x", op);
     }
+}
+
+/* Delivers a pending interrupt at an instruction boundary: pushes the
+ * return address (the instruction about to execute), disables further
+ * maskable interrupts, and jumps to the handler at `vector` - same shape
+ * as CAL, except the target comes from memory instead of a register.
+ * docs/SPEC.md section 3, "Interrupts". */
+static void deliver_interrupt(VM *m, uint32_t vector)
+{
+    m->ipc = m->pc;
+    spush(m, &m->rs, m->pc, 4);
+    m->ie = 0;
+    m->pc = mrd(m, vector, 4);
 }
 
 /* ---- diagnostics ---- */
@@ -338,6 +391,29 @@ static int run(VM *m, long limit, int trace)
         return 2;
     }
     while (!m->halted) {
+        if (m->nmi_at >= 0 && m->steps == m->nmi_at) {
+            m->nmi_at = -1;        /* one-shot test hook, see -n */
+            m->nmi_pending = 1;
+        }
+        if (m->irq_period > 0 && m->steps > 0 && m->steps % m->irq_period == 0)
+            m->irq_pending = 1;    /* latched: stays pending if ie is off */
+
+        if (m->nmi_pending) {
+            m->nmi_pending = 0;
+            m->ie_pending = 0;   /* this boundary is being preempted - discard, don't commit */
+            deliver_interrupt(m, NMI_VECTOR);
+        } else if (m->ie && m->irq_pending) {
+            m->irq_pending = 0;
+            m->ie_pending = 0;
+            deliver_interrupt(m, IRQ_VECTOR);
+        } else if (m->ie_pending) {
+            /* No interrupt preempted the instruction SEI scheduled this
+             * for - safe to commit now, one full instruction after SEI
+             * itself ran. */
+            m->ie = 1;
+            m->ie_pending = 0;
+        }
+
         if (limit && m->steps >= limit) {
             fflush(stdout);
             fprintf(stderr, "vex: step limit (%ld) reached at 0x%08x\n", limit, m->pc);
@@ -355,7 +431,7 @@ static int run(VM *m, long limit, int trace)
 int main(int argc, char **argv)
 {
     int trace = 0, do_dump = 0;
-    long limit = 0;
+    long limit = 0, irq_period = 0, nmi_at = -1;
     const char *path = NULL;
 
 #if defined(_WIN32)
@@ -373,6 +449,10 @@ int main(int argc, char **argv)
             do_dump = 1;
         } else if (!strcmp(argv[i], "-s") && i + 1 < argc) {
             limit = strtol(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "-i") && i + 1 < argc) {
+            irq_period = strtol(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "-n") && i + 1 < argc) {
+            nmi_at = strtol(argv[++i], NULL, 0);
         } else if (argv[i][0] == '-' && argv[i][1]) {
             path = NULL;
             break;
@@ -381,7 +461,20 @@ int main(int argc, char **argv)
         }
     }
     if (!path) {
-        fprintf(stderr, "usage: %s [-t] [-d] [-s steps] program.rom\n", argv[0]);
+        fprintf(stderr, "usage: %s [-t] [-d] [-s steps] [-i period] [-n count] program.rom\n", argv[0]);
+        return 1;
+    }
+
+    /* A static/global MEM_SIZE array would put this 4GiB of mostly-unused
+     * address space in the binary's own BSS, where some toolchains/loaders
+     * (confirmed: GitHub Actions' macOS and Windows runners, not Linux or
+     * local macOS) fail to zero-fill or commit it, crashing before main()
+     * ever runs a single instruction. A heap allocation goes through the
+     * OS's own virtual-memory calls instead, same as every other large
+     * allocation a C program makes. */
+    vm.mem = calloc(1, MEM_SIZE);
+    if (!vm.mem) {
+        fprintf(stderr, "vex: cannot allocate %llu bytes of memory\n", (unsigned long long)MEM_SIZE);
         return 1;
     }
 
@@ -401,6 +494,8 @@ int main(int argc, char **argv)
 
     vm.rs = (Stack){ vm.rbuf, 0, RS_SIZE, "return" };
     vm.pc = LOAD_ADDR;
+    vm.irq_period = irq_period;
+    vm.nmi_at = nmi_at;
 
     int status = run(&vm, limit, trace);
     if (do_dump)

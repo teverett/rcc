@@ -86,24 +86,31 @@ jobs:
             mingw-w64-ucrt-x86_64-gcc
 
       - name: Install py65 (6502 emulator)
-        if: matrix.name == 'macos'
+        if: matrix.name == 'linux'
         run: pip3 install --break-system-packages py65
 
       - name: Install z80-python (Z80 emulator)
-        if: matrix.name == 'macos'
+        if: matrix.name == 'linux'
         run: pip3 install --break-system-packages z80-python
 
       - name: Install qemu (68000 emulator)
-        if: matrix.name == 'macos'
-        run: brew install qemu
+        if: matrix.name == 'linux'
+        run: sudo apt-get install -y --no-install-recommends qemu-system
 
+      # No Ubuntu/Debian package ships the open-simh (4.x) fork the
+      # pdp7-freestanding example needs - see ci.yml's own matching step
+      # for why this builds the exact same upstream release the macOS
+      # job's Homebrew formula does, straight from its own makefile.
       - name: Install open-simh (pdp7 emulator)
-        if: matrix.name == 'macos'
-        run: brew install open-simh
+        if: matrix.name == 'linux'
+        run: |
+          git clone --branch v3.12-3 --depth 1 https://github.com/open-simh/simh.git /tmp/open-simh
+          make -C /tmp/open-simh GCC=gcc CFLAGS_G=-fcommon all
+          echo "/tmp/open-simh/BIN" >> "$GITHUB_PATH"
 
       - name: Install moarvm (moarvm interpreter)
-        if: matrix.name == 'macos'
-        run: brew install moarvm
+        if: matrix.name == 'linux'
+        run: sudo apt-get install -y --no-install-recommends moarvm
 
       # Each example's own `test` target builds it, then verifies it in
       # whichever simulator (py65, z80-python, qemu-system-m68k,
@@ -112,8 +119,8 @@ jobs:
       # 8086-msdos/6809-coco/6809-vectrex/tms9900-ti994a have no emulator
       # wired into this project at all, so their `test` targets only
       # confirm the build output exists.
-      - name: Run macOS-only example tests
-        if: matrix.name == 'macos'
+      - name: Run example tests needing a target simulator
+        if: matrix.name == 'linux'
         run: |
           make -C examples/m30626fjpfp-freestanding test
           make -C examples/8086-msdos test

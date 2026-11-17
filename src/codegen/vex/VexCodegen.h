@@ -13,14 +13,25 @@
 namespace rcc {
 
 // Generates vex assembly (see VexAssembler.h) for the IR built by IRBuilder. Vex
-// (/Users/tom/projects/vex) is v1.1: an 8-register (R0-R7), 32-bit register machine - no
-// data stack, no stack-relative addressing mode at all; the return stack holds only
-// return addresses (CAL pushes, RET pops). This backend therefore looks like every
-// other small-register-file target here (see M6809Codegen.h/MipsCodegen.h-style
-// backends), not like a stack-machine port: a register holds one live value, the
-// software stack (synthesized from LD/ST through a register this backend maintains as
-// a stack pointer, since no PUSH/POP opcode exists any more) is the real spill area for
-// anything beyond what a handful of named registers can hold live at once.
+// (/Users/tom/projects/vex) is v1.2: an 8-register (R0-R7), 32-bit register machine - no
+// dedicated data stack, no stack-relative addressing mode at all; the one return stack
+// holds return addresses (CAL pushes, RET pops), PSH/POP scratch values, and interrupt
+// entry/IRET's saved PC, all sharing the same 128-cell space (see docs/SPEC.md section
+// 3). This backend therefore looks like every other small-register-file target here
+// (see M6809Codegen.h/MipsCodegen.h-style backends), not like a stack-machine port: a
+// register holds one live value, and a *separate*, backend-owned software stack
+// (synthesized from LD/ST through R5 as this backend's own stack pointer - see "Stack
+// frame" below) is the real spill area for anything beyond what a handful of named
+// registers can hold live at once. Ordinary C codegen never emits PSH/POP itself: C has
+// no notion of an interrupt handler to save/restore registers around, and routing
+// arbitrarily deep expression-spilling or call-frame storage through the 128-cell
+// shared return stack instead of this backend's own unbounded one would risk exactly
+// the "unbalanced PSH left on the stack corrupts a later RET" hazard docs/SPEC.md's
+// own "Stack" section describes - for no benefit, since nothing here is bounded by call
+// depth the way CAL/RET's own use of that stack already is. PSH/POP/IRET/SEI/CLI are
+// still real, assembler-level instructions (VexAssembler.h) available from an `asm { }`
+// block, for a hand-written interrupt handler or scheduler in the style docs/SPEC.md
+// section 4's "Preemptive multitasking" describes - just never generated for ordinary C.
 //
 // --- Register convention -------------------------------------------------
 //
@@ -182,10 +193,11 @@ class VexCodegen : public Backend {
     void jmpTo(const std::string &label, int rtarget = 2);
     void jcnTo(const std::string &label, int rcond, int rtarget = 2);
     void calTo(const std::string &label, int rtarget = 2);
-    // Synthesized push/pop (no PUSH/POP opcode exists any more - see the class comment):
-    // `rscratch` (default R3) holds the immediate 4 each needs; never pass the same register as
-    // both `rx` and `rscratch` (push(3)/pop(3) use R1 as the scratch instead - the only two
-    // call sites that ever save/restore R3 itself).
+    // Synthesized push/pop, through R5 as this backend's own stack pointer - deliberately not
+    // the real PSH/POP opcode (see the class comment for why ordinary codegen stays off the
+    // small shared return stack). `rscratch` (default R3) holds the immediate 4 each needs;
+    // never pass the same register as both `rx` and `rscratch` (push(3)/pop(3) use R1 as the
+    // scratch instead - the only two call sites that ever save/restore R3 itself).
     void push(int rx, int rscratch = 3);
     void pop(int rx, int rscratch = 3);
 
