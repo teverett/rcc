@@ -70,6 +70,28 @@ bool hasSideEffect(const ir::Expr *e) {
     return false;
 }
 
+// A switch lowers (IRBuilder.cpp's buildSwitch()) to a flat `L1: B1  L2: B2
+// ... Lend:` block dispatched into via `goto`, so a Label anywhere in the
+// statements after a `return` is a real jump target, not dead code.
+bool containsLabel(const ir::Stmt *s) {
+    if (!s) return false;
+    switch (s->kind) {
+        case ir::StmtKind::Label:
+            return true;
+        case ir::StmtKind::Block:
+            for (const auto &child : s->body) {
+                if (containsLabel(child.get())) return true;
+            }
+            return false;
+        case ir::StmtKind::If:
+            return containsLabel(s->thenStmt.get()) || containsLabel(s->elseStmt.get());
+        case ir::StmtKind::While:
+            return containsLabel(s->loopBody.get()) || containsLabel(s->postStmt.get());
+        default:
+            return false;
+    }
+}
+
 // Drops statements after the first `return` in a block and bare `;`
 // statements, then recurses. Pass 1 of 2; see run()'s comment on ordering.
 void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile) {
@@ -78,6 +100,14 @@ void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile
         case ir::StmtKind::Block: {
             for (size_t i = 0; i < s->body.size(); i++) {
                 if (s->body[i]->kind == ir::StmtKind::Return && i + 1 < s->body.size()) {
+                    bool targetedLater = false;
+                    for (size_t j = i + 1; j < s->body.size(); j++) {
+                        if (containsLabel(s->body[j].get())) {
+                            targetedLater = true;
+                            break;
+                        }
+                    }
+                    if (targetedLater) break;  // a later statement is a jump target - can't truncate past it
                     std::cerr << sourceFile << ": dce: line " << s->body[i]->line << ": removed "
                                << (s->body.size() - i - 1) << " statement(s) after `return`\n";
                     s->body.resize(i + 1);
