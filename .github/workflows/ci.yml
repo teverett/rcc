@@ -106,6 +106,18 @@ jobs:
             echo "::endgroup::"
           done
 
+      # Same battery, with --optimize passed through to every compile (see
+      # docs/optimization.md) - confirms the IR optimizer pipeline never
+      # changes a program's own observable result, on the same real CPU
+      # cores as the unoptimized run above.
+      - name: Run rcc's own test suite against every simulator-backed target, with --optimize
+        run: |
+          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
+            echo "::group::--target=$target --optimize"
+            ./tests/run_tests.sh build/bin/rcc --target="$target" --optimize
+            echo "::endgroup::"
+          done
+
       # `rcc` is dynamically linked against Homebrew's own
       # libantlr4-runtime.dylib, at that formula's own absolute
       # install path (confirmed directly via `otool -L` - unlike
