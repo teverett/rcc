@@ -6,38 +6,81 @@
  * pinned to one known-matching interpreter version instead of whatever that repo's own
  * `interpreter/vex.c` happens to be on a given day.
  *
- * vex.c - reference interpreter for the Vex virtual machine (spec v1.2).
+ * vex.c - reference interpreter for the Vex virtual machine (spec v1.3).
  * See docs/SPEC.md for the machine definition.
  *
- * Usage: vex [-t] [-d] [-s steps] [-i period] [-n count] program.rom
+ * Usage: vex [-t] [-d] [-s steps] [-i] [-I period] [-n count] program.rom
  *   -t        trace every instruction to stderr
  *   -d        dump the final registers and return stack to stderr
  *   -s N      stop with status 3 after N instructions (0 = unlimited)
- *   -i N      raise the maskable interrupt every N instructions (0 = off)
+ *   -i        raise the maskable interrupt every IRQ_PERIOD_MS milliseconds
+ *             of wall-clock time (off by default)
+ *   -I N      raise the maskable interrupt every N instructions instead of
+ *             on a wall-clock period - a test hook for exercising interrupt
+ *             semantics deterministically (see tests/run_tests.py), not a
+ *             real timer source; -i is what a real program should expect
  *   -n N      raise NMI once, immediately before instruction N executes
  *             (a test hook standing in for a real board's NMI pin - see
  *             docs/SPEC.md section 3, "Interrupts")
+ *
+ * HLT (docs/SPEC.md section 3) parks the machine - the interpreter actually
+ * blocks the host thread, not a busy-wait - until an interrupt is pending,
+ * then resumes at the instruction after HLT (or, if unmasked, the handler
+ * vector). -n/-I are step-count test hooks and never advance while parked
+ * (step count is frozen), so only -i's real wall-clock timer can wake a
+ * HLT'd machine.
  *
  * The ROM is loaded at 0x0100 and execution starts there.
  * Exit status: 0 normal halt, N from "DEO 0x00" (value & 0xFF),
  *              1 usage or I/O error, 2 machine fault, 3 step limit.
  */
+#if !defined(_WIN32)
+/* clock_gettime(CLOCK_MONOTONIC, ...) is POSIX, not C99 - -std=c99
+ * otherwise hides it under -pedantic. Must come before any system header
+ * pulls in <time.h> or <features.h> and fixes the visibility it grants. */
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #if defined(_WIN32)
 #include <fcntl.h>
 #include <io.h>
+#include <windows.h>
+#endif
+
+/* A monotonic wall-clock reading in milliseconds - unlike clock(), this
+ * keeps advancing while the process is asleep (host_sleep_while_waiting()
+ * below relies on that), which is the whole point of a real timer. */
+#if defined(_WIN32)
+static double now_ms(void) { return (double)GetTickCount64(); }
+#else
+static double now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec * 1000.0 + (double)ts.tv_nsec / 1e6;
+}
 #endif
 
 #define MEM_SIZE  UINT64_C(0x100000000)
 #define LOAD_ADDR 0x0100
-#define RS_SIZE   512
 #define NREGS     8
+
+/* RS (the return-stack pointer, docs/SPEC.md section 1) starts here and
+ * grows downward through ordinary memory, exactly like rcc's own R5/SP
+ * convention (VexCodegen.h's kVexStackTop, 0x01000000) - a different,
+ * comfortably separated region so the two never collide under normal
+ * use. mem is calloc'd (see main()), so the word at RS_TOP is already
+ * zero without any extra setup - see OP_RET's own comment for why that
+ * matters. */
+#define RS_TOP 0x00800000
 
 /* Interrupt vectors: fixed memory words below LOAD_ADDR (free memory, docs/SPEC.md
  * section 1), read once per interrupt delivery - see docs/SPEC.md section 3,
@@ -45,46 +88,53 @@
 #define NMI_VECTOR 0x0000
 #define IRQ_VECTOR 0x0004
 
+/* Period of the maskable-interrupt timer (see -i). Fixed, like irq_period
+ * used to be - see docs/SPEC.md section 3, "Interrupts". */
+#define IRQ_PERIOD_MS 100
+
+/* How often (in instructions) the timer's wall-clock deadline is actually
+ * polled - must be a power of 2 (see the "& (IRQ_POLL_STRIDE - 1)" check
+ * in run()). */
+#define IRQ_POLL_STRIDE 1024
+
 enum {
     OP_RET, OP_LDI, OP_MOV, OP_LD, OP_ST, OP_DEI, OP_DEO, OP_JMP, OP_JCN, OP_CAL,
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_AND, OP_ORA, OP_XOR,
-    OP_CEQ, OP_CLT, OP_NOP, OP_PSH, OP_POP, OP_IRET, OP_SEI, OP_CLI,
+    OP_CEQ, OP_CLT, OP_NOP, OP_PSH, OP_POP, OP_IRET, OP_SEI, OP_CLI, OP_HLT,
+    OP_GSP, OP_SSP,
     OP_COUNT
 };
 
 /* total instruction length in bytes, including the opcode byte itself */
 static const uint8_t OPLEN[OP_COUNT] = {
-    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 2, 2, 1, 1, 1
+    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 2, 2, 1, 1, 1, 1, 2, 2
 };
 
 static const char *const OPNAME[OP_COUNT] = {
     "RET", "LDI", "MOV", "LD", "ST", "DEI", "DEO", "JMP", "JCN", "CAL",
     "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR", "CEQ", "CLT", "NOP",
-    "PSH", "POP", "IRET", "SEI", "CLI"
+    "PSH", "POP", "IRET", "SEI", "CLI", "HLT", "GSP", "SSP"
 };
 
 typedef struct {
-    uint8_t *b;
-    int sp;          /* number of bytes currently on the stack */
-    int cap;
-    const char *name;
-} Stack;
-
-typedef struct {
     uint8_t *mem;    /* MEM_SIZE bytes, heap-allocated - see main() */
-    uint8_t  rbuf[RS_SIZE];
-    Stack    rs;
+    uint32_t rs;     /* return-stack pointer (docs/SPEC.md section 1) - an
+                       * ordinary address into mem, read/written by GSP/SSP;
+                       * grows downward, like R5 (see RS_TOP above) */
     uint32_t regs[NREGS];
     uint32_t pc;     /* address of the next instruction */
     uint32_t ipc;    /* address of the instruction being executed */
     int halted;
+    int waiting;     /* parked by HLT; resumes once any interrupt is pending - see run() */
     int exit_code;
     long steps;
     int ie;          /* maskable-interrupt enable, cleared by CLI/entry */
     int ie_pending;  /* SEI's one-instruction-delayed commit into ie - see run() */
     int nmi_pending;
     int irq_pending;
-    long irq_period; /* raise IRQ every N instructions; 0 = off (see -i) */
+    int irq_enabled;    /* periodic timer IRQ on/off (see -i) */
+    double next_irq_at_ms; /* now_ms() value at which the timer next fires */
+    long irq_test_period; /* test hook: raise IRQ every N instructions; 0 = off (see -I) */
     long nmi_at;     /* raise NMI once, right before this step count; -1 = off (see -n) */
     jmp_buf trap;
     char err[160];
@@ -102,30 +152,6 @@ static void fault(VM *m, const char *fmt, ...)
     vsnprintf(m->err, sizeof m->err, fmt, ap);
     va_end(ap);
     longjmp(m->trap, 1);
-}
-
-/* ---- the return stack: big-endian, byte granular ---- */
-
-static uint32_t spop(VM *m, Stack *s, int n)
-{
-    uint32_t v = 0;
-    if (s->sp < n)
-        fault(m, "%s stack underflow", s->name);
-    for (int i = 0; i < n; i++)
-        v = (v << 8) | s->b[s->sp - n + i];
-    s->sp -= n;
-    return v;
-}
-
-static void spush(VM *m, Stack *s, uint32_t v, int n)
-{
-    if (s->sp + n > s->cap)
-        fault(m, "%s stack overflow", s->name);
-    for (int i = n - 1; i >= 0; i--) {
-        s->b[s->sp + i] = (uint8_t)(v & 0xFF);
-        v >>= 8;
-    }
-    s->sp += n;
 }
 
 /* ---- memory ---- */
@@ -148,6 +174,28 @@ static void mwr(VM *m, uint32_t addr, uint32_t v, int n)
         m->mem[addr + i] = (uint8_t)(v & 0xFF);
         v >>= 8;
     }
+}
+
+/* ---- the return stack: ordinary memory, addressed through RS (docs/SPEC.md
+ * section 1) - CAL/PSH/interrupt entry pre-decrement RS and write there;
+ * RET/POP/IRET read at RS and post-increment, mirroring rcc's own R5/SP
+ * convention (VexCodegen.h) exactly. There is no dedicated overflow/
+ * underflow check any more: running RS below 0 or past other memory
+ * eventually trips mrd()/mwr()'s own out-of-range fault, same as any other
+ * runaway pointer - docs/SPEC.md section 7 discusses the tradeoff this
+ * accepts in exchange for RS being a plain, saveable/settable register
+ * (GSP/SSP) rather than fixed, opaque hardware state. */
+static void rs_push(VM *m, uint32_t v)
+{
+    m->rs -= 4;
+    mwr(m, m->rs, v, 4);
+}
+
+static uint32_t rs_pop(VM *m)
+{
+    uint32_t v = mrd(m, m->rs, 4);
+    m->rs += 4;
+    return v;
 }
 
 /* ---- devices (see docs/SPEC.md, "Reference devices") ---- */
@@ -220,14 +268,25 @@ static void step(VM *m)
     uint8_t rd, ra, rb;
 
     switch (op) {
-    case OP_RET:
-        if (m->rs.sp == 0) {
+    case OP_RET: {
+        /* Peeks rather than unconditionally popping: a fully unwound call
+         * chain finds zero at the word it would pop - mem is calloc'd and
+         * nothing legitimate ever stores there (every CAL/PSH/interrupt-
+         * entry writes strictly below RS before advancing it) - and RET
+         * repurposes that as "halt normally" (a real return address of 0
+         * would jump into the NMI vector anyway, never a valid
+         * destination), leaving RS exactly where it was rather than
+         * advancing past a slot nothing was ever really popped from. */
+        uint32_t target = mrd(m, m->rs, 4);
+        if (target == 0) {
             m->halted = 1;
             m->exit_code = 0;
         } else {
-            m->pc = spop(m, &m->rs, 4);
+            m->rs += 4;
+            m->pc = target;
         }
         break;
+    }
     case OP_LDI:
         rd = fetch_reg(m);
         m->regs[rd] = mrd(m, m->pc, 4);
@@ -264,7 +323,7 @@ static void step(VM *m)
         break;
     case OP_CAL:
         ra = fetch_reg(m);
-        spush(m, &m->rs, m->pc, 4);
+        rs_push(m, m->pc);
         m->pc = m->regs[ra];
         break;
 
@@ -296,14 +355,14 @@ static void step(VM *m)
 
     case OP_PSH:
         ra = fetch_reg(m);
-        spush(m, &m->rs, m->regs[ra], 4);
+        rs_push(m, m->regs[ra]);
         break;
     case OP_POP:
         rd = fetch_reg(m);
-        m->regs[rd] = spop(m, &m->rs, 4);
+        m->regs[rd] = rs_pop(m);
         break;
     case OP_IRET:
-        m->pc = spop(m, &m->rs, 4);
+        m->pc = rs_pop(m);
         break;
     case OP_SEI:
         /* Takes effect after the *next* instruction, not immediately -
@@ -315,6 +374,30 @@ static void step(VM *m)
         break;
     case OP_CLI:
         m->ie = 0;
+        break;
+    case OP_HLT:
+        /* Parks the machine - run()'s loop stops calling step() and
+         * blocks the host instead of busy-spinning, until some interrupt
+         * is pending (docs/SPEC.md section 3, "HLT"). Woken on a merely
+         * *pending* request, masked or not - see run() - so the
+         * instruction right after HLT runs either way; whether that turns
+         * into a handler call depends on ie, same as any other boundary. */
+        m->waiting = 1;
+        break;
+    case OP_GSP:
+        /* Reads RS, the return-stack pointer (docs/SPEC.md section 1) -
+         * an ordinary register value, saveable/restorable like any
+         * other, unlike the old opaque hardware stack it replaces. */
+        rd = fetch_reg(m);
+        m->regs[rd] = m->rs;
+        break;
+    case OP_SSP:
+        /* Redirects RS - e.g. to give a freshly forked thread its own
+         * private return-stack region before resuming it. Takes effect
+         * immediately; the next CAL/RET/PSH/POP/interrupt entry uses the
+         * new value. */
+        ra = fetch_reg(m);
+        m->rs = m->regs[ra];
         break;
 
     default:
@@ -330,18 +413,12 @@ static void step(VM *m)
 static void deliver_interrupt(VM *m, uint32_t vector)
 {
     m->ipc = m->pc;
-    spush(m, &m->rs, m->pc, 4);
+    rs_push(m, m->pc);
     m->ie = 0;
     m->pc = mrd(m, vector, 4);
 }
 
 /* ---- diagnostics ---- */
-
-static void print_stack(FILE *f, const Stack *s)
-{
-    for (int i = 0; i < s->sp; i++)
-        fprintf(f, "%02x", s->b[i]);
-}
 
 static void trace_line(const VM *m)
 {
@@ -367,20 +444,48 @@ static void trace_line(const VM *m)
     fprintf(stderr, "%08x  %-24s regs=", pc, text);
     for (int i = 0; i < NREGS; i++)
         fprintf(stderr, "%08x ", m->regs[i]);
-    fprintf(stderr, "rs=");
-    print_stack(stderr, &m->rs);
-    fputc('\n', stderr);
+    fprintf(stderr, "rs=%08x\n", m->rs);
 }
 
+/* RS is just a register now (docs/SPEC.md section 1/7) - its value, not a
+ * byte-dump of "everything between it and some fixed top", since GSP/SSP
+ * means there's no longer one universal top to dump relative to (a
+ * program is free to point it anywhere). A balanced program that never
+ * calls SSP halts with rs back at RS_TOP, same as the old dump showing an
+ * empty stack. */
 static void dump(const VM *m)
 {
     fprintf(stderr, "regs:");
     for (int i = 0; i < NREGS; i++)
         fprintf(stderr, " %08x", m->regs[i]);
     fputc('\n', stderr);
-    fprintf(stderr, "rs: ");
-    print_stack(stderr, &m->rs);
-    fputc('\n', stderr);
+    fprintf(stderr, "rs: %08x\n", m->rs);
+}
+
+/* Blocks the host for a short while when HLT has parked the machine -
+ * never the whole remaining wait in one call, so the caller can re-check
+ * for a newly pending interrupt between sleeps. Sleeps until the real
+ * timer's next deadline when one is armed (clamped to a small ceiling so
+ * a very distant deadline still re-checks promptly); otherwise nothing
+ * will ever wake the machine, so it just idles in fixed small steps
+ * rather than hanging in one uninterruptible call. */
+static void host_sleep_while_waiting(const VM *m)
+{
+    long ms = 20;
+    if (m->irq_enabled) {
+        double want_ms = m->next_irq_at_ms - now_ms();
+        if (want_ms < 1.0)
+            return;
+        ms = want_ms < 20.0 ? (long)want_ms : 20;
+    }
+#if defined(_WIN32)
+    Sleep((DWORD)ms);
+#else
+    struct timespec ts;
+    ts.tv_sec = ms / 1000;
+    ts.tv_nsec = (ms % 1000) * 1000000L;
+    nanosleep(&ts, NULL);
+#endif
 }
 
 static int run(VM *m, long limit, int trace)
@@ -395,8 +500,32 @@ static int run(VM *m, long limit, int trace)
             m->nmi_at = -1;        /* one-shot test hook, see -n */
             m->nmi_pending = 1;
         }
-        if (m->irq_period > 0 && m->steps > 0 && m->steps % m->irq_period == 0)
+        /* now_ms() is cheap but not free, and calling it on every single
+         * instruction would make it dominate interpretation cost for a
+         * timer this coarse - sample it every IRQ_POLL_STRIDE steps instead.
+         * That still resolves IRQ_PERIOD_MS to well under a millisecond in
+         * practice, since a real program executes far more than that many
+         * instructions per millisecond. While HLT has parked the machine,
+         * m->steps is frozen - possibly on a value this stride never
+         * revisits - so poll on every host-sleep wakeup instead; those are
+         * already paced in host_sleep_while_waiting(), not per-instruction. */
+        if (m->irq_enabled && (m->waiting || (m->steps & (IRQ_POLL_STRIDE - 1)) == 0)
+            && now_ms() >= m->next_irq_at_ms) {
             m->irq_pending = 1;    /* latched: stays pending if ie is off */
+            /* advance by one period rather than snapping to "now + period",
+             * so a late delivery doesn't push later ones out and the
+             * long-run average stays IRQ_PERIOD_MS even under jitter */
+            m->next_irq_at_ms += IRQ_PERIOD_MS;
+        }
+        if (m->irq_test_period > 0 && m->steps > 0 && m->steps % m->irq_test_period == 0)
+            m->irq_pending = 1;    /* -I: test hook, see top-of-file usage comment */
+
+        if (m->waiting && (m->nmi_pending || m->irq_pending))
+            m->waiting = 0;   /* HLT wakes on a merely pending request, masked or not */
+        if (m->waiting) {
+            host_sleep_while_waiting(m);
+            continue;
+        }
 
         if (m->nmi_pending) {
             m->nmi_pending = 0;
@@ -430,8 +559,8 @@ static int run(VM *m, long limit, int trace)
 
 int main(int argc, char **argv)
 {
-    int trace = 0, do_dump = 0;
-    long limit = 0, irq_period = 0, nmi_at = -1;
+    int trace = 0, do_dump = 0, irq_enabled = 0;
+    long limit = 0, irq_test_period = 0, nmi_at = -1;
     const char *path = NULL;
 
 #if defined(_WIN32)
@@ -449,8 +578,10 @@ int main(int argc, char **argv)
             do_dump = 1;
         } else if (!strcmp(argv[i], "-s") && i + 1 < argc) {
             limit = strtol(argv[++i], NULL, 0);
-        } else if (!strcmp(argv[i], "-i") && i + 1 < argc) {
-            irq_period = strtol(argv[++i], NULL, 0);
+        } else if (!strcmp(argv[i], "-i")) {
+            irq_enabled = 1;
+        } else if (!strcmp(argv[i], "-I") && i + 1 < argc) {
+            irq_test_period = strtol(argv[++i], NULL, 0);
         } else if (!strcmp(argv[i], "-n") && i + 1 < argc) {
             nmi_at = strtol(argv[++i], NULL, 0);
         } else if (argv[i][0] == '-' && argv[i][1]) {
@@ -461,7 +592,7 @@ int main(int argc, char **argv)
         }
     }
     if (!path) {
-        fprintf(stderr, "usage: %s [-t] [-d] [-s steps] [-i period] [-n count] program.rom\n", argv[0]);
+        fprintf(stderr, "usage: %s [-t] [-d] [-s steps] [-i] [-I period] [-n count] program.rom\n", argv[0]);
         return 1;
     }
 
@@ -492,10 +623,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    vm.rs = (Stack){ vm.rbuf, 0, RS_SIZE, "return" };
+    vm.rs = RS_TOP;
     vm.pc = LOAD_ADDR;
-    vm.irq_period = irq_period;
+    vm.irq_enabled = irq_enabled;
+    vm.irq_test_period = irq_test_period;
     vm.nmi_at = nmi_at;
+    if (irq_enabled)
+        vm.next_irq_at_ms = now_ms() + IRQ_PERIOD_MS;
 
     int status = run(&vm, limit, trace);
     if (do_dump)

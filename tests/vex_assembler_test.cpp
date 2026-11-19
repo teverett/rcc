@@ -21,7 +21,7 @@ std::string be32(uint32_t v) {
     return s;
 }
 
-// Every one of the 26 real opcodes (docs/SPEC.md section 2's own table), with the exact
+// Every one of the 28 real opcodes (docs/SPEC.md section 2's own table), with the exact
 // register-operand count (and, for `ldi`, the trailing immediate) its own shape needs, in
 // numeric order.
 void testEveryOpcodeEncoding() {
@@ -51,7 +51,9 @@ void testEveryOpcodeEncoding() {
         "iret\n"
         "sei\n"
         "cli\n"
-        "hlt\n";
+        "hlt\n"
+        "gsp r0\n"
+        "ssp r1\n";
     std::string bytes = rcc::assembleVex(asmText);
     std::string expected = bytesOf({0x00}) + bytesOf({0x01, 0x00}) + be32(1) + bytesOf({0x02, 0x01, 0x02}) +
                             bytesOf({0x03, 0x00, 0x01}) + bytesOf({0x04, 0x00, 0x01}) + bytesOf({0x05, 0x00, 0x01}) +
@@ -62,8 +64,9 @@ void testEveryOpcodeEncoding() {
                             bytesOf({0x0F, 0x00, 0x01, 0x02}) + bytesOf({0x10, 0x00, 0x01, 0x02}) +
                             bytesOf({0x11, 0x00, 0x01, 0x02}) + bytesOf({0x12, 0x00, 0x01, 0x02}) +
                             bytesOf({0x13}) + bytesOf({0x14, 0x00}) + bytesOf({0x15, 0x01}) + bytesOf({0x16}) +
-                            bytesOf({0x17}) + bytesOf({0x18}) + bytesOf({0x19});
-    require(bytes == expected, "the 26 opcodes didn't encode to their own spec-table shape/values in order");
+                            bytesOf({0x17}) + bytesOf({0x18}) + bytesOf({0x19}) + bytesOf({0x1A, 0x00}) +
+                            bytesOf({0x1B, 0x01});
+    require(bytes == expected, "the 28 opcodes didn't encode to their own spec-table shape/values in order");
 }
 
 void testNopTakesNoOperand() {
@@ -140,7 +143,7 @@ void testWrongOperandCountRejected() {
 }
 
 void testUnassignedOpcodeRejected() {
-    // 0x1A-0xFF are unassigned per docs/SPEC.md section 2 - this dialect has no mnemonic for
+    // 0x1C-0xFF are unassigned per docs/SPEC.md section 2 - this dialect has no mnemonic for
     // them at all, so they're rejected at parse time, not encoded.
     bool threw = false;
     try {
@@ -169,6 +172,26 @@ void testPshPopTakeExactlyOneOperand() {
         threw = true;
     }
     require(threw, "'pop' with no operand (takes exactly one) should be rejected");
+}
+
+// `GSP`/`SSP` each take exactly one register operand (`Rd`/`Ra` respectively) - docs/SPEC.md
+// section 2's own length table, added in v1.3.
+void testGspSspTakeExactlyOneOperand() {
+    bool threw = false;
+    try {
+        rcc::assembleVex("gsp r0, r1\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'gsp' with two operands (takes exactly one) should be rejected");
+
+    threw = false;
+    try {
+        rcc::assembleVex("ssp\n");
+    } catch (const std::runtime_error &) {
+        threw = true;
+    }
+    require(threw, "'ssp' with no operand (takes exactly one) should be rejected");
 }
 
 // `IRET`/`SEI`/`CLI`/`HLT` all take no operands at all - same shape as `RET`/`NOP`.
@@ -304,6 +327,7 @@ int main() {
         testUnassignedOpcodeRejected();
         testNopTakesNoOperand();
         testPshPopTakeExactlyOneOperand();
+        testGspSspTakeExactlyOneOperand();
         testIretSeiCliTakeNoOperand();
         testOrgPadsForward();
         testOrgCannotMoveBackward();

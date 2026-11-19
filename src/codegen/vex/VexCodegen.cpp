@@ -80,8 +80,10 @@ std::string VexCodegen::generate(const ir::Program &prog, bool objectMode) {
         code_ << "_start:\n";
         ldiNum(5, kVexStackTop);
         calTo(label(mainFn));
-        // Normal halt (empty return stack) - see VexCodegen.h's own class comment for why this,
-        // not an explicit DEO-to-port-0, is this backend's entry convention.
+        // Normal halt (this final `ret` pops the zero word below RS_TOP, never written by
+        // anything - docs/SPEC.md section 3's own "Why RET halts on a popped zero") - see
+        // VexCodegen.h's own class comment for why this, not an explicit DEO-to-port-0, is this
+        // backend's entry convention.
         code_ << "    ret\n\n";
     }
 
