@@ -44,6 +44,19 @@ MAX_STATES = 3
 PROMPT = b"(qemu) "
 STARTUP_INTERVAL = 0.5
 
+# Lines for a free-running cycle/instruction/time counter (e.g. RISC-V's
+# own `mcycle`/`minstret`/`time`/`(m)hpmcounter<N>`, each also with an
+# `...h` high-half row): these keep incrementing every real cycle even
+# while a target spins in its own stable end-of-program loop, so they're
+# stripped before a dump is used for the *stability* comparison below -
+# `last`, returned to the caller once settled, still keeps every line
+# verbatim.
+_VOLATILE_COUNTER_LINE = re.compile(rb"^\s*m?(?:cycle|instret|time|hpmcounter\d+)h?\s+\S+", re.MULTILINE)
+
+
+def _stable_view(dump):
+    return _VOLATILE_COUNTER_LINE.sub(b"", dump)
+
 
 def i8086_end_pattern(image):
     with open(image, "rb") as stream:
@@ -124,7 +137,7 @@ def main():
                     recent.append((now, last))
                     while len(recent) > 1 and now - recent[1][0] >= WINDOW_SECONDS:
                         recent.pop(0)
-                    dumps = [d for _, d in recent]
+                    dumps = [_stable_view(d) for _, d in recent]
                     if (now - recent[0][0] >= WINDOW_SECONDS and len(set(dumps)) <= MAX_STATES
                             and (required is None or all(required.search(d) for d in dumps))):
                         sys.stdout.write(last.decode("latin-1"))

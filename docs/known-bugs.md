@@ -115,6 +115,46 @@ flags register, so every signed `<` needs sign-based machinery at all,
 unlike i386/6502 which get a correct comparison for free from one native
 compare instruction regardless of either operand's sign.
 
+## `r10000`/`r4000`'s `long long` support has two distinct, now-root-caused bugs: the divide/modulo loop and a wide call argument's word order
+
+Both were root-caused while porting the identical algorithms to the new
+`riscv32` backend (see `src/codegen/riscv32/Riscv32Codegen.cpp`, where
+both are fixed) and confirmed by running the fixed and unfixed version
+of each against the same inputs; neither is fixed in `MipsCodegen.cpp`
+itself here, as that's out of scope for the `riscv32` port this was
+found during.
+
+1. `genWideDivMod()`'s own loop counter ("cnt") is initialized to 32
+   (`addiu t0,zero,32`), but the bit-serial shift/compare/subtract
+   division it implements needs one iteration per bit of the 64-bit
+   dividend/divisor pair it's dividing - 64 iterations, not 32. The
+   existing comment next to that initialization ("cnt = 32 (per-word,
+   so 2*32=64 total)") describes the intent but the code doesn't follow
+   through: the loop actually decrements and exits after exactly 32
+   passes, so every `long long` `/`/`%` only ever shifts the low 32
+   bits of the numerator through the remainder accumulator - any case
+   whose result depends on the numerator's or divisor's upper 32 bits
+   is wrong. Fix: `addiu t0,zero,32` -> `addiu t0,zero,64`.
+2. The `Call` case's own wide-argument push (`stind sp,t1` / `stind
+   sp,t0,4` - high word first, low word second) stores the high word at
+   the *lower* address and the low word at the *higher* one, but
+   `loadOperand()` (used to read any Param slot back, wide or not)
+   expects the opposite: low word at the lower address (`ldind
+   addrReg,t0` with no displacement), high word at the higher one
+   (`ldind addrReg,t1,4`). A `long long` parameter therefore always
+   reads back with its two words swapped. Fix: swap the push order to
+   `stind sp,t0` / `stind sp,t1,4`.
+
+`tests/run_tests.sh`'s own `is_known_unsupported()` already skip-lists
+`types_longlong_divmod.c`/`types_longlong_divmod_repeated.c` (bug 1) and
+`types_params_return.c` (bug 2) for `r10000`, attributing all three only
+to "a wrong value" rather than to either specific cause above; removing
+those three skip-list entries once both one-line fixes land in
+`MipsCodegen.cpp` closes this out. `powerpc`'s own identical skip-list
+entries (`PowerPCCodegen.cpp`'s wide-divide/wide-call code wasn't
+checked against either root cause here) may or may not share one or
+both bugs - not investigated.
+
 ## A packed struct can still land at a misaligned absolute address on `mips`/`r10000`
 
 Affects `src/codegen/mips/MipsCodegen.cpp`'s frame-offset/global-placement

@@ -163,6 +163,14 @@ r4000-aout    MIPS I (R10000/R4000) - a.out relocatable object
 r4000-coff    MIPS I (R10000/R4000) - COFF relocatable object
 r4000-elf    MIPS I (R10000/R4000) - ELF relocatable object
 r4000-raw    MIPS I (R10000/R4000) - flat binary image, no container
+riscv32-aout    RISC-V RV32I+M - a.out relocatable object
+riscv32-coff    RISC-V RV32I+M - COFF relocatable object
+riscv32-elf    RISC-V RV32I+M - ELF relocatable object
+riscv32-raw    RISC-V RV32I+M - flat binary image, no container
+riscv64-aout    RISC-V RV64I+M - a.out relocatable object
+riscv64-coff    RISC-V RV64I+M - COFF relocatable object
+riscv64-elf    RISC-V RV64I+M - ELF relocatable object
+riscv64-raw    RISC-V RV64I+M - flat binary image, no container
 saturn-coff    HP Saturn - COFF relocatable object
 saturn-raw    HP Saturn - flat binary image, no container
 sparc-aout    SPARC V8 (32-bit) - a.out relocatable object

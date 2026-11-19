@@ -920,6 +920,11 @@ class Builder {
     }
 
     void rejectIfWide(Type t, int line, const char *what) {
+        // A pointer is always allowed here regardless of its own storage width - this check
+        // means "a genuine 'long'/'long long' value", and on a target where a pointer's own
+        // width happens to match theirs (e.g. riscv64's 8-byte pointerUnits) rather than an
+        // `int`'s, isWideType() alone can't tell the two apart.
+        if (isPointer(t)) return;
         if (isWideType(t)) {
             err(line, std::string(what) +
                           " on a 'long'/'long long' target isn't supported yet - only char/short/int/"

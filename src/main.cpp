@@ -77,6 +77,8 @@
 #include "codegen/pic16/PIC16Codegen.h"
 #include "codegen/pic18/PIC18Codegen.h"
 #include "codegen/mips/MipsCodegen.h"
+#include "codegen/riscv32/Riscv32Codegen.h"
+#include "codegen/riscv64/Riscv64Codegen.h"
 #include "codegen/armm/ArmMCodegen.h"
 #include "codegen/mcs51/MCS51Codegen.h"
 #include "codegen/arm/ArmCodegen.h"
@@ -117,6 +119,8 @@
 #include "linker/factory/Arm64LinkerFactory.h"
 #include "linker/factory/STM32LinkerFactory.h"
 #include "linker/factory/MipsLinkerFactory.h"
+#include "linker/factory/Riscv32LinkerFactory.h"
+#include "linker/factory/Riscv64LinkerFactory.h"
 #include "linker/factory/PowerPCLinkerFactory.h"
 #include "linker/factory/SparcLinkerFactory.h"
 #include "linker/factory/VaxLinkerFactory.h"
@@ -208,6 +212,7 @@ const std::vector<std::string> kTargetNames = {
     "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
     "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "cp1610", "parrotvm", "vex", "moarvm",
+    "riscv32", "riscv64",
 };
 
 std::string knownTargetsList() {
@@ -282,6 +287,8 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "pic16") return std::make_unique<rcc::PIC16Codegen>();
     if (target == "pic18") return std::make_unique<rcc::PIC18Codegen>();
     if (target == "r10000" || target == "r4000") return std::make_unique<rcc::MipsCodegen>();
+    if (target == "riscv32") return std::make_unique<rcc::Riscv32Codegen>();
+    if (target == "riscv64") return std::make_unique<rcc::Riscv64Codegen>();
     if (target == "cortex-m3" || target == "cortex-m4" || target == "cortex-m7") {
         return std::make_unique<rcc::ArmMCodegen>();
     }
@@ -344,6 +351,8 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     if (target == "cortex-m3" || target == "cortex-m4" || target == "cortex-m7") return rcc::makeArmMLinker();
     if (target == "stm32") return rcc::makeSTM32Linker();
     if (target == "r10000" || target == "r4000") return rcc::makeMipsLinker();
+    if (target == "riscv32") return rcc::makeRiscv32Linker();
+    if (target == "riscv64") return rcc::makeRiscv64Linker();
     if (target == "powerpc") return rcc::makePowerPCLinker();
     if (target == "sparc") return rcc::makeSparcLinker();
     if (target == "vax") return rcc::makeVaxLinker();
@@ -1007,6 +1016,12 @@ int main(int argc, char **argv) {
     } else if (target == "r4000") {
         predefinedMacros["__R10000__"] = "1";
         predefinedMacros["__R4000__"] = "1";
+    } else if (target == "riscv32") {
+        predefinedMacros["__riscv"] = "1";
+        predefinedMacros["__riscv32__"] = "1";
+    } else if (target == "riscv64") {
+        predefinedMacros["__riscv"] = "1";
+        predefinedMacros["__riscv64__"] = "1";
     } else if (target == "cortex-m3") {
         predefinedMacros["__CORTEX_M3__"] = "1";
     } else if (target == "cortex-m4" || target == "cortex-m7") {

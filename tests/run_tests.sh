@@ -6,7 +6,7 @@
 # on every target (see ../src/Backend.h: a .c file means the same
 # thing regardless of --target).
 #
-# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|cp1610|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
+# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|riscv32|riscv64|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|cp1610|8008|8051|stm32|i386|armv7a|armv8a|vex] [--optimize]
 #
 # --optimize passes rcc's own --optimize straight through to every
 # compile below, so the exact same checks also confirm the IR
@@ -75,6 +75,26 @@ case "$TARGET" in
     r10000)
         if ! command -v qemu-system-mips >/dev/null 2>&1; then
             echo "qemu-system-mips not found on PATH - install it (e.g. 'brew install qemu')" >&2
+            exit 1
+        fi
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 not found on PATH - needed to talk to qemu's monitor" >&2
+            exit 1
+        fi
+        ;;
+    riscv32)
+        if ! command -v qemu-system-riscv32 >/dev/null 2>&1; then
+            echo "qemu-system-riscv32 not found on PATH - install it (e.g. 'brew install qemu' or 'apt-get install qemu-system-misc')" >&2
+            exit 1
+        fi
+        if ! command -v python3 >/dev/null 2>&1; then
+            echo "python3 not found on PATH - needed to talk to qemu's monitor" >&2
+            exit 1
+        fi
+        ;;
+    riscv64)
+        if ! command -v qemu-system-riscv64 >/dev/null 2>&1; then
+            echo "qemu-system-riscv64 not found on PATH - install it (e.g. 'brew install qemu' or 'apt-get install qemu-system-misc')" >&2
             exit 1
         fi
         if ! command -v python3 >/dev/null 2>&1; then
@@ -378,7 +398,7 @@ case "$TARGET" in
         fi
         ;;
     *)
-        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, cp1610, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
+        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, riscv32, riscv64, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, cp1610, 8008, 8051, stm32, i386, armv7a, armv8a, vex)" >&2
         exit 1
         ;;
 esac
@@ -1741,6 +1761,106 @@ check_r10000() {
 
     local t0_dec
     t0_dec="$(to_signed "$((16#$t0_hex))" 32)"
+    if [ "$t0_dec" -eq "$expect" ]; then
+        echo "PASS $name (t0=$t0_dec)"
+        return 0
+    fi
+    echo "FAIL $name: expected $expect, got $t0_dec (t0 hex: $t0_hex)"
+    return 1
+}
+
+# The RISC-V `virt` board's RAM starts exactly at `kRiscv32BaseAddress`
+# (0x80000000), so the program loads and the `loader` device's PC-forcing
+# `cpu-num=0` both land it there directly, unlike MIPS above - no special-
+# cased board needed. Riscv32Assembler.cpp's own `emit32()` is little-
+# endian, matching real RV32 hardware, so this needs no byte-order care.
+# The program's own result sits in `t0` (`x5`) the instant execution
+# reaches its `halt: j halt` spin loop - see Riscv32Codegen.h's own
+# header comment.
+check_riscv32() {
+    local src="$1" name="$2"
+    local binfile="$tmpdir/$name.bin"
+
+    if ! "$RCC" --target=riscv32 --format=raw \
+            $OPTFLAGS --dump-ir --out="$binfile" "$src" >"$tmpdir/$name.log" 2>&1; then
+        echo "FAIL $name: compile error"
+        sed 's/^/    /' "$tmpdir/$name.log"
+        return 1
+    fi
+
+    qemu_count=$((qemu_count + 1))
+    local monitor="$sockdir/$qemu_count"
+    local outfile="$tmpdir/$name.out"
+
+    qemu-system-riscv32 -M virt -cpu rv32 -bios none -m 16M \
+        -device "loader,file=$binfile,addr=0x80000000,cpu-num=0" \
+        -monitor "unix:$monitor,server,nowait" -nographic -serial none -display none -no-reboot \
+        >"$tmpdir/$name.qemu.log" 2>&1 &
+    local qemu_pid=$!
+    ( sleep 45; kill -9 "$qemu_pid" 2>/dev/null ) &
+    local watcher=$!
+
+    wait_for_qemu "$name" "$monitor" "$outfile" "$qemu_pid" "$watcher" || return 1
+
+    local t0_hex
+    t0_hex="$(grep -oE 'x5/t0 +[0-9a-fA-F]+' "$outfile" | head -1 | awk '{print $2}')"
+    if [ -z "$t0_hex" ]; then
+        echo "FAIL $name: qemu produced no t0 (timed out or crashed)"
+        return 1
+    fi
+
+    local t0_dec
+    t0_dec="$(to_signed "$((16#$t0_hex))" 32)"
+    if [ "$t0_dec" -eq "$expect" ]; then
+        echo "PASS $name (t0=$t0_dec)"
+        return 0
+    fi
+    echo "FAIL $name: expected $expect, got $t0_dec (t0 hex: $t0_hex)"
+    return 1
+}
+
+# The RV64 `virt` board's RAM also starts at `kRiscv64BaseAddress`
+# (0x80000000, same as riscv32's own board), so this mirrors
+# check_riscv32() exactly except for the CPU/board flags and the
+# register width: `t0`'s own hex dump here is a full 64-bit value, and
+# bash's `$((16#...))` arithmetic already interprets a 16-hex-digit
+# value as the correctly signed 64-bit two's-complement number on its
+# own, so no separate `to_signed` call is needed (or even correct -
+# `to_signed`'s own `1 << 63` overflows bash's signed 64-bit arithmetic).
+check_riscv64() {
+    local src="$1" name="$2"
+    local binfile="$tmpdir/$name.bin"
+
+    if ! "$RCC" --target=riscv64 --format=raw \
+            $OPTFLAGS --dump-ir --out="$binfile" "$src" >"$tmpdir/$name.log" 2>&1; then
+        echo "FAIL $name: compile error"
+        sed 's/^/    /' "$tmpdir/$name.log"
+        return 1
+    fi
+
+    qemu_count=$((qemu_count + 1))
+    local monitor="$sockdir/$qemu_count"
+    local outfile="$tmpdir/$name.out"
+
+    qemu-system-riscv64 -M virt -cpu rv64 -bios none -m 16M \
+        -device "loader,file=$binfile,addr=0x80000000,cpu-num=0" \
+        -monitor "unix:$monitor,server,nowait" -nographic -serial none -display none -no-reboot \
+        >"$tmpdir/$name.qemu.log" 2>&1 &
+    local qemu_pid=$!
+    ( sleep 45; kill -9 "$qemu_pid" 2>/dev/null ) &
+    local watcher=$!
+
+    wait_for_qemu "$name" "$monitor" "$outfile" "$qemu_pid" "$watcher" || return 1
+
+    local t0_hex
+    t0_hex="$(grep -oE 'x5/t0 +[0-9a-fA-F]+' "$outfile" | head -1 | awk '{print $2}')"
+    if [ -z "$t0_hex" ]; then
+        echo "FAIL $name: qemu produced no t0 (timed out or crashed)"
+        return 1
+    fi
+
+    local t0_dec
+    t0_dec="$((16#$t0_hex))"
     if [ "$t0_dec" -eq "$expect" ]; then
         echo "PASS $name (t0=$t0_dec)"
         return 0
@@ -3126,6 +3246,8 @@ for src in "${all_sources[@]}"; do
         saturn) check_saturn "$src" "$name" || fail=1 ;;
         tms320c6713) check_tms320c6713 "$src" "$name" || fail=1 ;;
         r10000) check_r10000 "$src" "$name" || fail=1 ;;
+        riscv32) check_riscv32 "$src" "$name" || fail=1 ;;
+        riscv64) check_riscv64 "$src" "$name" || fail=1 ;;
         powerpc) check_powerpc "$src" "$name" || fail=1 ;;
         cortex-m3) check_cortex_m3 "$src" "$name" || fail=1 ;;
         8086) check_8086 8086 "$src" "$name" || fail=1 ;;

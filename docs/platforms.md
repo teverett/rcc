@@ -714,6 +714,72 @@ pair - see `docs/using.md`.
   self-branch infinite loop. Verified under `qemu-system-mips -cpu R4000`
   (qemu ships no real R10000 model); tested against
   `qemu-system-mips -M malta -cpu 4Kc`, but not run by `make test`.
+- **riscv32** — RISC-V assembly (own dialect; `Riscv32Assembler.h`),
+  targeting the RV32I base integer instruction set plus the M extension
+  (`mul`/`mulh`/`mulhsu`/`mulhu`/`div`/`divu`/`rem`/`remu`); every
+  mnemonic the assembler accepts encodes the real bit pattern the
+  RISC-V unprivileged ISA spec defines, with the dialect's own narrowing
+  limited to operand *shapes* (a load/store's base register and
+  displacement are two plain comma-separated operands rather than real
+  `offset(rs1)` syntax, and `lui`/`addi` resolve a label operand to its
+  own upper-20/lower-12 bits automatically instead of needing `%hi()`/
+  `%lo()`). A real register machine with a hardware stack, hardware
+  `ra` link register, and hardware multiply/divide/remainder (`div`/
+  `rem` give the quotient/remainder directly, with no `mfhi`/`mflo`-
+  style extra step the way MIPS needs) — like `sparc`, calls are
+  simplified to push every argument on the stack rather than use the
+  real RV32 `a0`-`a7` register-argument convention, and RISC-V has no
+  branch-delay slot at all, so every branch/`jal`/`jalr` takes effect
+  immediately. `x0`-`x31` are reachable by their bare number or their
+  standard ABI name; this backend's own codegen only ever uses
+  `zero`/`ra`/`sp`/`fp`(`s0`)/`t0`-`t6`, plus `s1` as its own internal
+  scratch register (this dialect's stand-in for `MipsCodegen.h`'s
+  `$at`). Halts in a self-jump (`j`) infinite loop, result in `t0`
+  (`x5`). Verified under `qemu-system-riscv32 -M virt -cpu rv32`, run
+  by `make test`.
+- **riscv64** — RISC-V assembly (own dialect; `Riscv64Assembler.h`), the
+  64-bit sibling of `riscv32`: full RV64I (every RV32I mnemonic, operating
+  on the full 64-bit register file, plus the RV64-only word-size
+  instructions `lwu`/`ld`/`sd`/`addiw`/`slliw`/`srliw`/`sraiw`/`addw`/
+  `subw`/`sllw`/`srlw`/`sraw`) plus the M extension at both the full
+  64-bit width (`mul`/`mulh`/`mulhsu`/`mulhu`/`div`/`divu`/`rem`/`remu`)
+  and the word-size width (`mulw`/`divw`/`divuw`/`remw`/`remuw`); `slli`/
+  `srli`/`srai` take a 6-bit shift amount (0-63) rather than RV32's 5-bit
+  one, since a register holds 64 bits. Unlike `riscv32` (a genuinely
+  32-bit-register machine, needing a software-emulated register pair for
+  `long long`), every RISC-V register here is already 64 bits wide, so
+  `int` is the only type narrower than a native register: `long`/`long
+  long`/every pointer are a full 8-byte register value, generated the way
+  `alpha` (another native-64-bit-register target) generates its own -
+  one register holds the whole value regardless of C type, with a
+  sign/zero-extending truncation step after an operation on a narrower
+  `int` - rather than riscv32's own bit-serial 32-bit-register-pair
+  emulation; and unlike `alpha`, RV64M's hardware `div`/`divu`/`rem`/
+  `remu` cover `long`/`long long` division directly, with no software
+  fallback needed at all. Absolute addressing (a global's or function's
+  label) still splits into a `lui`/`addi` pair the same `%hi`/`%lo`
+  sign-rounding way riscv32's own dialect does, but `lui`/`addi` only
+  ever build a *sign-extended* 32-bit value on real RV64 hardware; since
+  this target's own base address (`kRiscv64BaseAddress`, 0x80000000, same
+  as riscv32's) has bit 31 set, that sign-extension would leave an
+  address's own top 32 bits all-ones instead of all-zero, so every such
+  load appends a fixed `slli`/`srli`-by-32 pair to zero-extend it back to
+  the intended unsigned value - see `Riscv64Codegen.h`'s own header
+  comment. The same fix (`canonicalizeAddress()`) is applied to any
+  runtime-computed pointer value right before it's dereferenced or
+  called through, since this C subset also lets a plain, narrower-than-
+  pointer-width integer (most often `int`) stand in for an address (a
+  `sum3(int p)`-style raw-pointer-arithmetic idiom, or a dispatch table
+  declared `int table[N]`), which `loadOperand()` necessarily sign-
+  extends like any other signed `int`. The assembler dialect adds one
+  directive riscv32's doesn't need: `dq`, a plain 64-bit data word
+  (literal or symbol), used for this target's own 8-byte pointer/`long`/
+  `long long` storage - riscv32's `dw`-pair-splitting convention for a
+  64-bit literal isn't needed here, since `dq` holds the whole value (or
+  symbol relocation) directly. Same calling-convention simplification as
+  riscv32 (every argument on the stack, caller cleanup), same self-jump
+  halt with the result in `t0` (`x5`). Verified under
+  `qemu-system-riscv64 -M virt -cpu rv64`, run by `make test`.
 - **powerpc** — classic 32-bit PowerPC assembly (own dialect;
   `PowerPCAssembler.h`), the instruction set every G3/G4/G5 and embedded
   PowerPC core shares. A real register machine with a hardware stack and
@@ -994,7 +1060,8 @@ target's macro and its own): `__PDP1__`, `__PDP7__`, `__8086__` (also for
 `z80-coleco`, plus `__COLECO__`), `__6809__`, `__8008__`, `__STM8__`,
 `__STM32__`, `__I386__`, `__M16C__` (also for `m30626fjpfp`, plus
 `__M30626FJPFP__`), `__PIC16__`, `__PIC18__`, `__R10000__` (also for
-`r4000`, plus `__R4000__`), `__CORTEX_M3__` (also for `cortex-m4`/
+`r4000`, plus `__R4000__`), `__riscv` (also `__riscv32__`/`__riscv64__`, for `riscv32`/`riscv64`
+respectively), `__CORTEX_M3__` (also for `cortex-m4`/
 `cortex-m7`, plus `__CORTEX_M4__`/`__CORTEX_M7__`), `__MCS51__` (also for
 `8051`/`8052`/`8031`/`8032`, plus each one's own `__8051__`/`__8052__`/
 `__8031__`/`__8032__`), `__ARMV7A__`, `__ARMV8A__` (also `__aarch64__`),

@@ -126,6 +126,26 @@ wait_for_qemu test "$monitor" "$tmpdir/test.out" "$qemu_pid" "$watcher" "$@"
         self.assertIn("R00=00000003", out.stdout)
         self.assertGreaterEqual(elapsed, 2)
 
+    def test_ignores_free_running_counter_noise_like_riscv_mcycle(self):
+        # A RISC-V dump's `mcycle`/`minstret`/`time` rows (plus their own
+        # `...h` high-half counterparts) keep incrementing every real
+        # cycle even once the program itself has settled into a stable
+        # spin loop - settling must still be detected despite them.
+        serve(self.path, lambda n: "x5/t0    0000002a\n mcycle   %08x\n minstreth %08x\n" % (0x1000 + n, n))
+        out, elapsed = run_wait(self.path, 10)
+        self.assertIn("x5/t0    0000002a", out.stdout)
+        self.assertLess(elapsed, 5)
+
+    def test_still_detects_real_changes_alongside_counter_noise(self):
+        # The same free-running counters as above, but the *real* register
+        # keeps changing for the first several samples - settling must
+        # wait for that to stop, not be fooled by the counter-stripping
+        # into an immediate false "stable" result.
+        serve(self.path, lambda n: "x5/t0    %08x\n mcycle   %08x\n" % (min(n, 5), 0x2000 + n))
+        out, elapsed = run_wait(self.path, 10)
+        self.assertIn("x5/t0    00000005", out.stdout)
+        self.assertLess(elapsed, 5)
+
     def test_stops_the_cpu_around_each_read(self):
         commands = []
         serve(self.path, lambda n: "R00=00000001 PC=0100", commands)
