@@ -3,6 +3,11 @@
 2a03-elf    Ricoh 2A03 (NES) - ELF relocatable object
 2a03-nes    Ricoh 2A03 (NES) - iNES ROM image
 2a03-raw    Ricoh 2A03 (NES) - flat binary image, no container
+5200-a5200    MOS 6502 (Atari 5200) - Atari 5200 cartridge ROM image
+5200-aout    MOS 6502 (Atari 5200) - a.out relocatable object
+5200-coff    MOS 6502 (Atari 5200) - COFF relocatable object
+5200-elf    MOS 6502 (Atari 5200) - ELF relocatable object
+5200-raw    MOS 6502 (Atari 5200) - flat binary image, no container
 6502-aout    MOS 6502 - a.out relocatable object
 6502-atari    MOS 6502 - Atari 400/800 DOS binary-load byte stream
 6502-coff    MOS 6502 - COFF relocatable object
@@ -11,6 +16,7 @@
 6502-prg    MOS 6502 - Commodore PRG byte stream (load address plus bytes)
 6502-prodos    MOS 6502 - ProDOS binary file with directory metadata footer
 6502-raw    MOS 6502 - flat binary image, no container
+6502-ssd    MOS 6502 - Acorn DFS single-sided disc image
 65c02-aout    WDC 65C02 - a.out relocatable object
 65c02-atari    WDC 65C02 - Atari 400/800 DOS binary-load byte stream
 65c02-coff    WDC 65C02 - COFF relocatable object
@@ -106,6 +112,11 @@ cortex-m7-raw    ARM Cortex-M (ARMv7-M) - flat binary image, no container
 cp1610-aout    General Instrument CP1610 - a.out relocatable object
 cp1610-coff    General Instrument CP1610 - COFF relocatable object
 cp1610-elf    General Instrument CP1610 - ELF relocatable object
+cp1610-intv-aout    General Instrument CP1610 - a.out relocatable object
+cp1610-intv-coff    General Instrument CP1610 - COFF relocatable object
+cp1610-intv-elf    General Instrument CP1610 - ELF relocatable object
+cp1610-intv-intvbin    General Instrument CP1610 - Mattel Intellivision cartridge ROM image (plain .bin, $5000-based)
+cp1610-intv-raw    General Instrument CP1610 - flat binary image, no container
 cp1610-raw    General Instrument CP1610 - flat binary image, no container
 i386-aout    Intel 386 - a.out relocatable object
 i386-coff    Intel 386 - COFF relocatable object
@@ -121,6 +132,10 @@ m30626fjpfp-aout    Renesas M16C - a.out relocatable object
 m30626fjpfp-coff    Renesas M16C - COFF relocatable object
 m30626fjpfp-elf    Renesas M16C - ELF relocatable object
 m30626fjpfp-raw    Renesas M16C - flat binary image, no container
+m32c-aout    Renesas M32C - a.out relocatable object
+m32c-coff    Renesas M32C - COFF relocatable object
+m32c-elf    Renesas M32C - ELF relocatable object
+m32c-raw    Renesas M32C - flat binary image, no container
 mc68328-aout    Motorola MC68328 "DragonBall" - a.out relocatable object
 mc68328-coff    Motorola MC68328 "DragonBall" - COFF relocatable object
 mc68328-elf    Motorola MC68328 "DragonBall" - ELF relocatable object
@@ -159,6 +174,10 @@ r10000-aout    MIPS I (R10000/R4000) - a.out relocatable object
 r10000-coff    MIPS I (R10000/R4000) - COFF relocatable object
 r10000-elf    MIPS I (R10000/R4000) - ELF relocatable object
 r10000-raw    MIPS I (R10000/R4000) - flat binary image, no container
+r32c-aout    Renesas R32C - a.out relocatable object
+r32c-coff    Renesas R32C - COFF relocatable object
+r32c-elf    Renesas R32C - ELF relocatable object
+r32c-raw    Renesas R32C - flat binary image, no container
 r4000-aout    MIPS I (R10000/R4000) - a.out relocatable object
 r4000-coff    MIPS I (R10000/R4000) - COFF relocatable object
 r4000-elf    MIPS I (R10000/R4000) - ELF relocatable object
@@ -206,7 +225,14 @@ z80-coleco-colecorom    Zilog Z80 - ColecoVision cartridge ROM image
 z80-coleco-elf    Zilog Z80 - ELF relocatable object
 z80-coleco-raw    Zilog Z80 - flat binary image, no container
 z80-elf    Zilog Z80 - ELF relocatable object
+z80-gg    Zilog Z80 - Sega Game Gear cartridge ROM image
+z80-msx-aout    Zilog Z80 - a.out relocatable object
+z80-msx-coff    Zilog Z80 - COFF relocatable object
+z80-msx-elf    Zilog Z80 - ELF relocatable object
+z80-msx-msxrom    Zilog Z80 - MSX cartridge ROM image
+z80-msx-raw    Zilog Z80 - flat binary image, no container
 z80-raw    Zilog Z80 - flat binary image, no container
+z80-sms    Zilog Z80 - Sega Master System cartridge ROM image
 z80-sna    Zilog Z80 - ZX Spectrum 48K .sna snapshot
 z8000-aout    Zilog Z8000 (Z8002, non-segmented) - a.out relocatable object
 z8000-coff    Zilog Z8000 (Z8002, non-segmented) - COFF relocatable object

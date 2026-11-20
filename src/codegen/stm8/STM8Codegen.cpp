@@ -481,6 +481,7 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
         declareTemp("ptr");
         declareTemp("fp");
         declareTemp("fsp");
+        declareTemp("mc");  // genNarrowMul()'s own scratch cell, never aliased with `cx`
         trailer_.push_back("lc: db 0");
         // Permanent zero byte: adc a, zero folds a pending carry into a
         // byte with nothing else added (see genWideNegate()).
@@ -1102,10 +1103,8 @@ void STM8Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft
     copy16("ac", "bc");
 }
 
-// Textbook shift-and-add multiply (no hardware multiply wide enough for a
-// 16x16): `bc` is the multiplicand (doubled each iteration), `dx` the
-// multiplier (halved, consumed one bit at a time), `ac` the accumulating
-// product. Only verified against non-negative operands. `lhs` survives
+// `bc` is the multiplicand, `dx` the multiplier; `genNarrowMul()` turns
+// them into a 16x16->16 product via hardware `MUL X,A`. `lhs` survives
 // evaluating `rhs` on the hardware stack rather than an early
 // copy16("bc", ...), since `rhs` may itself be or contain a call that reuses `bc`.
 void STM8Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -1114,21 +1113,30 @@ void STM8Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(rhs);
     copy16("dx", "ac");  // dx = multiplier
     code_ << "    pop x\n    ldw bc, x\n";  // bc = multiplicand
-    code_ << "    ldwi x, 0\n    ldw ac, x\n";  // ac = product = 0
-    code_ << "    ldi a, 16\n    ld lc, a\n";    // loop counter
-    std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ld a, lc\n    tnza\n";
-    code_ << "    jreq " << Ldone << "\n";
-    code_ << "    ld a, dx+1\n    andi a, 1\n";
-    code_ << "    jreq " << Lskipadd << "\n";
-    code_ << "    ldw x, ac\n    ldw y, bc\n    addw x, y\n    ldw ac, x\n";
-    code_ << Lskipadd << ":\n";
-    shiftOneBit("bc", /*isLeft=*/true);
-    shiftOneBit("dx", /*isLeft=*/false);
-    code_ << "    ld a, lc\n    deca\n    ld lc, a\n";
-    code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    genNarrowMul();
+}
+
+// `MUL X,A` multiplies `a` by `x`'s low byte, leaving the full 16-bit
+// result in `x`; the real STM8's own `x` is only a transit register here
+// (every live operand lives in a named cell), so each byte operand is
+// routed through `x`'s low byte via a scratch cell (`mc`, dedicated to this
+// function alone - `cx` is reserved for genCompoundOp()'s callers to stash
+// a yieldOld result across it) whose low byte is set first.
+//
+// A 16x16 product's bcH*dxH term only affects bits >=16, so it's dropped;
+// of the two cross terms (bcH*dxL, bcL*dxH), only their low bytes still
+// land inside the 16-bit result (each cross term's own high byte would
+// land at bit 16 or above), so those two low bytes are summed (the 8-bit
+// add's carry-out is itself bit 16 and is discarded) and added into the
+// low*low product's high byte (again discarding any carry past bit 15).
+void STM8Codegen::genNarrowMul() {
+    code_ << "    ldw x, bc\n    ld a, dx+1\n    mul x, a\n";  // x = bcL * dxL
+    code_ << "    ldw ac, x\n";
+    code_ << "    ld a, bc\n    ld mc+1, a\n    ldw x, mc\n    ld a, dx+1\n    mul x, a\n";  // x = bcH * dxL
+    code_ << "    ldw mc, x\n    ld a, mc+1\n    ld lc, a\n";
+    code_ << "    ldw x, bc\n    ld a, dx\n    mul x, a\n";  // x = bcL * dxH
+    code_ << "    ldw mc, x\n    ld a, mc+1\n    add a, lc\n    ld lc, a\n";
+    code_ << "    ld a, ac\n    add a, lc\n    ld ac, a\n";
 }
 
 // Repeated subtraction (no hardware 16/16 divide): `dx` is the running
@@ -1199,21 +1207,7 @@ void STM8Codegen::genCompoundOp(const std::string &op, Type type) {
     }
     if (op == "*") {
         copy16("dx", "ac");  // dx = multiplier (rhs) - bc already holds the multiplicand (old)
-        code_ << "    ldwi x, 0\n    ldw ac, x\n";  // ac = product = 0
-        code_ << "    ldi a, 16\n    ld lc, a\n";    // loop counter
-        std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    ld a, lc\n    tnza\n";
-        code_ << "    jreq " << Ldone << "\n";
-        code_ << "    ld a, dx+1\n    andi a, 1\n";
-        code_ << "    jreq " << Lskipadd << "\n";
-        code_ << "    ldw x, ac\n    ldw y, bc\n    addw x, y\n    ldw ac, x\n";
-        code_ << Lskipadd << ":\n";
-        shiftOneBit("bc", /*isLeft=*/true);
-        shiftOneBit("dx", /*isLeft=*/false);
-        code_ << "    ld a, lc\n    deca\n    ld lc, a\n";
-        code_ << "    jp " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        genNarrowMul();
         return;
     }
     if (op == "/" || op == "%") {

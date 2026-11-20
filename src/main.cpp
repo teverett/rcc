@@ -65,12 +65,15 @@
 #include "codegen/pdp11/Pdp11Codegen.h"
 #include "codegen/z8000/Z8000Codegen.h"
 #include "codegen/cp1610/CP1610Codegen.h"
+#include "linker/factory/CP1610IntvLinkerFactory.h"
 #include "codegen/pdp10/Pdp10Codegen.h"
 #include "codegen/i8080/I8080Codegen.h"
 #include "codegen/m6809/M6809Codegen.h"
 #include "codegen/z80/Z80Codegen.h"
 #include "codegen/i8008/I8008Codegen.h"
 #include "codegen/m16c/M16cCodegen.h"
+#include "codegen/m32c/M32cCodegen.h"
+#include "codegen/r32c/R32cCodegen.h"
 #include "codegen/stm8/STM8Codegen.h"
 #include "codegen/stm32/STM32Codegen.h"
 #include "codegen/i386/I386Codegen.h"
@@ -98,6 +101,7 @@
 #include "linker/factory/Pdp7LinkerFactory.h"
 #include "linker/factory/Z80LinkerFactory.h"
 #include "linker/factory/ColecoLinkerFactory.h"
+#include "linker/factory/MsxLinkerFactory.h"
 #include "linker/factory/M6809LinkerFactory.h"
 #include "linker/factory/VectrexLinkerFactory.h"
 #include "linker/factory/M6502LinkerFactory.h"
@@ -113,6 +117,8 @@
 #include "linker/factory/CP1610LinkerFactory.h"
 #include "linker/factory/Pdp10LinkerFactory.h"
 #include "linker/factory/M16cLinkerFactory.h"
+#include "linker/factory/M32cLinkerFactory.h"
+#include "linker/factory/R32cLinkerFactory.h"
 #include "linker/factory/I386LinkerFactory.h"
 #include "linker/factory/ArmLinkerFactory.h"
 #include "linker/factory/ArmMLinkerFactory.h"
@@ -208,10 +214,10 @@ void writeToBuildDir(const std::string &name, const std::string &content, bool b
 // independently valid on the command line). Used both for "unknown
 // --target" error messages and for --list-platforms.
 const std::vector<std::string> kTargetNames = {
-    "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "6809", "6809-vectrex", "8008",
-    "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
+    "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "5200", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "z80-msx", "6809", "6809-vectrex", "8008",
+    "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "m32c", "r32c", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
-    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "cp1610", "parrotvm", "vex", "moarvm",
+    "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "cp1610", "cp1610-intv", "parrotvm", "vex", "moarvm",
     "riscv32", "riscv64",
 };
 
@@ -270,6 +276,7 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "6502") return std::make_unique<rcc::M6502Codegen>();
     if (target == "atari2600") return std::make_unique<rcc::M6502Codegen>(rcc::M6502Codegen::Variant::Atari2600);
     if (target == "2a03") return std::make_unique<rcc::M6502Codegen>(rcc::M6502Codegen::Variant::Nes2A03);
+    if (target == "5200") return std::make_unique<rcc::M6502Codegen>(rcc::M6502Codegen::Variant::Atari5200);
     if (target == "65c02") return std::make_unique<rcc::M65C02Codegen>();
     if (target == "68000") return std::make_unique<rcc::M68kCodegen>();
     if (target == "tms9900") return std::make_unique<rcc::TMS9900Codegen>();
@@ -277,13 +284,15 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "pdp11") return std::make_unique<rcc::Pdp11Codegen>();
     if (target == "pdp10") return std::make_unique<rcc::Pdp10Codegen>();
     if (target == "8080") return std::make_unique<rcc::I8080Codegen>();
-    if (target == "z80" || target == "z80-coleco") return std::make_unique<rcc::Z80Codegen>();
+    if (target == "z80" || target == "z80-coleco" || target == "z80-msx") return std::make_unique<rcc::Z80Codegen>();
     if (target == "6809" || target == "6809-vectrex") return std::make_unique<rcc::M6809Codegen>();
     if (target == "8008") return std::make_unique<rcc::I8008Codegen>();
     if (target == "stm8") return std::make_unique<rcc::STM8Codegen>();
     if (target == "stm32") return std::make_unique<rcc::STM32Codegen>();
     if (target == "i386") return std::make_unique<rcc::I386Codegen>();
     if (target == "m16c" || target == "m30626fjpfp") return std::make_unique<rcc::M16cCodegen>();
+    if (target == "m32c") return std::make_unique<rcc::M32cCodegen>();
+    if (target == "r32c") return std::make_unique<rcc::R32cCodegen>();
     if (target == "pic16") return std::make_unique<rcc::PIC16Codegen>();
     if (target == "pic18") return std::make_unique<rcc::PIC18Codegen>();
     if (target == "r10000" || target == "r4000") return std::make_unique<rcc::MipsCodegen>();
@@ -307,7 +316,7 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "saturn") return std::make_unique<rcc::SaturnCodegen>();
     if (target == "tms320c6713") return std::make_unique<rcc::Tms320C6713Codegen>();
     if (target == "z8000") return std::make_unique<rcc::Z8000Codegen>();
-    if (target == "cp1610") return std::make_unique<rcc::CP1610Codegen>();
+    if (target == "cp1610" || target == "cp1610-intv") return std::make_unique<rcc::CP1610Codegen>();
     return nullptr;
 }
 
@@ -318,8 +327,9 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     }
     if (target == "8086" || target == "8088") return rcc::makeI8086Linker();
     if (target == "8086-dos") return rcc::makeI8086DosLinker();
-    if (target == "z80") return rcc::makeZ80Linker();
+    if (target == "z80") return baseAddressWords ? rcc::makeZ80Linker(*baseAddressWords) : rcc::makeZ80Linker();
     if (target == "z80-coleco") return rcc::makeColecoLinker();
+    if (target == "z80-msx") return rcc::makeMsxLinker();
     if (target == "6809") return rcc::makeM6809Linker();
     if (target == "6809-vectrex") return rcc::makeVectrexLinker();
     if (target == "6502") {
@@ -330,6 +340,9 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     }
     if (target == "2a03") {
         return baseAddressWords ? rcc::makeNes2A03Linker(*baseAddressWords) : rcc::makeNes2A03Linker();
+    }
+    if (target == "5200") {
+        return baseAddressWords ? rcc::makeAtari5200Linker(*baseAddressWords) : rcc::makeAtari5200Linker();
     }
     if (target == "65c02") {
         return baseAddressWords ? rcc::makeM65C02Linker(*baseAddressWords) : rcc::makeM65C02Linker();
@@ -343,8 +356,11 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     if (target == "pdp11") return rcc::makePdp11Linker();
     if (target == "z8000") return rcc::makeZ8000Linker();
     if (target == "cp1610") return rcc::makeCP1610Linker();
+    if (target == "cp1610-intv") return rcc::makeCP1610IntvLinker();
     if (target == "pdp10") return rcc::makePdp10Linker();
     if (target == "m16c" || target == "m30626fjpfp") return rcc::makeM16cLinker();
+    if (target == "m32c") return rcc::makeM32cLinker();
+    if (target == "r32c") return rcc::makeR32cLinker();
     if (target == "i386") return rcc::makeI386Linker();
     if (target == "armv7a") return rcc::makeArmLinker();
     if (target == "armv8a") return rcc::makeArm64Linker();
@@ -458,9 +474,15 @@ std::string formatDescription(const std::string &format) {
         {"atari", "Atari 400/800 DOS binary-load byte stream"},
         {"a26", "Atari 2600 cartridge ROM image"},
         {"nes", "iNES ROM image"},
+        {"a5200", "Atari 5200 cartridge ROM image"},
+        {"intvbin", "Mattel Intellivision cartridge ROM image (plain .bin, $5000-based)"},
         {"sna", "ZX Spectrum 48K .sna snapshot"},
         {"amsdos", "Amstrad CPC file header plus data"},
         {"vectrex", "GCE Vectrex cartridge ROM image"},
+        {"ssd", "Acorn DFS single-sided disc image"},
+        {"msxrom", "MSX cartridge ROM image"},
+        {"sms", "Sega Master System cartridge ROM image"},
+        {"gg", "Sega Game Gear cartridge ROM image"},
     };
     auto it = kDescriptions.find(format);
     return it != kDescriptions.end() ? it->second : "";
@@ -831,8 +853,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (baseAddressWords && target != "pdp7" && target != "6502" && target != "65c02" && target != "atari2600" &&
-        target != "2a03") {
-        std::cerr << "--base is only supported for --target=pdp7/6502/65c02/atari2600/2a03 right now\n";
+        target != "2a03" && target != "5200" && target != "z80") {
+        std::cerr << "--base is only supported for --target=pdp7/6502/65c02/atari2600/2a03/5200/z80 right now\n";
         return 1;
     }
 
@@ -966,6 +988,9 @@ int main(int argc, char **argv) {
     } else if (target == "2a03") {
         predefinedMacros["__6502__"] = "1";
         predefinedMacros["__2A03__"] = "1";
+    } else if (target == "5200") {
+        predefinedMacros["__6502__"] = "1";
+        predefinedMacros["__ATARI5200__"] = "1";
     } else if (target == "65c02") {
         predefinedMacros["__6502__"] = "1";
         predefinedMacros["__65C02__"] = "1";
@@ -980,7 +1005,7 @@ int main(int argc, char **argv) {
         predefinedMacros["__PDP11__"] = "1";
     } else if (target == "z8000") {
         predefinedMacros["__Z8000__"] = "1";
-    } else if (target == "cp1610") {
+    } else if (target == "cp1610" || target == "cp1610-intv") {
         predefinedMacros["__CP1610__"] = "1";
     } else if (target == "pdp10") {
         predefinedMacros["__PDP10__"] = "1";
@@ -991,6 +1016,9 @@ int main(int argc, char **argv) {
     } else if (target == "z80-coleco") {
         predefinedMacros["__Z80__"] = "1";
         predefinedMacros["__COLECO__"] = "1";
+    } else if (target == "z80-msx") {
+        predefinedMacros["__Z80__"] = "1";
+        predefinedMacros["__MSX__"] = "1";
     } else if (target == "6809") {
         predefinedMacros["__6809__"] = "1";
     } else if (target == "6809-vectrex") {
@@ -1007,6 +1035,10 @@ int main(int argc, char **argv) {
     } else if (target == "m16c" || target == "m30626fjpfp") {
         predefinedMacros["__M16C__"] = "1";
         if (target == "m30626fjpfp") predefinedMacros["__M30626FJPFP__"] = "1";
+    } else if (target == "m32c") {
+        predefinedMacros["__M32C__"] = "1";
+    } else if (target == "r32c") {
+        predefinedMacros["__R32C__"] = "1";
     } else if (target == "pic16") {
         predefinedMacros["__PIC16__"] = "1";
     } else if (target == "pic18") {

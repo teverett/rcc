@@ -81,6 +81,31 @@ constexpr const char *kNes2A03EntryAsm =
     "halt:\n"
     "    jmp halt\n";
 
+// `--target=5200`'s own entry sequence: identical shape to kEntryAsm above, just with every
+// zero-page equate shifted up to M6502Codegen.h's `zeroPageBase()` ($0020, clear of the 5200
+// BIOS's own zero-page use) and `sp` seeded to `frameStackBase()` ($0300) instead of $0200,
+// which is the 5200 BIOS's own 12-byte-plus interrupt-vector-table RAM (see M6502Codegen.h's
+// own header comment for why).
+constexpr const char *kAtari5200EntryAsm =
+    "org 0\n"
+    "ptr = 32\n"
+    "ac = 34\n"
+    "bc = 36\n"
+    "cx = 38\n"
+    "dx = 40\n"
+    "fp = 42\n"
+    "sp = 44\n"
+    "aBase = 46\n"
+    "_start:\n"
+    "    ldai 0\n"
+    "    sta sp\n"
+    "    ldai 3\n"
+    "    sta sp+1\n"
+    "    jsr fn_main\n"
+    "    lda ac\n"
+    "halt:\n"
+    "    jmp halt\n";
+
 // Patches only the low/high byte of a 16-bit value.
 void patchAbs16Lo(std::vector<uint8_t> &image, uint32_t siteOffset, uint32_t value, uint32_t) {
     image[siteOffset] = static_cast<uint8_t>(image[siteOffset] + (value & 0xFF));
@@ -98,7 +123,7 @@ std::unique_ptr<TargetLinker> makeM6502Linker(uint32_t baseAddress) {
     config.relocPatchers[kM6502RelocAbs16] = RelocKinds::patchAbs16;
     config.relocPatchers[kM6502RelocAbs16Lo] = patchAbs16Lo;
     config.relocPatchers[kM6502RelocAbs16Hi] = patchAbs16Hi;
-    config.outputFormats = {"raw", "coff", "elf", "aout", "dos33", "prodos", "prg", "atari"};
+    config.outputFormats = {"raw", "coff", "elf", "aout", "dos33", "prodos", "prg", "atari", "ssd"};
     return std::make_unique<GenericLinker>(std::move(config));
 }
 
@@ -123,6 +148,18 @@ std::unique_ptr<TargetLinker> makeNes2A03Linker(uint32_t baseAddress) {
     config.relocPatchers[kM6502RelocAbs16Lo] = patchAbs16Lo;
     config.relocPatchers[kM6502RelocAbs16Hi] = patchAbs16Hi;
     config.outputFormats = {"raw", "coff", "elf", "aout", "nes"};
+    return std::make_unique<GenericLinker>(std::move(config));
+}
+
+std::unique_ptr<TargetLinker> makeAtari5200Linker(uint32_t baseAddress) {
+    GenericLinkerConfig config;
+    config.baseAddress = baseAddress;
+    config.machineType = kM6502Atari5200CoffMachine;
+    config.entryObject = assembleM6502Object(kAtari5200EntryAsm, kM6502Atari5200CoffMachine);
+    config.relocPatchers[kM6502RelocAbs16] = RelocKinds::patchAbs16;
+    config.relocPatchers[kM6502RelocAbs16Lo] = patchAbs16Lo;
+    config.relocPatchers[kM6502RelocAbs16Hi] = patchAbs16Hi;
+    config.outputFormats = {"raw", "coff", "elf", "aout", "a5200"};
     return std::make_unique<GenericLinker>(std::move(config));
 }
 

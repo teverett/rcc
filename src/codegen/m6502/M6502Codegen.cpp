@@ -1553,6 +1553,7 @@ std::optional<std::string> M6502Codegen::assembleInProcess(const std::string &as
         uint16_t machineType = kM6502CoffMachine;
         if (variant_ == Variant::Atari2600) machineType = kM6502Atari2600CoffMachine;
         else if (variant_ == Variant::Nes2A03) machineType = kM6502Nes2A03CoffMachine;
+        else if (variant_ == Variant::Atari5200) machineType = kM6502Atari5200CoffMachine;
         ObjectFile obj = assembleM6502Object(asmText, machineType);
         return makeFileFormatWriter(*kind)->write(obj);
     }

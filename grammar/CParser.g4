@@ -152,8 +152,14 @@ returnTypeSpec
     | 'void'
     ;
 
+// A lone 'void' spells "no parameters" the standard ISO C way, same
+// meaning as an empty paramList (functionDecl's own `paramList?`) -
+// BuildAst.cpp needs no special case since this alternative's
+// param() collection is simply empty, same as omitting paramList
+// entirely.
 paramList
     : param (',' param)*
+    | 'void'
     ;
 
 // 'const' marks the declared name itself as never written to after its
@@ -178,14 +184,26 @@ param
 // a function above. 'const' (on any alternative here, including 'extern')
 // marks the global as never written to after its declaration - see param's
 // own comment above and ../docs/language.md's "Const declarations" section.
+// Each alternative admits a comma-separated list of declarators sharing
+// one base type/storage class (`int a, b[4];`), same as real C - every
+// declarator still picks its own array-vs-scalar shape, initializer and
+// '@' address independently (see globalDeclarator/externDeclarator below).
 globalDecl
-    : 'extern' cst='const'? typeSpec IDENT '[' size=NUMBER ']' ';'                            # externArrayDecl
-    | 'extern' cst='const'? typeSpec IDENT ';'                                                 # externScalarDecl
-    | stat='static'? cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)? ('@' addr=NUMBER)? ';'  # globalArrayDecl
+    : 'extern' cst='const'? typeSpec decl+=externDeclarator (',' decl+=externDeclarator)* ';'  # externDeclGroup
+    | stat='static'? cst='const'? typeSpec decl+=globalDeclarator (',' decl+=globalDeclarator)* ';'  # globalDeclGroup
+    ;
+
+externDeclarator
+    : IDENT '[' size=NUMBER ']'   # externArrayDeclarator
+    | IDENT                       # externScalarDeclarator
+    ;
+
+globalDeclarator
+    : IDENT '[' size=NUMBER ']' ('=' arrayInit)? ('@' addr=NUMBER)?    # globalArrayDeclarator
     // The initializer is a plain (optionally negated) literal, or an
     // already-declared enum constant's bare name (identVal) - see
     // BuildAst.cpp's resolveConstOrEnum.
-    | stat='static'? cst='const'? typeSpec IDENT ('=' (sign='-'? val=(NUMBER | FLOAT_NUMBER) | identVal=IDENT))? ('@' addr=NUMBER)? ';'  # globalScalarDecl
+    | IDENT ('=' (sign='-'? val=(NUMBER | FLOAT_NUMBER) | identVal=IDENT))? ('@' addr=NUMBER)?  # globalScalarDeclarator
     ;
 
 // Elements are plain literals, optionally negated, or a bare function/
@@ -241,12 +259,28 @@ statement
 // the two non-'static' alternatives - real C's own two storage-class
 // specifiers are mutually exclusive) is the same accepted-but-unacted-on
 // hint as param's - see param's own comment above.
+// Each alternative admits a comma-separated list of declarators sharing
+// one base type/storage class (`unsigned int row, col;`), same as real C -
+// every declarator still picks its own array-vs-scalar shape and
+// initializer independently (see localDeclarator/staticLocalDeclarator
+// below).
 simpleStmt
-    : reg='register'? cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)?     # localArrayDecl
-    | reg='register'? cst='const'? typeSpec IDENT ('=' expr)?                              # localDecl
-    | 'static' cst='const'? typeSpec IDENT '[' size=NUMBER ']' ('=' arrayInit)?           # staticLocalArrayDecl
-    | 'static' cst='const'? typeSpec IDENT ('=' (sign='-'? val=NUMBER | identVal=IDENT))? # staticLocalDecl
+    : reg='register'? cst='const'? typeSpec decl+=localDeclarator (',' decl+=localDeclarator)*                 # localDeclGroup
+    | 'static' cst='const'? typeSpec decl+=staticLocalDeclarator (',' decl+=staticLocalDeclarator)*             # staticLocalDeclGroup
     | expr                                                                  # exprStmt
+    ;
+
+localDeclarator
+    : IDENT '[' size=NUMBER ']' ('=' arrayInit)?    # localArrayDeclarator
+    | IDENT ('=' expr)?                              # localScalarDeclarator
+    ;
+
+// A 'static' local's initializer is restricted to the same compile-time-
+// constant form a global's is (plain, optionally negated, NUMBER) rather
+// than a general expr - see simpleStmt's own comment above.
+staticLocalDeclarator
+    : IDENT '[' size=NUMBER ']' ('=' arrayInit)?                       # staticLocalArrayDeclarator
+    | IDENT ('=' (sign='-'? val=NUMBER | identVal=IDENT))?              # staticLocalScalarDeclarator
     ;
 
 // A case label's value is a plain (optionally negated) integer literal,

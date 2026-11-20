@@ -103,19 +103,27 @@ public:
     return visitChildren(ctx);
   }
 
-  virtual std::any visitExternArrayDecl(CParser::ExternArrayDeclContext *ctx) override {
+  virtual std::any visitExternDeclGroup(CParser::ExternDeclGroupContext *ctx) override {
     return visitChildren(ctx);
   }
 
-  virtual std::any visitExternScalarDecl(CParser::ExternScalarDeclContext *ctx) override {
+  virtual std::any visitGlobalDeclGroup(CParser::GlobalDeclGroupContext *ctx) override {
     return visitChildren(ctx);
   }
 
-  virtual std::any visitGlobalArrayDecl(CParser::GlobalArrayDeclContext *ctx) override {
+  virtual std::any visitExternArrayDeclarator(CParser::ExternArrayDeclaratorContext *ctx) override {
     return visitChildren(ctx);
   }
 
-  virtual std::any visitGlobalScalarDecl(CParser::GlobalScalarDeclContext *ctx) override {
+  virtual std::any visitExternScalarDeclarator(CParser::ExternScalarDeclaratorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitGlobalArrayDeclarator(CParser::GlobalArrayDeclaratorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitGlobalScalarDeclarator(CParser::GlobalScalarDeclaratorContext *ctx) override {
     return visitChildren(ctx);
   }
 
@@ -187,23 +195,31 @@ public:
     return visitChildren(ctx);
   }
 
-  virtual std::any visitLocalArrayDecl(CParser::LocalArrayDeclContext *ctx) override {
+  virtual std::any visitLocalDeclGroup(CParser::LocalDeclGroupContext *ctx) override {
     return visitChildren(ctx);
   }
 
-  virtual std::any visitLocalDecl(CParser::LocalDeclContext *ctx) override {
-    return visitChildren(ctx);
-  }
-
-  virtual std::any visitStaticLocalArrayDecl(CParser::StaticLocalArrayDeclContext *ctx) override {
-    return visitChildren(ctx);
-  }
-
-  virtual std::any visitStaticLocalDecl(CParser::StaticLocalDeclContext *ctx) override {
+  virtual std::any visitStaticLocalDeclGroup(CParser::StaticLocalDeclGroupContext *ctx) override {
     return visitChildren(ctx);
   }
 
   virtual std::any visitExprStmt(CParser::ExprStmtContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitLocalArrayDeclarator(CParser::LocalArrayDeclaratorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitLocalScalarDeclarator(CParser::LocalScalarDeclaratorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitStaticLocalArrayDeclarator(CParser::StaticLocalArrayDeclaratorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
+  virtual std::any visitStaticLocalScalarDeclarator(CParser::StaticLocalScalarDeclaratorContext *ctx) override {
     return visitChildren(ctx);
   }
 

@@ -273,7 +273,7 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
     // 128-byte floor every 8031/8032/8051/8052 guarantees. `dpl`/`dph`
     // are the real DPL/DPH SFRs (0x82/0x83), not invented cells.
     code_ << "ac = 0x30\nbc = 0x32\ncx = 0x34\ndx = 0x36\nptr = 0x38\nfp = 0x3A\nssp = 0x3C\n";
-    code_ << "dpl = 0x82\ndph = 0x83\n\n";
+    code_ << "dpl = 0x82\ndph = 0x83\nb = 0xF0\n\n";
 
     // No object file emits the entry sequence itself in object mode;
     // MCS51LinkerFactory.cpp synthesizes one once every object is
@@ -781,11 +781,41 @@ void MCS51Codegen::genConvert(const ir::Expr &e) {
     }
 }
 
+const ir::Expr &MCS51Codegen::stripWideningConvert(const ir::Expr &e) const {
+    if (e.kind == ir::ExprKind::Convert && widthOfType(e.type) != 1 && widthOfType(e.lhs->type) == 1) {
+        return *e.lhs;
+    }
+    return e;
+}
+
+// `MUL AB` computes an exact unsigned 8x8->16 product directly in hardware
+// (low byte left in A, high byte in B), matching this case exactly: both
+// operands narrow enough to fit A and B, and the full 16-bit product kept
+// rather than truncated. A signed operand's full product depends on sign,
+// which `MUL AB` doesn't account for, so this only applies when both
+// operands are unsigned.
+void MCS51Codegen::genNarrowMul(const ir::Expr &lhs, const ir::Expr &rhs) {
+    genExpr(lhs);
+    code_ << "    push ac\n";
+    genExpr(rhs);
+    code_ << "    mova ac\n    movd b\n";  // b = rhs
+    code_ << "    pop ac\n";
+    code_ << "    mova ac\n    mul\n";  // a = lhs; after mul: a = low byte, b = high byte of product
+    code_ << "    movd ac\n";
+    code_ << "    mova b\n    movd ac+1\n";
+}
+
 // Shift-and-add multiply (real `MUL AB` is only 8x8->16, too narrow
 // for 16-bit `int`): `bc` is the multiplicand (shifted left), `dx` the
 // multiplier (shifted right, consumed one bit at a time), `ac` the
 // product, `cx` a fixed 16-iteration counter. Non-negative operands only.
 void MCS51Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
+    const ir::Expr &nl = stripWideningConvert(lhs);
+    const ir::Expr &nr = stripWideningConvert(rhs);
+    if (widthOfType(nl.type) == 1 && nl.type.isUnsigned && widthOfType(nr.type) == 1 && nr.type.isUnsigned) {
+        genNarrowMul(nl, nr);
+        return;
+    }
     genExpr(lhs);
     code_ << "    push ac\n    push ac+1\n";
     genExpr(rhs);

@@ -162,6 +162,9 @@ class PIC18Codegen : public Backend {
     void genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs);
     void genLogicalNot(const ir::Expr &rhs);
     void genMul(const ir::Expr &lhs, const ir::Expr &rhs);
+    // True for an operand promote() wrapped from a narrower unsigned type - exactly what
+    // MULWF's 8x8->16 unsigned multiply computes without needing the generic shift-add loop.
+    bool isUnsignedByteOperand(const ir::Expr &e) const;
     void genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder);
     void genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft);
     void genIndex(const ir::Expr &e);

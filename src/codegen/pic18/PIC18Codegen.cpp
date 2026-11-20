@@ -282,6 +282,7 @@ std::string PIC18Codegen::generate(const ir::Program &prog, bool objectMode) {
     // Access Bank SFR short addresses, resolved via the Access Bank's
     // 0x60-0xFF->0xF60-0xFFF hardware aliasing.
     header << "STATUS = 0xD8\nFSR0L = 0xE9\nFSR0H = 0xEA\nPOSTINC0 = 0xEE\nINDF0 = 0xEF\nINTCON = 0xF2\n";
+    header << "PRODL = 0xF3\nPRODH = 0xF4\n";
     // Program-counter-latch and top-of-return-stack registers, used by
     // genExpr's CallPtr case.
     header << "PCL = 0xF9\nPCLATH = 0xFA\nPCLATU = 0xFB\nSTKPTR = 0xFC\nTOSL = 0xFD\nTOSH = 0xFE\nTOSU = 0xFF\n\n";
@@ -749,7 +750,26 @@ void PIC18Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLef
     code_ << Ldone << ":\n";
 }
 
+// True when `e` is an integer-promoted `unsigned char` (or narrower unsigned) operand: the
+// pre-promotion type IRBuilder's promote() wrapped is exactly what MULWF's 8x8->16 unsigned
+// multiply computes, so the hardware result needs no further adjustment.
+bool PIC18Codegen::isUnsignedByteOperand(const ir::Expr &e) const {
+    return e.kind == ir::ExprKind::Convert && widthOfType(e.lhs->type) == 1 && e.lhs->type.isUnsigned;
+}
+
 void PIC18Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
+    if (isUnsignedByteOperand(lhs) && isUnsignedByteOperand(rhs)) {
+        genExpr(lhs);
+        pushCell2("ac");
+        genExpr(rhs);
+        // popCell2() uses W as scratch, so bc=lhs must be popped before ac=rhs is read into W.
+        popCell2("bc");
+        code_ << "    movf ac,w\n";
+        code_ << "    mulwf bc\n";
+        code_ << "    movff PRODL,ac\n";
+        code_ << "    movff PRODH,ac+1\n";
+        return;
+    }
     genExpr(lhs);
     pushCell2("ac");
     genExpr(rhs);

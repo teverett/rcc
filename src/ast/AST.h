@@ -138,6 +138,12 @@ struct Stmt {
     // LocalDecl: 'register' - accepted, not acted on (never set alongside isStatic;
     // the grammar doesn't allow both on the same declaration).
     bool isRegister = false;
+    // Block: wraps a comma-separated declarator group (`int a, b;`) sharing
+    // one source statement - like Label's own wrapped statement, this
+    // doesn't open a real C scope of its own, so IRBuilder must build it
+    // without push/popScope, leaving each declarator visible to whatever
+    // follows in the real enclosing block.
+    bool isDeclGroup = false;
 };
 
 using StmtPtr = std::unique_ptr<Stmt>;

@@ -75,7 +75,7 @@ SPACE +=
 # on every source file before ANTLR ever sees it) - not backend-
 # specific, but still their own subdirectories needing the same vpath
 # treatment.
-BACKEND_DIRS := $(SRC_DIR)/codegen/pdp1 $(SRC_DIR)/codegen/pdp7 $(SRC_DIR)/codegen/x86_8086 $(SRC_DIR)/codegen/m6502 $(SRC_DIR)/codegen/m65c02 $(SRC_DIR)/codegen/m68k $(SRC_DIR)/codegen/mc68328 $(SRC_DIR)/codegen/pdp11 $(SRC_DIR)/codegen/pdp10 $(SRC_DIR)/codegen/i8080 $(SRC_DIR)/codegen/pic16 $(SRC_DIR)/codegen/pic18 $(SRC_DIR)/codegen/z80 $(SRC_DIR)/codegen/i8008 $(SRC_DIR)/codegen/stm8 $(SRC_DIR)/codegen/m16c $(SRC_DIR)/codegen/mips $(SRC_DIR)/codegen/riscv32 $(SRC_DIR)/codegen/riscv64 $(SRC_DIR)/codegen/mcs51 $(SRC_DIR)/codegen/stm32 $(SRC_DIR)/codegen/i386 $(SRC_DIR)/codegen/armm $(SRC_DIR)/codegen/arm $(SRC_DIR)/codegen/arm64 $(SRC_DIR)/codegen/powerpc $(SRC_DIR)/codegen/sparc $(SRC_DIR)/codegen/vax $(SRC_DIR)/codegen/avr $(SRC_DIR)/codegen/alpha $(SRC_DIR)/codegen/saturn $(SRC_DIR)/codegen/tms320c6713 $(SRC_DIR)/codegen/m6809 $(SRC_DIR)/codegen/tms9900 $(SRC_DIR)/codegen/z8000 $(SRC_DIR)/codegen/cp1610 $(SRC_DIR)/codegen/parrotvm $(SRC_DIR)/codegen/vex $(SRC_DIR)/codegen/moarvm
+BACKEND_DIRS := $(SRC_DIR)/codegen/pdp1 $(SRC_DIR)/codegen/pdp7 $(SRC_DIR)/codegen/x86_8086 $(SRC_DIR)/codegen/m6502 $(SRC_DIR)/codegen/m65c02 $(SRC_DIR)/codegen/m68k $(SRC_DIR)/codegen/mc68328 $(SRC_DIR)/codegen/pdp11 $(SRC_DIR)/codegen/pdp10 $(SRC_DIR)/codegen/i8080 $(SRC_DIR)/codegen/pic16 $(SRC_DIR)/codegen/pic18 $(SRC_DIR)/codegen/z80 $(SRC_DIR)/codegen/i8008 $(SRC_DIR)/codegen/stm8 $(SRC_DIR)/codegen/m16c $(SRC_DIR)/codegen/m32c $(SRC_DIR)/codegen/r32c $(SRC_DIR)/codegen/mips $(SRC_DIR)/codegen/riscv32 $(SRC_DIR)/codegen/riscv64 $(SRC_DIR)/codegen/mcs51 $(SRC_DIR)/codegen/stm32 $(SRC_DIR)/codegen/i386 $(SRC_DIR)/codegen/armm $(SRC_DIR)/codegen/arm $(SRC_DIR)/codegen/arm64 $(SRC_DIR)/codegen/powerpc $(SRC_DIR)/codegen/sparc $(SRC_DIR)/codegen/vax $(SRC_DIR)/codegen/avr $(SRC_DIR)/codegen/alpha $(SRC_DIR)/codegen/saturn $(SRC_DIR)/codegen/tms320c6713 $(SRC_DIR)/codegen/m6809 $(SRC_DIR)/codegen/tms9900 $(SRC_DIR)/codegen/z8000 $(SRC_DIR)/codegen/cp1610 $(SRC_DIR)/codegen/parrotvm $(SRC_DIR)/codegen/vex $(SRC_DIR)/codegen/moarvm
 AST_DIR      := $(SRC_DIR)/ast
 IR_DIR       := $(SRC_DIR)/ir
 LINKER_DIR   := $(SRC_DIR)/linker
@@ -92,7 +92,7 @@ OPTIMIZERS_DIRS   := $(OPTIMIZERS_DIR)/constant_folding $(OPTIMIZERS_DIR)/consta
 # header comment - instead of being split across src/coff/, src/elf/,
 # src/objectformat/ and src/linker/format/ the way it used to be.
 FILEFORMAT_DIR  := $(SRC_DIR)/fileformat
-FILEFORMAT_DIRS := $(FILEFORMAT_DIR) $(FILEFORMAT_DIR)/archive $(FILEFORMAT_DIR)/coff $(FILEFORMAT_DIR)/elf $(FILEFORMAT_DIR)/macho $(FILEFORMAT_DIR)/aout $(FILEFORMAT_DIR)/raw $(FILEFORMAT_DIR)/rim $(FILEFORMAT_DIR)/ptr $(FILEFORMAT_DIR)/a7out $(FILEFORMAT_DIR)/list $(FILEFORMAT_DIR)/dos33 $(FILEFORMAT_DIR)/prodos $(FILEFORMAT_DIR)/cmd $(FILEFORMAT_DIR)/colecorom $(FILEFORMAT_DIR)/decb $(FILEFORMAT_DIR)/prg $(FILEFORMAT_DIR)/atari $(FILEFORMAT_DIR)/atari2600 $(FILEFORMAT_DIR)/nes $(FILEFORMAT_DIR)/sna $(FILEFORMAT_DIR)/amsdos $(FILEFORMAT_DIR)/vectrex
+FILEFORMAT_DIRS := $(FILEFORMAT_DIR) $(FILEFORMAT_DIR)/archive $(FILEFORMAT_DIR)/coff $(FILEFORMAT_DIR)/elf $(FILEFORMAT_DIR)/macho $(FILEFORMAT_DIR)/aout $(FILEFORMAT_DIR)/raw $(FILEFORMAT_DIR)/rim $(FILEFORMAT_DIR)/ptr $(FILEFORMAT_DIR)/a7out $(FILEFORMAT_DIR)/list $(FILEFORMAT_DIR)/dos33 $(FILEFORMAT_DIR)/prodos $(FILEFORMAT_DIR)/cmd $(FILEFORMAT_DIR)/colecorom $(FILEFORMAT_DIR)/decb $(FILEFORMAT_DIR)/prg $(FILEFORMAT_DIR)/atari $(FILEFORMAT_DIR)/atari2600 $(FILEFORMAT_DIR)/nes $(FILEFORMAT_DIR)/a5200 $(FILEFORMAT_DIR)/sna $(FILEFORMAT_DIR)/amsdos $(FILEFORMAT_DIR)/vectrex $(FILEFORMAT_DIR)/dfs $(FILEFORMAT_DIR)/intvbin $(FILEFORMAT_DIR)/msxrom $(FILEFORMAT_DIR)/smsrom
 
 HAND_SRCS := \
     $(SRC_DIR)/main.cpp \
@@ -118,9 +118,14 @@ HAND_SRCS := \
     $(FILEFORMAT_DIR)/atari/AtariExeFormat.cpp \
     $(FILEFORMAT_DIR)/atari2600/Atari2600RomFormat.cpp \
     $(FILEFORMAT_DIR)/nes/NesRomFormat.cpp \
+    $(FILEFORMAT_DIR)/a5200/Atari5200RomFormat.cpp \
+    $(FILEFORMAT_DIR)/intvbin/IntvBinFormat.cpp \
     $(FILEFORMAT_DIR)/sna/SnaFormat.cpp \
     $(FILEFORMAT_DIR)/amsdos/AmsdosFormat.cpp \
     $(FILEFORMAT_DIR)/vectrex/VectrexFormat.cpp \
+    $(FILEFORMAT_DIR)/dfs/DfsFormat.cpp \
+    $(FILEFORMAT_DIR)/msxrom/MsxRomFormat.cpp \
+    $(FILEFORMAT_DIR)/smsrom/SmsRomFormat.cpp \
     $(FILEFORMAT_DIR)/archive/ArchiveReader.cpp \
     $(FILEFORMAT_DIR)/coff/PeExportReader.cpp \
     $(FILEFORMAT_DIR)/coff/HostedCoffReader.cpp \
@@ -135,6 +140,7 @@ HAND_SRCS := \
     $(LINKER_DIR)/GenericLinker.cpp \
     $(FACTORY_DIR)/Z80LinkerFactory.cpp \
     $(FACTORY_DIR)/ColecoLinkerFactory.cpp \
+    $(FACTORY_DIR)/MsxLinkerFactory.cpp \
     $(FACTORY_DIR)/M6809LinkerFactory.cpp \
     $(FACTORY_DIR)/VectrexLinkerFactory.cpp \
     $(FACTORY_DIR)/M6502LinkerFactory.cpp \
@@ -148,8 +154,11 @@ HAND_SRCS := \
     $(FACTORY_DIR)/Pdp11LinkerFactory.cpp \
     $(FACTORY_DIR)/Z8000LinkerFactory.cpp \
     $(FACTORY_DIR)/CP1610LinkerFactory.cpp \
+    $(FACTORY_DIR)/CP1610IntvLinkerFactory.cpp \
     $(FACTORY_DIR)/Pdp10LinkerFactory.cpp \
     $(FACTORY_DIR)/M16cLinkerFactory.cpp \
+    $(FACTORY_DIR)/M32cLinkerFactory.cpp \
+    $(FACTORY_DIR)/R32cLinkerFactory.cpp \
     $(FACTORY_DIR)/I386LinkerFactory.cpp \
     $(FACTORY_DIR)/ArmLinkerFactory.cpp \
     $(FACTORY_DIR)/ArmMLinkerFactory.cpp \
@@ -220,6 +229,10 @@ HAND_SRCS := \
     $(SRC_DIR)/codegen/stm8/STM8Assembler.cpp \
     $(SRC_DIR)/codegen/m16c/M16cCodegen.cpp \
     $(SRC_DIR)/codegen/m16c/M16cAssembler.cpp \
+    $(SRC_DIR)/codegen/m32c/M32cCodegen.cpp \
+    $(SRC_DIR)/codegen/m32c/M32cAssembler.cpp \
+    $(SRC_DIR)/codegen/r32c/R32cCodegen.cpp \
+    $(SRC_DIR)/codegen/r32c/R32cAssembler.cpp \
     $(SRC_DIR)/codegen/pic16/PIC16Codegen.cpp \
     $(SRC_DIR)/codegen/pic16/PIC16Assembler.cpp \
     $(SRC_DIR)/codegen/pic18/PIC18Codegen.cpp \
@@ -367,6 +380,14 @@ $(BIN_DIR)/nes_rom_format_test: tests/nes_rom_format_test.cpp $(FILEFORMAT_DIR)/
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/nes_rom_format_test.cpp $(FILEFORMAT_DIR)/nes/NesRomFormat.cpp -o $@
 
+$(BIN_DIR)/a5200_rom_format_test: tests/a5200_rom_format_test.cpp $(FILEFORMAT_DIR)/a5200/Atari5200RomFormat.cpp $(FILEFORMAT_DIR)/a5200/Atari5200RomFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/a5200_rom_format_test.cpp $(FILEFORMAT_DIR)/a5200/Atari5200RomFormat.cpp -o $@
+
+$(BIN_DIR)/intvbin_format_test: tests/intvbin_format_test.cpp $(FILEFORMAT_DIR)/intvbin/IntvBinFormat.cpp $(FILEFORMAT_DIR)/intvbin/IntvBinFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/intvbin_format_test.cpp $(FILEFORMAT_DIR)/intvbin/IntvBinFormat.cpp -o $@
+
 $(BIN_DIR)/sna_format_test: tests/sna_format_test.cpp $(FILEFORMAT_DIR)/sna/SnaFormat.cpp $(FILEFORMAT_DIR)/sna/SnaFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/sna_format_test.cpp $(FILEFORMAT_DIR)/sna/SnaFormat.cpp -o $@
@@ -375,12 +396,36 @@ $(BIN_DIR)/amsdos_format_test: tests/amsdos_format_test.cpp $(FILEFORMAT_DIR)/am
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/amsdos_format_test.cpp $(FILEFORMAT_DIR)/amsdos/AmsdosFormat.cpp -o $@
 
+$(BIN_DIR)/dfs_format_test: tests/dfs_format_test.cpp $(FILEFORMAT_DIR)/dfs/DfsFormat.cpp $(FILEFORMAT_DIR)/dfs/DfsFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/dfs_format_test.cpp $(FILEFORMAT_DIR)/dfs/DfsFormat.cpp -o $@
+
+$(BIN_DIR)/msxrom_format_test: tests/msxrom_format_test.cpp $(FILEFORMAT_DIR)/msxrom/MsxRomFormat.cpp $(FILEFORMAT_DIR)/msxrom/MsxRomFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/msxrom_format_test.cpp $(FILEFORMAT_DIR)/msxrom/MsxRomFormat.cpp -o $@
+
+$(BIN_DIR)/smsrom_format_test: tests/smsrom_format_test.cpp $(FILEFORMAT_DIR)/smsrom/SmsRomFormat.cpp $(FILEFORMAT_DIR)/smsrom/SmsRomFormat.h $(FILEFORMAT_DIR)/ObjectFile.h
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/smsrom_format_test.cpp $(FILEFORMAT_DIR)/smsrom/SmsRomFormat.cpp -o $@
+
 # Unlike the file-format tests above, this links against the generated
 # ANTLR grammar (M6809Assembler.cpp parses via grammar/RccAsm.g4), so it
 # needs the same $(CPPFLAGS)/$(LDFLAGS)/$(LDLIBS) the main binary does.
 $(BIN_DIR)/m6809_assembler_test: tests/m6809_assembler_test.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/m6809_assembler_test.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+$(BIN_DIR)/m6502_assembler_test: tests/m6502_assembler_test.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/m6502_assembler_test.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+$(BIN_DIR)/m32c_assembler_test: tests/m32c_assembler_test.cpp $(SRC_DIR)/codegen/m32c/M32cAssembler.cpp $(SRC_DIR)/codegen/m32c/M32cAssembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/m32c_assembler_test.cpp $(SRC_DIR)/codegen/m32c/M32cAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+$(BIN_DIR)/r32c_assembler_test: tests/r32c_assembler_test.cpp $(SRC_DIR)/codegen/r32c/R32cAssembler.cpp $(SRC_DIR)/codegen/r32c/R32cAssembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/r32c_assembler_test.cpp $(SRC_DIR)/codegen/r32c/R32cAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
 $(BIN_DIR)/riscv32_assembler_test: tests/riscv32_assembler_test.cpp $(SRC_DIR)/codegen/riscv32/Riscv32Assembler.cpp $(SRC_DIR)/codegen/riscv32/Riscv32Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
@@ -405,6 +450,10 @@ $(BIN_DIR)/z8000_assembler_test: tests/z8000_assembler_test.cpp $(SRC_DIR)/codeg
 $(BIN_DIR)/cp1610_assembler_test: tests/cp1610_assembler_test.cpp $(SRC_DIR)/codegen/cp1610/CP1610Assembler.cpp $(SRC_DIR)/codegen/cp1610/CP1610Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/cp1610_assembler_test.cpp $(SRC_DIR)/codegen/cp1610/CP1610Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+$(BIN_DIR)/stm8_mul_test: tests/stm8_mul_test.cpp $(SRC_DIR)/codegen/stm8/STM8Assembler.cpp $(SRC_DIR)/codegen/stm8/STM8Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/stm8_mul_test.cpp $(SRC_DIR)/codegen/stm8/STM8Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
 $(BIN_DIR)/i8080_in_out_test: tests/i8080_in_out_test.cpp $(SRC_DIR)/codegen/i8080/I8080Assembler.cpp $(SRC_DIR)/codegen/i8080/I8080Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
@@ -432,24 +481,32 @@ $(BIN_DIR)/vex_assembler_test: tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/v
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
-test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
 	$(BIN_DIR)/colecorom_format_test
+	$(BIN_DIR)/msxrom_format_test
+	$(BIN_DIR)/smsrom_format_test
 	$(BIN_DIR)/decb_format_test
 	$(BIN_DIR)/vectrex_format_test
+	$(BIN_DIR)/intvbin_format_test
 	$(BIN_DIR)/prg_format_test
 	$(BIN_DIR)/atari_exe_format_test
 	$(BIN_DIR)/atari2600_rom_format_test
 	$(BIN_DIR)/nes_rom_format_test
+	$(BIN_DIR)/a5200_rom_format_test
 	$(BIN_DIR)/sna_format_test
 	$(BIN_DIR)/amsdos_format_test
+	$(BIN_DIR)/dfs_format_test
 	$(BIN_DIR)/m6809_assembler_test
+	$(BIN_DIR)/m6502_assembler_test
+	$(BIN_DIR)/m32c_assembler_test
+	$(BIN_DIR)/r32c_assembler_test
 	$(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
 	$(BIN_DIR)/i8080_in_out_test
-	$(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test
+	$(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test
 	$(BIN_DIR)/parrotvm_codegen_test
 	$(BIN_DIR)/moarvm_codegen_test
 	$(BIN_DIR)/vex_assembler_test
@@ -459,25 +516,33 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
 	$(BIN_DIR)/cmd_format_test
 	$(BIN_DIR)/colecorom_format_test
+	$(BIN_DIR)/msxrom_format_test
+	$(BIN_DIR)/smsrom_format_test
 	$(BIN_DIR)/decb_format_test
 	$(BIN_DIR)/vectrex_format_test
+	$(BIN_DIR)/intvbin_format_test
 	$(BIN_DIR)/prg_format_test
 	$(BIN_DIR)/atari_exe_format_test
 	$(BIN_DIR)/atari2600_rom_format_test
 	$(BIN_DIR)/nes_rom_format_test
+	$(BIN_DIR)/a5200_rom_format_test
 	$(BIN_DIR)/sna_format_test
 	$(BIN_DIR)/amsdos_format_test
+	$(BIN_DIR)/dfs_format_test
 	$(BIN_DIR)/m6809_assembler_test
+	$(BIN_DIR)/m6502_assembler_test
+	$(BIN_DIR)/m32c_assembler_test
+	$(BIN_DIR)/r32c_assembler_test
 	$(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test
 	$(BIN_DIR)/z80_in_out_c_test
 	$(BIN_DIR)/i8080_in_out_test
-	$(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test
+	$(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test
 	$(BIN_DIR)/parrotvm_codegen_test
 	$(BIN_DIR)/moarvm_codegen_test
 	$(BIN_DIR)/vex_assembler_test
@@ -489,6 +554,7 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 	python3 tests/pic16_function_pointer_call_test.py $(TARGET)
 	python3 tests/pic16_pic18_extern_function_address_test.py $(TARGET)
+	python3 tests/pic18_narrow_multiply_test.py $(TARGET)
 	python3 tests/m30626fjpfp_alias_test.py $(TARGET)
 	./tests/run_tests.sh $(TARGET) --target=pdp1
 	./tests/run_tests.sh $(TARGET) --target=pdp7
@@ -504,6 +570,8 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	./tests/run_tests.sh $(TARGET) --target=8051
 	./tests/run_tests.sh $(TARGET) --target=stm32
 	./tests/run_tests.sh $(TARGET) --target=i386
+	./tests/run_tests.sh $(TARGET) --target=m32c
+	./tests/run_tests.sh $(TARGET) --target=r32c
 	./tests/run_apple2_format_tests.sh $(TARGET)
 	./tests/run_apple2_rom_wrapper_tests.sh $(TARGET)
 	./tests/run_vic20_format_tests.sh $(TARGET)
@@ -511,9 +579,14 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	./tests/run_atari400_format_tests.sh $(TARGET)
 	./tests/run_atari2600_tests.sh $(TARGET)
 	./tests/run_2a03_tests.sh $(TARGET)
+	./tests/run_atari5200_tests.sh $(TARGET)
 	./tests/run_zxspectrum_tests.sh $(TARGET)
 	./tests/run_trs80_rt_tests.sh $(TARGET)
 	./tests/run_coleco_rt_tests.sh $(TARGET)
+	./tests/run_msx_rt_tests.sh $(TARGET)
+	./tests/run_sms_rt_tests.sh $(TARGET)
+	./tests/run_gamegear_rt_tests.sh $(TARGET)
+	./tests/run_ti994a_rt_tests.sh $(TARGET)
 	./tests/run_cpc_rt_tests.sh $(TARGET)
 	./tests/run_zx81_rt_tests.sh $(TARGET)
 	./tests/run_const_tests.sh $(TARGET)

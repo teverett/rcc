@@ -44,4 +44,14 @@ std::unique_ptr<TargetLinker> makeAtari2600Linker(uint32_t baseAddress = kM6502A
 // nes/NesRomFormat.h).
 std::unique_ptr<TargetLinker> makeNes2A03Linker(uint32_t baseAddress = kM6502Nes2A03BaseAddress);
 
+// Same instruction encoding, same GenericLinker machinery, but `--target=5200`'s own
+// zero-page/frame-storage layout (see M6502Codegen.h's own `zeroPageBase()`/`frameStackBase()`
+// comments) and its own distinct machine ID (`kM6502Atari5200CoffMachine`, so `--link` rejects
+// an accidental mix with a plain 6502 object instead of silently corrupting BIOS-owned RAM) -
+// see M6502LinkerFactory.cpp's own `kAtari5200EntryAsm` comment for the entry sequence this
+// links in. A non-default `baseAddress` must be one of $B000/$A000/$8000/$4000 (4K/8K/16K/32K
+// cartridge, each ending at $C000 - see src/fileformat/a5200/Atari5200RomFormat.h) to produce a
+// valid `--format=a5200` image.
+std::unique_ptr<TargetLinker> makeAtari5200Linker(uint32_t baseAddress = kM6502Atari5200BaseAddress);
+
 }  // namespace rcc

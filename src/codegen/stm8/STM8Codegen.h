@@ -30,11 +30,11 @@ namespace rcc {
 // (STM8 bitwise ops only touch `a`), so `&`/`|`/`^` go byte-at-a-time through
 // `a` against each cell's direct-addressed byte.
 //
-// No hardware 16x16 multiply/divide (`MUL`/`DIV` only combine `a` with `x`,
-// i.e. 8x8->16 and 16/8->16) - `*`/`/`/`%` use textbook shift-and-add /
-// repeated-subtraction loops, verified only against non-negative operands.
-// `<<`/`>>` loop one bit at a time via `SLAW`/`SRLW`; there is no
-// variable-count shift instruction.
+// No hardware 16x16 divide (`DIV` only combines `a` with `x`, i.e. 16/8->16)
+// - `/`/`%` use a repeated-subtraction loop, verified only against
+// non-negative operands. `*` composes three hardware `MUL X,A` (8x8->16)
+// multiplies instead (see genNarrowMul()). `<<`/`>>` loop one bit at a
+// time via `SLAW`/`SRLW`; there is no variable-count shift instruction.
 //
 // This dialect's conditional jumps (jreq/jrne/jrult/jruge) are deliberately
 // full 16-bit absolute, not the real STM8 8-bit signed relative JRxx.
@@ -95,6 +95,10 @@ class STM8Codegen : public Backend {
     void testTruthy(const ir::Expr &e);
     void genBitwise(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs);
     void genMul(const ir::Expr &lhs, const ir::Expr &rhs);
+    // Builds a 16x16->16 product from three `MUL X,A` hardware byte
+    // multiplies. Precondition: `bc` holds the multiplicand, `dx` the
+    // multiplier. Leaves the product in `ac`; `mc`/`lc` are used as scratch.
+    void genNarrowMul();
     void genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned);
     void genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned);
     void genIndex(const ir::Expr &e);         // slot[idx] read

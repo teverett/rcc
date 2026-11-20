@@ -22,13 +22,13 @@ constexpr const char *kEntryAsm =
     "ptr: db 0, 0\n";
 }  // namespace
 
-std::unique_ptr<TargetLinker> makeZ80Linker() {
+std::unique_ptr<TargetLinker> makeZ80Linker(uint32_t baseAddress) {
     GenericLinkerConfig config;
-    config.baseAddress = kZ80BaseAddress;
+    config.baseAddress = baseAddress;
     config.machineType = kZ80CoffMachine;
     config.entryObject = assembleZ80Object(kEntryAsm);
     config.relocPatchers[kZ80RelocAbs16] = RelocKinds::patchAbs16;
-    config.outputFormats = {"raw", "coff", "elf", "aout", "cmd", "sna", "amsdos"};
+    config.outputFormats = {"raw", "coff", "elf", "aout", "cmd", "sna", "amsdos", "sms", "gg"};
     return std::make_unique<GenericLinker>(std::move(config));
 }
 

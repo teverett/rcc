@@ -1441,9 +1441,14 @@ class Builder {
         switch (s.kind) {
             case StmtKind::Block: {
                 out->kind = ir::StmtKind::Block;
-                pushScope();
+                // A declarator-group block (`int a, b;`) isn't a real C
+                // scope - see AST.h's Stmt::isDeclGroup - so each
+                // declarator must register into whichever scope is
+                // already active, visible to whatever follows this
+                // statement in the real enclosing block.
+                if (!s.isDeclGroup) pushScope();
                 for (const auto &child : s.body) out->body.push_back(buildStmt(*child));
-                popScope();
+                if (!s.isDeclGroup) popScope();
                 return out;
             }
             case StmtKind::If:

@@ -21,9 +21,14 @@
 #include "fileformat/atari/AtariExeFormat.h"
 #include "fileformat/atari2600/Atari2600RomFormat.h"
 #include "fileformat/nes/NesRomFormat.h"
+#include "fileformat/a5200/Atari5200RomFormat.h"
+#include "fileformat/intvbin/IntvBinFormat.h"
 #include "fileformat/sna/SnaFormat.h"
 #include "fileformat/amsdos/AmsdosFormat.h"
 #include "fileformat/vectrex/VectrexFormat.h"
+#include "fileformat/dfs/DfsFormat.h"
+#include "fileformat/msxrom/MsxRomFormat.h"
+#include "fileformat/smsrom/SmsRomFormat.h"
 
 namespace rcc {
 
@@ -65,12 +70,24 @@ std::unique_ptr<FileFormatWriter> makeFileFormatWriter(FileFormatKind kind) {
             return std::make_unique<Atari2600RomFormatWriter>();
         case FileFormatKind::NesRom:
             return std::make_unique<NesRomFormatWriter>();
+        case FileFormatKind::Atari5200Rom:
+            return std::make_unique<Atari5200RomFormatWriter>();
+        case FileFormatKind::IntvBin:
+            return std::make_unique<IntvBinFormatWriter>();
         case FileFormatKind::Sna:
             return std::make_unique<SnaFormatWriter>();
         case FileFormatKind::Amsdos:
             return std::make_unique<AmsdosFormatWriter>();
         case FileFormatKind::VectrexRom:
             return std::make_unique<VectrexRomFormatWriter>();
+        case FileFormatKind::Dfs:
+            return std::make_unique<DfsFormatWriter>();
+        case FileFormatKind::MsxRom:
+            return std::make_unique<MsxRomFormatWriter>();
+        case FileFormatKind::Sms:
+            return std::make_unique<SmsRomFormatWriter>(/*isGameGear=*/false);
+        case FileFormatKind::GameGear:
+            return std::make_unique<SmsRomFormatWriter>(/*isGameGear=*/true);
     }
     return nullptr;
 }
@@ -113,12 +130,23 @@ std::unique_ptr<FileFormatReader> makeFileFormatReader(FileFormatKind kind) {
             return std::make_unique<Atari2600RomFormatReader>();
         case FileFormatKind::NesRom:
             return std::make_unique<NesRomFormatReader>();
+        case FileFormatKind::Atari5200Rom:
+            return std::make_unique<Atari5200RomFormatReader>();
+        case FileFormatKind::IntvBin:
+            return std::make_unique<IntvBinFormatReader>();
         case FileFormatKind::Sna:
             return std::make_unique<SnaFormatReader>();
         case FileFormatKind::Amsdos:
             return std::make_unique<AmsdosFormatReader>();
         case FileFormatKind::VectrexRom:
             return std::make_unique<VectrexRomFormatReader>();
+        case FileFormatKind::Dfs:
+            return std::make_unique<DfsFormatReader>();
+        case FileFormatKind::MsxRom:
+            return std::make_unique<MsxRomFormatReader>();
+        case FileFormatKind::Sms:
+        case FileFormatKind::GameGear:
+            return std::make_unique<SmsRomFormatReader>();
     }
     return nullptr;
 }
@@ -143,9 +171,15 @@ std::optional<FileFormatKind> fileFormatKindFromName(const std::string &name) {
     if (name == "atari") return FileFormatKind::AtariExe;
     if (name == "a26") return FileFormatKind::Atari2600Rom;
     if (name == "nes") return FileFormatKind::NesRom;
+    if (name == "a5200") return FileFormatKind::Atari5200Rom;
+    if (name == "intvbin") return FileFormatKind::IntvBin;
     if (name == "sna") return FileFormatKind::Sna;
     if (name == "amsdos") return FileFormatKind::Amsdos;
     if (name == "vectrex") return FileFormatKind::VectrexRom;
+    if (name == "ssd") return FileFormatKind::Dfs;
+    if (name == "msxrom") return FileFormatKind::MsxRom;
+    if (name == "sms") return FileFormatKind::Sms;
+    if (name == "gg") return FileFormatKind::GameGear;
     return std::nullopt;
 }
 
@@ -187,12 +221,24 @@ std::string fileFormatName(FileFormatKind kind) {
             return "a26";
         case FileFormatKind::NesRom:
             return "nes";
+        case FileFormatKind::Atari5200Rom:
+            return "a5200";
+        case FileFormatKind::IntvBin:
+            return "intvbin";
         case FileFormatKind::Sna:
             return "sna";
         case FileFormatKind::Amsdos:
             return "amsdos";
         case FileFormatKind::VectrexRom:
             return "vectrex";
+        case FileFormatKind::Dfs:
+            return "ssd";
+        case FileFormatKind::MsxRom:
+            return "msxrom";
+        case FileFormatKind::Sms:
+            return "sms";
+        case FileFormatKind::GameGear:
+            return "gg";
     }
     return "";
 }
@@ -228,6 +274,7 @@ FileFormatKind detectFileFormat(const std::string &bytes) {
         0x6502,  // 6502
         0x2600,  // atari2600
         0x2A03,  // 2a03
+        0x5200,  // 5200
         0x9900,  // tms9900
         0xC502,  // 65c02
         0x8080,  // 8080
@@ -236,6 +283,8 @@ FileFormatKind detectFileFormat(const std::string &bytes) {
         0x6328,  // mc68328
         0x6800,  // m68k
         0x16C3,  // m16c
+        0x32C3,  // m32c
+        0x32C4,  // r32c
         0x1121,  // pdp11
         0x1010,  // pdp10
         0x3386,  // i386

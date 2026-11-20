@@ -363,12 +363,25 @@ class Assembler {
     }
 
     // The full instruction vocabulary M6502Codegen.cpp emits, plus `ldxi`
-    // (immediate-only LDX, added for src/rt/atari400/'s own CIO IOCB-number
+    // (immediate-only LDX, for src/rt/atari400/'s own CIO IOCB-number
     // selection - see that directory's own atari400.c comment for why only
-    // the immediate form is needed, never a general X register). Not a
-    // general 6502 encoder otherwise: no X/Y-indexed modes, no absolute
-    // LDX/LDY/STX/STY/CMP/CPX/CPY, no TAX/TXA/TAY/TYA - exactly the
-    // mnemonic/operand combinations used here.
+    // the immediate form is needed, never a general X register) and
+    // `ldxi_hi`/`ldyi_hi` (the high-byte counterparts of `ldai_hi`, for
+    // loading the low/high halves of a label's address into X/Y - the
+    // register pair every MOS call that takes a block address needs, e.g.
+    // src/rt/bbc/'s own OSWORD/OSFILE/OSFIND wrappers: X = `ldxi label`
+    // (already the low byte via immLow below), Y = `ldyi_hi label`) - plus
+    // absolute-addressing `ldx`/`ldy` (real opcodes $AE/$AC, in the
+    // `absolute` map below), added for the one case none of that covers:
+    // a MOS call needing a genuinely *dynamic* byte (not a compile-time
+    // constant or a label's own address) in X or Y, e.g. OSBGET/OSBPUT/
+    // OSFIND's own file handle, which the caller only learns at run time
+    // from OSFIND's own return value in A - staged through an ordinary
+    // global (`sta`) and loaded back with `ldy label` (also a natural
+    // symmetry fix: `lda`/`sta` already had absolute addressing, `ldx`/
+    // `ldy` didn't). Not a general 6502 encoder otherwise: no X/Y-indexed
+    // modes, no absolute STX/STY/CMP/CPX/CPY, no TAX/TXA/TAY/TYA - exactly
+    // the mnemonic/operand combinations used here.
     void encodeInstr(const std::string &mnemonic, const std::vector<std::vector<Syllable>> &ops) {
         auto one = [&]() -> const std::vector<Syllable> & {
             if (ops.size() != 1) fail("'" + mnemonic + "' needs exactly one operand");
@@ -385,6 +398,7 @@ class Assembler {
         static const std::unordered_map<std::string, uint8_t> absolute = {
             {"lda", 0xAD}, {"sta", 0x8D}, {"adc", 0x6D}, {"sbc", 0xED}, {"and", 0x2D}, {"ora", 0x0D}, {"eor", 0x4D},
             {"asl", 0x0E}, {"lsr", 0x4E}, {"rol", 0x2E}, {"ror", 0x6E}, {"inc", 0xEE}, {"dec", 0xCE},
+            {"ldx", 0xAE}, {"ldy", 0xAC},
             {"jmp", 0x4C}, {"jsr", 0x20},
             // Real opcode $6C, JMP indirect: operand is the address of a
             // two-byte cell holding the jump target.
@@ -406,6 +420,8 @@ class Assembler {
         static const std::unordered_map<std::string, uint8_t> immHigh = {
             {"ldai_hi", 0xA9},
             {"adci_hi", 0x69},
+            {"ldxi_hi", 0xA2},
+            {"ldyi_hi", 0xA0},
         };
         if (auto it = immHigh.find(mnemonic); it != immHigh.end()) {
             emit8(it->second);

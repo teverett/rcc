@@ -35,7 +35,9 @@ namespace rcc {
 // stack top). Ordinary variables (globals/locals/arrays) live in
 // XDATA instead, reached only via MOVX+DPTR. `dpl`/`dph` name the real
 // DPL/DPH SFRs (0x82/0x83), used to read a just-loaded DPTR address
-// back into a pseudo-register pair.
+// back into a pseudo-register pair. `b` names the real B SFR (0xF0),
+// the second operand `MUL AB`/`DIV AB` read directly from hardware
+// rather than from a pseudo-register.
 //
 // Each call gets a software frame in a shared `__frame_stack` buffer:
 // genPrologue() saves the caller's `fp` on the real hardware stack,
@@ -99,6 +101,12 @@ class MCS51Codegen : public Backend {
     void genLogicalNot(const ir::Expr &rhs);
     void genConvert(const ir::Expr &e);
     void genMul(const ir::Expr &lhs, const ir::Expr &rhs);
+    void genNarrowMul(const ir::Expr &lhs, const ir::Expr &rhs);
+    // A widening Convert (e.g. unsigned char -> int, inserted by usual
+    // arithmetic conversions) produces the exact same `ac` contents as its
+    // own operand, so unwrapping it to look for a narrow operand underneath
+    // changes nothing observable.
+    const ir::Expr &stripWideningConvert(const ir::Expr &e) const;
     void genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned);
     void genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned);
     void genIndex(const ir::Expr &e);         // slot[idx] read

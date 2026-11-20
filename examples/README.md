@@ -15,6 +15,9 @@ directory with a `Makefile` and a `README.md` of its own:
 - `6502-atari400` — Atari 400/800 "hello world" for `6502`, linked as
   `--platform=6502-atari` against `src/rt/atari400/`'s CIO-call runtime
   library
+- `6502-bbc` — BBC Micro "hello world" for `6502`, linked as
+  `--platform=6502-ssd` (a real Acorn DFS disc image) against
+  `src/rt/bbc/`'s MOS-call runtime library
 - `6502-c64` — Commodore 64 "hello world" for `6502`, linked as
   `--platform=6502-prg` against `src/rt/c64/`'s KERNAL-call runtime
   library

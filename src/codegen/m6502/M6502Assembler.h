@@ -29,6 +29,12 @@ constexpr uint16_t kM6502Atari2600CoffMachine = 0x2600;
 // expecting `$0600`.
 constexpr uint16_t kM6502Nes2A03CoffMachine = 0x2A03;
 
+// `--target=5200`'s own machine ID, same reasoning as kM6502Atari2600CoffMachine above: the
+// zero-page/frame-storage layout differs from plain 6502's (see M6502Codegen.h's own
+// `zeroPageBase()`/`frameStackBase()` comments), so an accidental mix with a plain 6502 object
+// must fail to link rather than silently corrupt BIOS-owned RAM.
+constexpr uint16_t kM6502Atari5200CoffMachine = 0x5200;
+
 // Linked base address; matches the whole-program raw entry's kBaseAddress.
 constexpr uint32_t kM6502BaseAddress = 0x0600;
 // atari2600's own default link base: the conventional 4K-cartridge
@@ -40,6 +46,10 @@ constexpr uint32_t kM6502Atari2600BaseAddress = 0xF000;
 // $8000-$FFFF (see M6502LinkerFactory.cpp's own `kNes2A03EntryAsm`
 // comment).
 constexpr uint32_t kM6502Nes2A03BaseAddress = 0x8000;
+// 5200's own default link base: a 16K cartridge, mapped at $8000-$BFFF (the cartridge window
+// is $4000-$BFFF - see M6502LinkerFactory.cpp's own `kAtari5200EntryAsm` comment and
+// src/fileformat/a5200/Atari5200RomFormat.h).
+constexpr uint32_t kM6502Atari5200BaseAddress = 0x8000;
 
 // Three reloc kinds because LDA takes only an 8-bit immediate: loading a
 // 16-bit address into a register pair needs separate low/high-byte patches.

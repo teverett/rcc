@@ -63,13 +63,17 @@ public:
 
     virtual std::any visitParam(CParser::ParamContext *context) = 0;
 
-    virtual std::any visitExternArrayDecl(CParser::ExternArrayDeclContext *context) = 0;
+    virtual std::any visitExternDeclGroup(CParser::ExternDeclGroupContext *context) = 0;
 
-    virtual std::any visitExternScalarDecl(CParser::ExternScalarDeclContext *context) = 0;
+    virtual std::any visitGlobalDeclGroup(CParser::GlobalDeclGroupContext *context) = 0;
 
-    virtual std::any visitGlobalArrayDecl(CParser::GlobalArrayDeclContext *context) = 0;
+    virtual std::any visitExternArrayDeclarator(CParser::ExternArrayDeclaratorContext *context) = 0;
 
-    virtual std::any visitGlobalScalarDecl(CParser::GlobalScalarDeclContext *context) = 0;
+    virtual std::any visitExternScalarDeclarator(CParser::ExternScalarDeclaratorContext *context) = 0;
+
+    virtual std::any visitGlobalArrayDeclarator(CParser::GlobalArrayDeclaratorContext *context) = 0;
+
+    virtual std::any visitGlobalScalarDeclarator(CParser::GlobalScalarDeclaratorContext *context) = 0;
 
     virtual std::any visitArrayInit(CParser::ArrayInitContext *context) = 0;
 
@@ -105,15 +109,19 @@ public:
 
     virtual std::any visitEmptyStmt(CParser::EmptyStmtContext *context) = 0;
 
-    virtual std::any visitLocalArrayDecl(CParser::LocalArrayDeclContext *context) = 0;
+    virtual std::any visitLocalDeclGroup(CParser::LocalDeclGroupContext *context) = 0;
 
-    virtual std::any visitLocalDecl(CParser::LocalDeclContext *context) = 0;
-
-    virtual std::any visitStaticLocalArrayDecl(CParser::StaticLocalArrayDeclContext *context) = 0;
-
-    virtual std::any visitStaticLocalDecl(CParser::StaticLocalDeclContext *context) = 0;
+    virtual std::any visitStaticLocalDeclGroup(CParser::StaticLocalDeclGroupContext *context) = 0;
 
     virtual std::any visitExprStmt(CParser::ExprStmtContext *context) = 0;
+
+    virtual std::any visitLocalArrayDeclarator(CParser::LocalArrayDeclaratorContext *context) = 0;
+
+    virtual std::any visitLocalScalarDeclarator(CParser::LocalScalarDeclaratorContext *context) = 0;
+
+    virtual std::any visitStaticLocalArrayDeclarator(CParser::StaticLocalArrayDeclaratorContext *context) = 0;
+
+    virtual std::any visitStaticLocalScalarDeclarator(CParser::StaticLocalScalarDeclaratorContext *context) = 0;
 
     virtual std::any visitCaseLabel(CParser::CaseLabelContext *context) = 0;
 

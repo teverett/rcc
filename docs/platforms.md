@@ -109,7 +109,39 @@ pair - see `docs/using.md`.
   only ever touch the accumulator), so the assembler supports `ldxi`
   (immediate-only `LDX`, opcode `$A2`) for loading it (see
   `M6502Assembler.cpp`'s own `encodeInstr()` comment); there is still no
-  `STX`/`TAX`/indexed addressing or other X-register support.
+  `STX`/`TAX`/indexed addressing or other X-register support. `--link
+  --format=ssd` wraps the same linked bytes in a real Acorn DFS
+  single-sided disc image instead - see `src/rt/bbc/` for an MOS-call
+  runtime library built on top of this target (`--base=6400`, `$1900`,
+  `PAGE`, the BBC Micro's own user-program start address once the Disc
+  Filing System is in use - the DFS workspace sits just below it,
+  between the OS's own fixed `$0E00` and `$1900`, on a Model B; a Master
+  with HAZEL filing-system RAM instead starts user programs at `$0E00`,
+  not modeled here; `examples/6502-bbc/`). MOS's own calling convention
+  needs a block/string address split across X (low byte) and Y (high
+  byte), unlike every ROM/KERNAL/CIO call above (which touch at most X),
+  so the assembler also supports `ldyi_hi` (the high-byte counterpart of
+  `ldai_hi`, added alongside `ldxi_hi` for symmetry) for loading Y, plus
+  absolute-addressing `ldx`/`ldy` (real opcodes `$AE`/`$AC`) for loading
+  X/Y from a *dynamic* byte (not a compile-time constant or a label's own
+  address) - OSBGET/OSBPUT/OSFIND's own file-handle argument, learned only
+  at run time from OSFIND's own return value in A (see
+  `M6502Assembler.cpp`'s own `encodeInstr()` comment). There is still no
+  `STX`/`STY`/`TAX`/`TXA`/`TAY`/`TYA` or indexed addressing, so an MOS
+  call whose own documented result comes back in X or Y rather than A
+  (most "read a system variable" OSBYTE calls, and OSWORD's INKEY-with-
+  time-limit convention) can't be read back into C-visible state - see
+  `src/rt/bbc/bbc.h`'s own header comment for exactly which calls that
+  rules out. `bbc.c` implements console/screen output (`OSWRCH`/
+  `OSASCI`/`OSNEWL`, plus `MODE`/`COLOUR`/`GCOL`/`PLOT`/cursor-position
+  VDU sequences through `OSWRCH`), keyboard input (`OSRDCH`), a curated
+  set of documented action-only `OSBYTE` calls (Escape enable/acknowledge,
+  keyboard auto-repeat, buffer flushing, vertical sync), `*` command
+  invocation (`OSCLI`), sound (`SOUND`/`ENVELOPE` via `OSWORD` 7/8), and
+  file I/O (`OSFIND`/`OSBGET`/`OSBPUT`/`OSGBPB`/`OSFILE`); OSARGS and
+  OSGBPB's own disc-title/directory-listing functions (5-8) are left out
+  for the same X/Y-readback reason, and every undocumented or
+  X/Y-returning OSBYTE/OSWORD call is left out rather than guessed.
 - **atari2600** — same 6502 instruction encoding and dialect as `6502`
   above (the real Atari 2600 uses a 6507, electrically a 6502 with its
   top address pins removed - no instruction-level difference this
@@ -335,6 +367,58 @@ pair - see `docs/using.md`.
   dedicated address registers (`A0`/`A1`, never colliding with `R0`/`R1`),
   with a real hardware stack (`SP`, `PUSH.W`/`POP.W`/`JSR.W`/`RTS`) and
   real EIS-style `MUL.W`/`DIVU.W`. No automated test yet.
+- **m32c** — real Renesas M32C assembly (`M32cAssembler.h`), a bare flat
+  binary loaded/entered at `$0400`. M32C is Renesas's 32-bit-register
+  extension of the M16C/R8C family: it keeps the M16C's 16-bit instruction
+  subset and register file (`R0`-`R3` general, `A0`/`A1` address, `SP`,
+  `FB`) binary-upward-compatible, and additionally lets `R0`/`R2` and
+  `R1`/`R3` be read/written together as the 32-bit pairs `R2R0`/`R3R1`.
+  `int` stays 16 bits, matching M32C's own C ABI (binary-compatible with
+  M16C code); `long`/`unsigned long` (32 bits) use the real `R2R0`/`R3R1`
+  pair registers and the `*L` instruction family (`MOVL`/`ADDL`/`MULL`/
+  `DIVUL`/`DIVXL`/...) directly, unlike M16C's manual word-at-a-time
+  carry-chain loop - `long`/`unsigned long` multiply and divide, which
+  M16C can't do at all, work here. `long long` (64 bits) has no
+  corresponding hardware and keeps the M16C-style multi-word loop for
+  add/sub/bitwise/shift/compare; `long long` multiply/divide is a hard
+  compile error (see docs/known-bugs.md). The assembler's own dialect also
+  covers bit manipulation (`BSET`/`BCLR`/`BTST`/`BNOT`), multiple-register
+  stack save/restore (`PUSHM`/`POPM`), and the compound frame helpers
+  `ENTER`/`EXITD`/`REIT`, each as a real M32C instruction used for its real
+  hardware effect (not real M32C object code, same approach as M16C's own
+  dialect - see `M16cAssembler.h`'s header comment). Formats: `m32c-raw`/
+  `-coff`/`-elf`/`-aout`, same shape as `m16c`'s. No verified M32C
+  simulator/emulator exists, so `tests/run_tests.sh --target=m32c` is
+  compile-only (see docs/known-bugs.md); no runtime library or example
+  exists either, for the same reason (no documented board target this
+  project could implement real I/O against without inventing behavior).
+- **r32c** — real Renesas R32C assembly (`R32cAssembler.h`), a bare flat
+  binary loaded/entered at `$1000`. R32C is Renesas's own successor to the
+  M32C, documented as mnemonic/register-file compatible with its M16C/M32C
+  ancestors rather than a new ISA: this backend keeps M32C's exact register
+  file (`R0`-`R3` general, `A0`/`A1` address, `SP`, `FB`, plus the 32-bit
+  pairs `R2R0`/`R3R1`) and the same instruction groups
+  (`M32cAssembler.h`'s own byte/word/dword arithmetic/logic/shift/compare,
+  `BSET`/`BCLR`/`BTST`/`BNOT`, `PUSHM`/`POPM`, `ENTER`/`EXITD`/`REIT`), each
+  a real R32C instruction used for its real hardware effect but with this
+  project's own invented opcode byte (same approach M16C/M32C already
+  take - see `M16cAssembler.h`'s header comment). The one place this
+  backend's own dialect diverges from M32C's: every absolute-address
+  operand (a jump/call target, or a label reference naming a global) is a
+  full 32-bit field here, not M32C's invented 16-bit one, reflecting the
+  wider linear address space the "R32C" name itself denotes. `int` stays
+  16 bits, matching the shared M16C/M32C/R32C family C ABI; `long`/
+  `unsigned long` use the `R2R0`/`R3R1` pair registers and the `*L`
+  instruction family exactly as M32C does, so `long`/`unsigned long`
+  multiply and divide work here too; `long long` has no corresponding
+  hardware and keeps the M16C/M32C-style multi-word loop for add/sub/
+  bitwise/shift/compare, with multiply/divide a hard compile error (see
+  docs/known-bugs.md). Formats: `r32c-raw`/`-coff`/`-elf`/`-aout`, same
+  shape as `m32c`'s. No verified R32C simulator/emulator exists, so
+  `tests/run_tests.sh --target=r32c` is compile-only (see
+  docs/known-bugs.md); no runtime library or example exists either, for
+  the same reason (no documented board target this project could
+  implement real I/O against without inventing behavior).
 - **8080** — real Intel 8080 assembly/machine code (`I8080Assembler.h`),
   a bare flat binary loaded/entered at `$0100`. Values live in fixed
   memory cells (like 6502's zero-page pseudo-registers, but without the
@@ -383,6 +467,53 @@ pair - see `docs/using.md`.
   sound hardware is entirely port-mapped (`IN`/`OUT`, not a memory
   address); the assembler supports this for `src/rt/coleco/`'s own
   runtime library - see `Z80Assembler.h`'s own header comment.
+- **z80-msx** — the same `z80` backend under its own `--target` name
+  (same pattern as `z80-coleco`): an MSX cartridge instead of a
+  ColecoVision one, linked by `src/linker/factory/MsxLinkerFactory.cpp`
+  against a BIOS-readable cartridge header (an `"AB"` signature and an
+  INIT vector, not a plain `call fn_main` - the MSX BIOS scans every
+  slot's own $4000/$8000 for that signature during boot) and written out
+  via `--format=msxrom` (see `docs/using.md`'s own `--format` row and
+  `src/fileformat/msxrom/MsxRomFormat.h`). Unlike `z80-coleco`'s runtime,
+  `src/rt/msx/` reaches hardware entirely through documented MSX BIOS
+  `CALL` entry points (CHPUT/CHGET/GTSTCK/WRTVDP/WRTVRM/RDVRM/WRTPSG/
+  INITXT) rather than raw `IN`/`OUT` - a cartridge's own INIT routine
+  runs with the BIOS still mapped and "live", unlike a ZX Spectrum
+  `.sna` snapshot which boots straight past it. Every address/register
+  convention is cross-checked against the Konamiman MSX2 Technical
+  Handbook's own BIOS listing; one exception is GTSTCK's own direction
+  *encoding* (how its 0-8 output maps to a direction), which no source
+  consulted states - `msx_joystick()` returns that byte raw, undecoded,
+  rather than guess (see `src/rt/msx/msx.h`'s own header comment). There
+  is no MSX BIOS ROM dump bundled with this project (shipping one would
+  mean bundling copyrighted firmware), so CI verifies the calling
+  convention only - each BIOS entry point patched with a bare `RET` in
+  an independent Z80 core (`z80-python`), not real BIOS behavior.
+- **z80 (sms/gg)** — the Sega Master System and Game Gear need no
+  separate `--target` (same "machine convention, not a new backend"
+  shape as `zx spectrum`/`amstrad cpc` below): their cartridge ROM
+  window starts at `$0000`, reached with `--base=0` (plain `z80`'s own
+  default base, `$8000`, is for machines whose ROM/RAM instead starts
+  higher up), and `--format=sms`/`--format=gg` write the real 16-byte
+  "TMR SEGA" cartridge header (signature, a checksum, and a region/size
+  byte - `$4`/`sms` vs. `$6`/`gg` for the region nibble) at whichever of
+  the three offsets smspower.org's own ROM Header page documents
+  (`$1ff0`/`$3ff0`/`$7ff0`, for an 8/16/32 KiB image) - see
+  `src/fileformat/smsrom/SmsRomFormat.h`'s own header comment for why
+  only those three sizes are supported (every larger size that page
+  documents is itself flagged "unused"/"buggy"/"rarely used"). Both
+  `src/rt/sms/` and `src/rt/gamegear/` reach their VDP/PSG/controller
+  ports entirely through `IN`/`OUT` - the same port-mapped shape
+  `src/rt/coleco/` uses, and (per nakardo's own SMS/GG port-map
+  document) the identical port numbers for everything but the Game
+  Gear's own dedicated Start-button port (`$00`). Neither runtime
+  attempts text/tile output: a cartridge here boots straight into user
+  code with no BIOS-supplied font or established VDP mode to rely on,
+  unlike ColecoVision's own BIOS-preloaded one - see `src/rt/sms/sms.h`'s
+  own header comment. Also not covered: the Pause button's NMI (this
+  backend has no interrupt-vector/ISR support to hook one with) and PSG
+  tone timing (the same cycle-exact-loop problem `atari2600`/`zx
+  spectrum` describe).
 - **zx spectrum** — like `z80-coleco`, the same `z80` backend under a
   different machine convention rather than a separate `--target`: the
   48K ZX Spectrum has a full, uncontended RAM window at `$4000`-`$FFFF`

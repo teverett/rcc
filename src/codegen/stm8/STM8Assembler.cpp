@@ -326,6 +326,14 @@ class Assembler {
             emit8(implied.at(mnemonic + "_xy"));
             return;
         }
+        // mul x, a: unsigned 8x8->16 multiply of `a` by `x`'s low byte,
+        // leaving the 16-bit result in `x`.
+        if (mnemonic == "mul") {
+            requireIdent(operandAt(ops, 0, mnemonic, 2), "x", mnemonic);
+            requireIdent(operandAt(ops, 1, mnemonic, 2), "a", mnemonic);
+            emit8(0x24);
+            return;
+        }
         if (mnemonic == "inc" || mnemonic == "dec" || mnemonic == "tnz") {
             // Accumulator-only forms (inc a/dec a/tnz a).
             requireIdent(operandAt(ops, 0, mnemonic, 1), "a", mnemonic);

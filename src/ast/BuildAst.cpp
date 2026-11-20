@@ -693,74 +693,109 @@ ExprPtr makeIncDec(antlr4::ParserRuleContext *ctx, const std::string &opToken, b
     return e;
 }
 
+// Wraps more than one declarator's Stmt into a single Block (already how
+// IRBuilder executes a sequence of statements in order) so every caller of
+// buildSimpleStmt - the statement-wrapper alt, and the for-loop's own
+// init/post, both of which hold exactly one StmtPtr - keeps working
+// unchanged; a lone declarator is returned as-is, matching pre-comma-list
+// behavior exactly.
+StmtPtr wrapDeclGroup(std::vector<StmtPtr> stmts, int line) {
+    if (stmts.size() == 1) return std::move(stmts[0]);
+    auto block = std::make_unique<Stmt>();
+    block->kind = StmtKind::Block;
+    block->isDeclGroup = true;
+    block->line = line;
+    block->body = std::move(stmts);
+    return block;
+}
+
 StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
-    if (auto *c = dynamic_cast<CParser::LocalArrayDeclContext *>(ctx)) {
-        auto s = std::make_unique<Stmt>();
-        s->kind = StmtKind::LocalDecl;
-        s->line = c->getStart()->getLine();
-        s->declName = c->IDENT()->getText();
-        s->type = buildType(c->typeSpec());
-        s->arraySize = static_cast<int>(parsePlainNumber(c->size, c, "an array size"));
-        if (s->arraySize <= 0) err(c, "array size must be a positive integer");
-        s->arrayInit = buildArrayInit(c->arrayInit());
-        padArrayInit(s->arrayInit, s->arraySize, c);
-        s->isConst = c->cst != nullptr;
-        s->isRegister = c->reg != nullptr;
-        return s;
-    }
-    if (auto *c = dynamic_cast<CParser::LocalDeclContext *>(ctx)) {
-        auto s = std::make_unique<Stmt>();
-        s->kind = StmtKind::LocalDecl;
-        s->line = c->getStart()->getLine();
-        s->declName = c->IDENT()->getText();
-        s->type = buildType(c->typeSpec());
-        if (auto *e = c->expr()) s->initOrReturnOrExpr = buildExpr(e);
-        s->isConst = c->cst != nullptr;
-        s->isRegister = c->reg != nullptr;
-        if (s->isConst && !s->initOrReturnOrExpr) {
-            err(c, "a 'const' local must have an initializer");
-        }
-        return s;
-    }
-    if (auto *c = dynamic_cast<CParser::StaticLocalArrayDeclContext *>(ctx)) {
-        auto s = std::make_unique<Stmt>();
-        s->kind = StmtKind::LocalDecl;
-        s->isStatic = true;
-        s->line = c->getStart()->getLine();
-        s->declName = c->IDENT()->getText();
-        s->type = buildType(c->typeSpec());
-        s->arraySize = static_cast<int>(parsePlainNumber(c->size, c, "an array size"));
-        if (s->arraySize <= 0) err(c, "array size must be a positive integer");
-        s->arrayInit = buildArrayInit(c->arrayInit());
-        padArrayInit(s->arrayInit, s->arraySize, c);
-        s->isConst = c->cst != nullptr;
-        return s;
-    }
-    if (auto *c = dynamic_cast<CParser::StaticLocalDeclContext *>(ctx)) {
-        auto s = std::make_unique<Stmt>();
-        s->kind = StmtKind::LocalDecl;
-        s->isStatic = true;
-        s->line = c->getStart()->getLine();
-        s->declName = c->IDENT(0)->getText();
-        s->type = buildType(c->typeSpec());
-        s->isConst = c->cst != nullptr;
-        if (c->val || c->identVal) {
-            ConstInit init = resolveConstOrEnumInit(c->val, c->sign, c->identVal, c, "a static local initializer");
-            auto lit = std::make_unique<Expr>();
-            lit->line = c->getStart()->getLine();
-            if (init.isFloat) {
-                lit->kind = ExprKind::FloatLit;
-                lit->floatValue = init.floatValue;
-                lit->type = init.floatType;
+    if (auto *c = dynamic_cast<CParser::LocalDeclGroupContext *>(ctx)) {
+        Type baseType = buildType(c->typeSpec());
+        bool isConst = c->cst != nullptr;
+        bool isRegister = c->reg != nullptr;
+        std::vector<StmtPtr> stmts;
+        for (auto *d : c->decl) {
+            if (auto *arr = dynamic_cast<CParser::LocalArrayDeclaratorContext *>(d)) {
+                auto s = std::make_unique<Stmt>();
+                s->kind = StmtKind::LocalDecl;
+                s->line = arr->getStart()->getLine();
+                s->declName = arr->IDENT()->getText();
+                s->type = baseType;
+                s->arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
+                if (s->arraySize <= 0) err(arr, "array size must be a positive integer");
+                s->arrayInit = buildArrayInit(arr->arrayInit());
+                padArrayInit(s->arrayInit, s->arraySize, arr);
+                s->isConst = isConst;
+                s->isRegister = isRegister;
+                stmts.push_back(std::move(s));
+            } else if (auto *sc = dynamic_cast<CParser::LocalScalarDeclaratorContext *>(d)) {
+                auto s = std::make_unique<Stmt>();
+                s->kind = StmtKind::LocalDecl;
+                s->line = sc->getStart()->getLine();
+                s->declName = sc->IDENT()->getText();
+                s->type = baseType;
+                if (auto *e = sc->expr()) s->initOrReturnOrExpr = buildExpr(e);
+                s->isConst = isConst;
+                s->isRegister = isRegister;
+                if (s->isConst && !s->initOrReturnOrExpr) {
+                    err(sc, "a 'const' local must have an initializer");
+                }
+                stmts.push_back(std::move(s));
             } else {
-                lit->kind = ExprKind::IntLit;
-                lit->intValue = init.intValue;
+                err(d, "internal: unhandled localDeclarator alternative");
             }
-            s->initOrReturnOrExpr = std::move(lit);
-        } else if (s->isConst) {
-            err(c, "a 'const' local must have an initializer");
         }
-        return s;
+        return wrapDeclGroup(std::move(stmts), c->getStart()->getLine());
+    }
+    if (auto *c = dynamic_cast<CParser::StaticLocalDeclGroupContext *>(ctx)) {
+        Type baseType = buildType(c->typeSpec());
+        bool isConst = c->cst != nullptr;
+        std::vector<StmtPtr> stmts;
+        for (auto *d : c->decl) {
+            if (auto *arr = dynamic_cast<CParser::StaticLocalArrayDeclaratorContext *>(d)) {
+                auto s = std::make_unique<Stmt>();
+                s->kind = StmtKind::LocalDecl;
+                s->isStatic = true;
+                s->line = arr->getStart()->getLine();
+                s->declName = arr->IDENT()->getText();
+                s->type = baseType;
+                s->arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
+                if (s->arraySize <= 0) err(arr, "array size must be a positive integer");
+                s->arrayInit = buildArrayInit(arr->arrayInit());
+                padArrayInit(s->arrayInit, s->arraySize, arr);
+                s->isConst = isConst;
+                stmts.push_back(std::move(s));
+            } else if (auto *sc = dynamic_cast<CParser::StaticLocalScalarDeclaratorContext *>(d)) {
+                auto s = std::make_unique<Stmt>();
+                s->kind = StmtKind::LocalDecl;
+                s->isStatic = true;
+                s->line = sc->getStart()->getLine();
+                s->declName = sc->IDENT(0)->getText();
+                s->type = baseType;
+                s->isConst = isConst;
+                if (sc->val || sc->identVal) {
+                    ConstInit init = resolveConstOrEnumInit(sc->val, sc->sign, sc->identVal, sc, "a static local initializer");
+                    auto lit = std::make_unique<Expr>();
+                    lit->line = sc->getStart()->getLine();
+                    if (init.isFloat) {
+                        lit->kind = ExprKind::FloatLit;
+                        lit->floatValue = init.floatValue;
+                        lit->type = init.floatType;
+                    } else {
+                        lit->kind = ExprKind::IntLit;
+                        lit->intValue = init.intValue;
+                    }
+                    s->initOrReturnOrExpr = std::move(lit);
+                } else if (s->isConst) {
+                    err(sc, "a 'const' local must have an initializer");
+                }
+                stmts.push_back(std::move(s));
+            } else {
+                err(d, "internal: unhandled staticLocalDeclarator alternative");
+            }
+        }
+        return wrapDeclGroup(std::move(stmts), c->getStart()->getLine());
     }
     if (auto *c = dynamic_cast<CParser::ExprStmtContext *>(ctx)) {
         auto s = std::make_unique<Stmt>();
@@ -1025,57 +1060,72 @@ Program buildProgram(CParser::ProgramContext *ctx) {
             fn.body = buildBlock(local->block());
             prog.functions.push_back(std::move(fn));
         } else if (auto *gd = top->globalDecl()) {
-            GlobalVar g;
-            g.line = gd->getStart()->getLine();
-            if (auto *extArr = dynamic_cast<CParser::ExternArrayDeclContext *>(gd)) {
-                g.name = extArr->IDENT()->getText();
-                g.type = buildType(extArr->typeSpec());
-                g.arraySize = static_cast<int>(parsePlainNumber(extArr->size, extArr, "an array size"));
-                if (g.arraySize <= 0) err(extArr, "array size must be a positive integer");
-                g.isExternDecl = true;
-                g.isConst = extArr->cst != nullptr;
-            } else if (auto *extSc = dynamic_cast<CParser::ExternScalarDeclContext *>(gd)) {
-                g.name = extSc->IDENT()->getText();
-                g.type = buildType(extSc->typeSpec());
-                g.isExternDecl = true;
-                g.isConst = extSc->cst != nullptr;
-            } else if (auto *arr = dynamic_cast<CParser::GlobalArrayDeclContext *>(gd)) {
-                g.name = arr->IDENT()->getText();
-                g.type = buildType(arr->typeSpec());
-                g.isStatic = arr->stat != nullptr;
-                g.isConst = arr->cst != nullptr;
-                g.arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
-                if (g.arraySize <= 0) err(arr, "array size must be a positive integer");
-                g.arrayInit = buildArrayInit(arr->arrayInit());
-                padArrayInit(g.arrayInit, g.arraySize, arr);
-                if (arr->addr) {
-                    g.hasAddress = true;
-                    g.address = parsePlainNumber(arr->addr, arr, "a '@' address");
-                }
-            } else if (auto *sc = dynamic_cast<CParser::GlobalScalarDeclContext *>(gd)) {
-                g.name = sc->IDENT(0)->getText();
-                g.type = buildType(sc->typeSpec());
-                g.isStatic = sc->stat != nullptr;
-                g.isConst = sc->cst != nullptr;
-                if (sc->val || sc->identVal) {
-                    ConstInit init = resolveConstOrEnumInit(sc->val, sc->sign, sc->identVal, sc, "a global initializer");
-                    g.hasInit = true;
-                    g.hasFloatInit = init.isFloat;
-                    if (init.isFloat) {
-                        g.floatInitValue = init.floatValue;
+            int line = gd->getStart()->getLine();
+            if (auto *extGroup = dynamic_cast<CParser::ExternDeclGroupContext *>(gd)) {
+                Type baseType = buildType(extGroup->typeSpec());
+                bool isConst = extGroup->cst != nullptr;
+                for (auto *d : extGroup->decl) {
+                    GlobalVar g;
+                    g.line = line;
+                    g.type = baseType;
+                    g.isExternDecl = true;
+                    g.isConst = isConst;
+                    if (auto *extArr = dynamic_cast<CParser::ExternArrayDeclaratorContext *>(d)) {
+                        g.name = extArr->IDENT()->getText();
+                        g.arraySize = static_cast<int>(parsePlainNumber(extArr->size, extArr, "an array size"));
+                        if (g.arraySize <= 0) err(extArr, "array size must be a positive integer");
+                    } else if (auto *extSc = dynamic_cast<CParser::ExternScalarDeclaratorContext *>(d)) {
+                        g.name = extSc->IDENT()->getText();
                     } else {
-                        g.initValue = init.intValue;
+                        err(d, "internal: unhandled externDeclarator alternative");
                     }
+                    prog.globals.push_back(std::move(g));
                 }
-                if (g.isConst && !g.hasInit) {
-                    err(sc, "a 'const' global must have an initializer");
-                }
-                if (sc->addr) {
-                    g.hasAddress = true;
-                    g.address = parsePlainNumber(sc->addr, sc, "a '@' address");
+            } else if (auto *group = dynamic_cast<CParser::GlobalDeclGroupContext *>(gd)) {
+                Type baseType = buildType(group->typeSpec());
+                bool isStatic = group->stat != nullptr;
+                bool isConst = group->cst != nullptr;
+                for (auto *d : group->decl) {
+                    GlobalVar g;
+                    g.line = line;
+                    g.type = baseType;
+                    g.isStatic = isStatic;
+                    g.isConst = isConst;
+                    if (auto *arr = dynamic_cast<CParser::GlobalArrayDeclaratorContext *>(d)) {
+                        g.name = arr->IDENT()->getText();
+                        g.arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
+                        if (g.arraySize <= 0) err(arr, "array size must be a positive integer");
+                        g.arrayInit = buildArrayInit(arr->arrayInit());
+                        padArrayInit(g.arrayInit, g.arraySize, arr);
+                        if (arr->addr) {
+                            g.hasAddress = true;
+                            g.address = parsePlainNumber(arr->addr, arr, "a '@' address");
+                        }
+                    } else if (auto *sc = dynamic_cast<CParser::GlobalScalarDeclaratorContext *>(d)) {
+                        g.name = sc->IDENT(0)->getText();
+                        if (sc->val || sc->identVal) {
+                            ConstInit init = resolveConstOrEnumInit(sc->val, sc->sign, sc->identVal, sc, "a global initializer");
+                            g.hasInit = true;
+                            g.hasFloatInit = init.isFloat;
+                            if (init.isFloat) {
+                                g.floatInitValue = init.floatValue;
+                            } else {
+                                g.initValue = init.intValue;
+                            }
+                        }
+                        if (g.isConst && !g.hasInit) {
+                            err(sc, "a 'const' global must have an initializer");
+                        }
+                        if (sc->addr) {
+                            g.hasAddress = true;
+                            g.address = parsePlainNumber(sc->addr, sc, "a '@' address");
+                        }
+                    } else {
+                        err(d, "internal: unhandled globalDeclarator alternative");
+                    }
+                    prog.globals.push_back(std::move(g));
                 }
             }
-            prog.globals.push_back(std::move(g));
         }
     }
     return prog;

@@ -3,6 +3,59 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## No verified M32C simulator/emulator is wired into `tests/run_tests.sh`
+
+Affects `tests/run_tests.sh`'s `check_m32c()`. No pip-installable Python M32C
+core, qemu M32C target, or other emulator was found for this project, so
+`check_m32c()` only compiles+assembles every `tests/*.c`/`tests/m32c/*.c`
+file and reports a compile result - it never executes the output or checks
+a test's own `// EXPECT: N` value. `--target=m32c` program correctness
+(beyond "the compiler and assembler accept it") is unverified by this
+project's own test suite.
+
+## No verified R32C simulator/emulator is wired into `tests/run_tests.sh`
+
+Affects `tests/run_tests.sh`'s `check_r32c()`. No pip-installable Python R32C
+core, qemu R32C target, or other emulator was found for this project, so
+`check_r32c()` only compiles+assembles every `tests/*.c`/`tests/r32c/*.c`
+file and reports a compile result - it never executes the output or checks
+a test's own `// EXPECT: N` value. `--target=r32c` program correctness
+(beyond "the compiler and assembler accept it") is unverified by this
+project's own test suite - same situation as the `m32c` entry just above,
+whose codegen this backend's own `R32cCodegen.cpp` otherwise mirrors.
+
+## `--target=m16c`/`--target=m32c`/`--target=r32c` array elements wider than one word read/write only their first word
+
+Affects `src/codegen/m16c/M16cCodegen.cpp`'s/`src/codegen/m32c/M32cCodegen.cpp`'s/
+`src/codegen/r32c/R32cCodegen.cpp`'s `genIndex()`/`genIndexAddr()`: an array element's effective address is
+correctly scaled by its real element width, but the actual load/store
+through that address always reads/writes exactly one word (`ld`/`st`) or
+one byte (`ldb`/`stb`), regardless of the element type's width. A
+`long`/`long long` *array* element (not a plain scalar - those go through
+the unaffected `Var`/`Assign` word-count-generic path) silently reads/
+writes only its low word; the other words are never touched.
+
+Not yet fixed - would need `genIndex()`/`genIndexAddr()` to loop over
+`wordCountOf(elementType)` words the way the scalar `Var`/`Assign`/
+dereference paths already do.
+
+## `--target=m32c`/`--target=r32c` can't multiply or divide two `long long` values
+
+Affects `src/codegen/m32c/M32cCodegen.cpp`'s/`src/codegen/r32c/R32cCodegen.cpp`'s
+`genWideMul()`/`genWideDivMod()`: `long`/`unsigned long` (32 bits) multiply/divide/modulo
+use the real `MULL`/`DIVUL`/`DIVXL` 32-bit-pair-register instructions, but
+`long long` (64 bits) has no corresponding hardware, so it's a hard
+compile error - the same gap `src/codegen/m16c/M16cCodegen.cpp` already has
+for every `long`/`long long` multiply/divide (M16C has no 32-bit hardware
+multiply/divide at all). `tests/run_tests.sh`'s `is_known_unsupported()`
+excludes `types_longlong_divmod.c`/`types_longlong_divmod_repeated.c` for
+`m32c`/`r32c` accordingly.
+
+Not yet fixed - would need a hand-written 64-bit multiply/divide routine
+(built from 32-bit pieces) verified against a real M32C/R32C simulator,
+which isn't available (see this file's own M32C/R32C-simulator entries
+above).
+
 ## `--target=z80-coleco` programs that multiply/divide/modulo/shift-by-variable, or deref through a pointer that spills, write through compiler-internal scratch cells placed in the same ROM-mapped cartridge image as code
 
 Affects `src/codegen/z80/Z80Codegen.cpp`'s `declareTemp()`-based scratch
@@ -507,6 +560,82 @@ resolve `$arg` to an absolute path (e.g. `RCC="$(cd "$(dirname "$arg")"
 way `ROOT_DIR`/`SCRIPT_DIR` already resolve themselves a few lines
 above.
 
+## `tests/multidecl_array.c`/`tests/multidecl_scalar.c` fail on `--target=stm32`/`i386`
+
+Affects `src/codegen/stm32/STM32Codegen.cpp` and `src/codegen/i386/I386Codegen.cpp`,
+discovered running `make test` after merging in the comma-separated-declarator-list feature
+(`grammar/CParser.g4`/`src/ast/BuildAst.cpp`/`src/ir/IRBuilder.cpp` - see these two tests' own
+header comments). Every other target exercised (`6502`-family, `pdp1`/`pdp7`, `68000`,
+`mc68328`, `8080`, `z80`, `8051`) passes both tests cleanly; only these two fail, and not with a
+crash - `multidecl_array.c` returns 340 instead of 339 on `stm32` (one of the uninitialized
+locals, `mid` or `s2`, comes back as 1 rather than 0), and `multidecl_scalar.c` returns
+unrelated large garbage values on both (28801/28497 rather than 35), suggesting an uninitialized
+local or a frame-layout issue specific to how these two backends place a comma-separated
+declarator list's own several locals, rather than anything about the shared parser/AST/IR
+change itself (which neither test exercises per-target logic for). Not yet root-caused -
+excluded via `is_known_unsupported()` in the meantime rather than left as an unexplained
+failure.
+
+## `src/rt/bbc/`'s runtime has no OSARGS, no OSGBPB disc-title/directory functions, and no OSBYTE/OSWORD call whose own result returns in X or Y
+
+Affects `src/rt/bbc/bbc.h`/`bbc.c` (the BBC Micro MOS runtime library for
+`--target=6502`). This dialect's own 6502 assembler
+(`src/codegen/m6502/M6502Assembler.cpp`) has no `TAX`/`TXA`/`TAY`/`TYA`/
+`STX`/`STY` of any kind (only `ldxi`/`ldyi`/`ldxi_hi`/`ldyi_hi`,
+compile-time-constant-or-label-only immediate loads, and the
+absolute-addressing `ldx`/`ldy` added for this library's own dynamic
+file-handle argument - see that file's own `encodeInstr()` comment), so
+a value MOS returns in X and/or Y rather than A can never be read back
+into C-visible state. OSARGS (`$FFDA`) and OSGBPB's own disc-title/
+current-directory/current-library/directory-listing functions (A = 5-8)
+all return their own real result that way; every OSBYTE "read a system
+variable" call (OSHWM, HIMEM, the VDU variables, INKEY's own time-limited
+read) does too. None of these are implemented - only the documented
+OSBYTE calls whose effect is the call itself (Escape enable/acknowledge,
+keyboard auto-repeat, buffer flushing, vertical sync) are, via
+`bbc_osbyte()`'s own generic A/X/Y-in escape hatch.
+
+Not a bug in what's implemented - a deliberate scope cut, logged here
+per this project's own documentation policy rather than silently
+omitted. Fixing it for real needs either a genuinely wider assembler
+extension (real `TAX`/`TAY`/`STX`/`STY` support, well past the narrow,
+purpose-built mnemonics every 6502 runtime library here has added so
+far) or some other way to get an X/Y-held result into a byte this
+dialect's `sta` can actually read.
+
+## `tests/pointer_through_int_dispatch.c` fails on every narrow-`int` target tried so far (every 6502-family target, `pdp1`/`pdp7`, `8051`, `8080`, `z80`), missing from `is_known_unsupported()`
+
+Affects `tests/run_tests.sh`'s `is_known_unsupported()` and the shared
+`tests/pointer_through_int_dispatch.c` itself, discovered while running
+`tests/run_tests.sh --target=6502` for the BBC Micro port (unrelated to
+that port's own changes - every narrow-`int` backend already had this
+gap; `pdp1`/`pdp7`/`8051`/`8080`/`z80` hit the identical root cause,
+confirmed by `make test`'s own per-target runs, also unrelated to this
+session's own changes).
+
+The test's own comment says `p = p + 8` is meant to move a plain
+`int`-as-address two elements along `arr` ("`arr[2]` sits 2*4 bytes on"),
+assuming a 4-byte `int`. Every 6502-family target's own native `int` is 2
+bytes (`M6502Codegen.h`'s `isWide()`/`widthOfType()`: "wide" means wider
+than the native 2-byte word), same as `8051`/`8080`/`z80`'s own native
+`int`; `pdp1`/`pdp7`'s own native `int` is a single 18-bit word
+(`Pdp1Codegen.h`/`Pdp7Codegen.h`'s `typeWidths()`: `intUnits = 1`). On
+any of these, the same literal `8` instead moves four elements along -
+past the end of `arr[3]` - and `*p += 100` then corrupts memory just
+past the array instead of updating `arr[2]`, failing the test's own very
+next check. Confirmed directly: isolating just this file's own two
+halves shows the dispatch-table call half passes on its own while the
+pointer-arithmetic half (reduced to `p = p + 8; if (*p != 3) return
+10;`) returns `10`, confirming the byte offset, not the dispatch-table
+call, is the mismatch.
+
+Not yet fixed - needs either this test's own offset made width-aware
+(e.g. `p + 2 * sizeof(int)` instead of the hardcoded `8`, if this
+subset's `sizeof` can appear in that position) or a documented
+per-target expected offset; added to `is_known_unsupported()` for every
+narrow-`int` target confirmed to hit it so far in the meantime rather than
+left as an unexplained failure.
+
 ## `src/generated/CParser.cpp`'s `condExprSempred()` triggers `-Wunused-parameter`
 
 Affects `src/generated/CParser.cpp`'s `condExprSempred(CondExprContext
@@ -528,3 +657,50 @@ upstream ANTLR C++-target template change or a build-level
 `-Wno-unused-parameter` carve-out scoped to `src/generated/` alone -
 out of scope for whatever grammar change happens to be the one that
 next forces a rebuild of this file.
+
+## Memotech MTX has no `rcc` support - its I/O port map/BIOS calls aren't verified against any reachable source
+
+No `--target`/runtime library exists for the Memotech MTX (a documented request: "SEGA Master
+System / Game Gear, Memotech MTX, Camputers Lynx" as platforms to add). The VDP (TMS9929A),
+SN76489A, and keyboard-matrix port numbers, and whether the machine offers any ROM/monitor call
+table the way MSX's BIOS does, were not found in any page this session could reach: the
+Wikipedia article and the MEMU emulator's own `docs/index.html` both describe the hardware in
+prose (chip names, RAM size) with no port/address tables, a cited "MTX Technical Specifications"
+PDF (`mtxinfo.de/TechInfo.pdf`, only reachable via an archive.org mirror) and `primrosebank.net`
+(the MEMU docs' own "definitive source of information about Memotech computers") were both
+unreachable (TLS error), and the MEMU source itself wasn't fetched. Writing a runtime library
+from guessed port numbers would risk silently wrong hardware behavior with nothing in this
+project to catch it. Add support once a primary source (the TechInfo PDF, a MEMU source
+checkout, or the MTX ROM disassembly) is actually readable.
+
+## Camputers Lynx has no `rcc` support - its video/keyboard/sound hardware isn't verified against any reachable source
+
+No `--target`/runtime library exists for the Camputers Lynx (not the Atari Lynx handheld - same
+platform request as the Memotech MTX entry above). Wikipedia names the chips (a Motorola 6845
+for video, a 6-bit DAC for sound) but gives no port numbers, video RAM base address, or keyboard
+matrix layout; retroisle.com's own "Lynx Board Information"/"Lynx Firmware" sections, the most
+likely source for a pinout or ROM disassembly, returned only empty section-index pages to this
+session's fetches. MAME's own cassette-format loader (`camplynx_cas.cpp`) describes the tape
+block structure in general terms but the source file itself returned HTTP 403 from the mirror
+tried. Add support once a primary source (the MAME source via a reachable mirror, or a Lynx
+technical manual/disassembly) is actually readable.
+
+## The C grammar rejects an assignment target wrapped in redundant parens
+
+Affects the C grammar/parser (`grammar/CParser.g4`/`src/generated/CParser.cpp`), discovered
+while writing `src/rt/atari5200/atari5200.c`. An assignment whose left-hand side is a
+dereference wrapped in one redundant, otherwise no-op pair of parens -
+`(*(unsigned char *)addr) = value;` - fails with "syntax errors, not compiling";
+`*(unsigned char *)addr = value;` (no outer parens) parses fine. Reproducible with a two-line
+`.c` file against any target.
+
+`expr`'s assignment alternatives (`assignDerefExpr`/`assignIndexExpr`/`assignExpr`/
+`assignMemberExpr`/`assignMemberPtrExpr`) each pattern-match the LHS's literal surface syntax
+(a leading `*`, a bare `IDENT`, `base.name`, `base->name`) directly in the grammar rather than
+accepting any `condExpr` and checking assignability afterward; wrapping the LHS in parens routes
+it through `condExpr`'s own generic `'(' expr ')'` alternative instead, which never reconnects
+to an `assignOp`. Fixing this needs a generic `lhs=condExpr op=assignOp val=expr` alternative
+with the "is this actually an assignable shape" check (unwrapping any redundant parens, then
+requiring a deref/index/member/plain-ident) moved into `BuildAst.cpp`, replacing the current
+shape-specific alternatives - not yet done; worked around in `atari5200.c`'s own
+hardware-register macros by never emitting the parenthesized shape.

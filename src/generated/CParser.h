@@ -33,9 +33,11 @@ public:
     RuleProgram = 0, RuleTypeSpec = 1, RuleBaseTypeSpec = 2, RuleTopLevelDecl = 3, 
     RuleStructDecl = 4, RuleStructMember = 5, RuleEnumDecl = 6, RuleEnumMember = 7, 
     RuleFunctionDecl = 8, RuleReturnTypeSpec = 9, RuleParamList = 10, RuleParam = 11, 
-    RuleGlobalDecl = 12, RuleArrayInit = 13, RuleArrayInitElem = 14, RuleBlock = 15, 
-    RuleStatement = 16, RuleSimpleStmt = 17, RuleSwitchCase = 18, RuleAssignOp = 19, 
-    RuleExpr = 20, RuleCondExpr = 21, RuleArgList = 22
+    RuleGlobalDecl = 12, RuleExternDeclarator = 13, RuleGlobalDeclarator = 14, 
+    RuleArrayInit = 15, RuleArrayInitElem = 16, RuleBlock = 17, RuleStatement = 18, 
+    RuleSimpleStmt = 19, RuleLocalDeclarator = 20, RuleStaticLocalDeclarator = 21, 
+    RuleSwitchCase = 22, RuleAssignOp = 23, RuleExpr = 24, RuleCondExpr = 25, 
+    RuleArgList = 26
   };
 
   explicit CParser(antlr4::TokenStream *input);
@@ -68,11 +70,15 @@ public:
   class ParamListContext;
   class ParamContext;
   class GlobalDeclContext;
+  class ExternDeclaratorContext;
+  class GlobalDeclaratorContext;
   class ArrayInitContext;
   class ArrayInitElemContext;
   class BlockContext;
   class StatementContext;
   class SimpleStmtContext;
+  class LocalDeclaratorContext;
+  class StaticLocalDeclaratorContext;
   class SwitchCaseContext;
   class AssignOpContext;
   class ExprContext;
@@ -402,6 +408,7 @@ public:
     ParamContext* param(size_t i);
     std::vector<antlr4::tree::TerminalNode *> COMMA();
     antlr4::tree::TerminalNode* COMMA(size_t i);
+    antlr4::tree::TerminalNode *VOID_KW();
 
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
@@ -441,80 +448,109 @@ public:
    
   };
 
-  class  ExternScalarDeclContext : public GlobalDeclContext {
+  class  GlobalDeclGroupContext : public GlobalDeclContext {
   public:
-    ExternScalarDeclContext(GlobalDeclContext *ctx);
-
-    antlr4::Token *cst = nullptr;
-    antlr4::tree::TerminalNode *EXTERN_KW();
-    TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *SEMI();
-    antlr4::tree::TerminalNode *CONST_KW();
-
-    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
-  };
-
-  class  GlobalArrayDeclContext : public GlobalDeclContext {
-  public:
-    GlobalArrayDeclContext(GlobalDeclContext *ctx);
+    GlobalDeclGroupContext(GlobalDeclContext *ctx);
 
     antlr4::Token *stat = nullptr;
     antlr4::Token *cst = nullptr;
-    antlr4::Token *size = nullptr;
-    antlr4::Token *addr = nullptr;
+    CParser::GlobalDeclaratorContext *globalDeclaratorContext = nullptr;
+    std::vector<GlobalDeclaratorContext *> decl;
     TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
     antlr4::tree::TerminalNode *SEMI();
-    std::vector<antlr4::tree::TerminalNode *> NUMBER();
-    antlr4::tree::TerminalNode* NUMBER(size_t i);
-    antlr4::tree::TerminalNode *ASSIGN();
-    ArrayInitContext *arrayInit();
-    antlr4::tree::TerminalNode *AT();
+    std::vector<GlobalDeclaratorContext *> globalDeclarator();
+    GlobalDeclaratorContext* globalDeclarator(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> COMMA();
+    antlr4::tree::TerminalNode* COMMA(size_t i);
     antlr4::tree::TerminalNode *STATIC_KW();
     antlr4::tree::TerminalNode *CONST_KW();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
-  class  ExternArrayDeclContext : public GlobalDeclContext {
+  class  ExternDeclGroupContext : public GlobalDeclContext {
   public:
-    ExternArrayDeclContext(GlobalDeclContext *ctx);
+    ExternDeclGroupContext(GlobalDeclContext *ctx);
 
     antlr4::Token *cst = nullptr;
-    antlr4::Token *size = nullptr;
+    CParser::ExternDeclaratorContext *externDeclaratorContext = nullptr;
+    std::vector<ExternDeclaratorContext *> decl;
     antlr4::tree::TerminalNode *EXTERN_KW();
     TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
     antlr4::tree::TerminalNode *SEMI();
-    antlr4::tree::TerminalNode *NUMBER();
+    std::vector<ExternDeclaratorContext *> externDeclarator();
+    ExternDeclaratorContext* externDeclarator(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> COMMA();
+    antlr4::tree::TerminalNode* COMMA(size_t i);
     antlr4::tree::TerminalNode *CONST_KW();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
-  class  GlobalScalarDeclContext : public GlobalDeclContext {
-  public:
-    GlobalScalarDeclContext(GlobalDeclContext *ctx);
+  GlobalDeclContext* globalDecl();
 
-    antlr4::Token *stat = nullptr;
-    antlr4::Token *cst = nullptr;
+  class  ExternDeclaratorContext : public antlr4::ParserRuleContext {
+  public:
+    ExternDeclaratorContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+   
+    ExternDeclaratorContext() = default;
+    void copyFrom(ExternDeclaratorContext *context);
+    using antlr4::ParserRuleContext::copyFrom;
+
+    virtual size_t getRuleIndex() const override;
+
+   
+  };
+
+  class  ExternScalarDeclaratorContext : public ExternDeclaratorContext {
+  public:
+    ExternScalarDeclaratorContext(ExternDeclaratorContext *ctx);
+
+    antlr4::tree::TerminalNode *IDENT();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  ExternArrayDeclaratorContext : public ExternDeclaratorContext {
+  public:
+    ExternArrayDeclaratorContext(ExternDeclaratorContext *ctx);
+
+    antlr4::Token *size = nullptr;
+    antlr4::tree::TerminalNode *IDENT();
+    antlr4::tree::TerminalNode *LBRACK();
+    antlr4::tree::TerminalNode *RBRACK();
+    antlr4::tree::TerminalNode *NUMBER();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  ExternDeclaratorContext* externDeclarator();
+
+  class  GlobalDeclaratorContext : public antlr4::ParserRuleContext {
+  public:
+    GlobalDeclaratorContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+   
+    GlobalDeclaratorContext() = default;
+    void copyFrom(GlobalDeclaratorContext *context);
+    using antlr4::ParserRuleContext::copyFrom;
+
+    virtual size_t getRuleIndex() const override;
+
+   
+  };
+
+  class  GlobalScalarDeclaratorContext : public GlobalDeclaratorContext {
+  public:
+    GlobalScalarDeclaratorContext(GlobalDeclaratorContext *ctx);
+
     antlr4::Token *sign = nullptr;
     antlr4::Token *val = nullptr;
     antlr4::Token *identVal = nullptr;
     antlr4::Token *addr = nullptr;
-    TypeSpecContext *typeSpec();
     std::vector<antlr4::tree::TerminalNode *> IDENT();
     antlr4::tree::TerminalNode* IDENT(size_t i);
-    antlr4::tree::TerminalNode *SEMI();
     antlr4::tree::TerminalNode *ASSIGN();
     antlr4::tree::TerminalNode *AT();
-    antlr4::tree::TerminalNode *STATIC_KW();
-    antlr4::tree::TerminalNode *CONST_KW();
     std::vector<antlr4::tree::TerminalNode *> NUMBER();
     antlr4::tree::TerminalNode* NUMBER(size_t i);
     antlr4::tree::TerminalNode *FLOAT_NUMBER();
@@ -523,7 +559,25 @@ public:
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
-  GlobalDeclContext* globalDecl();
+  class  GlobalArrayDeclaratorContext : public GlobalDeclaratorContext {
+  public:
+    GlobalArrayDeclaratorContext(GlobalDeclaratorContext *ctx);
+
+    antlr4::Token *size = nullptr;
+    antlr4::Token *addr = nullptr;
+    antlr4::tree::TerminalNode *IDENT();
+    antlr4::tree::TerminalNode *LBRACK();
+    antlr4::tree::TerminalNode *RBRACK();
+    std::vector<antlr4::tree::TerminalNode *> NUMBER();
+    antlr4::tree::TerminalNode* NUMBER(size_t i);
+    antlr4::tree::TerminalNode *ASSIGN();
+    ArrayInitContext *arrayInit();
+    antlr4::tree::TerminalNode *AT();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  GlobalDeclaratorContext* globalDeclarator();
 
   class  ArrayInitContext : public antlr4::ParserRuleContext {
   public:
@@ -784,6 +838,24 @@ public:
    
   };
 
+  class  StaticLocalDeclGroupContext : public SimpleStmtContext {
+  public:
+    StaticLocalDeclGroupContext(SimpleStmtContext *ctx);
+
+    antlr4::Token *cst = nullptr;
+    CParser::StaticLocalDeclaratorContext *staticLocalDeclaratorContext = nullptr;
+    std::vector<StaticLocalDeclaratorContext *> decl;
+    antlr4::tree::TerminalNode *STATIC_KW();
+    TypeSpecContext *typeSpec();
+    std::vector<StaticLocalDeclaratorContext *> staticLocalDeclarator();
+    StaticLocalDeclaratorContext* staticLocalDeclarator(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> COMMA();
+    antlr4::tree::TerminalNode* COMMA(size_t i);
+    antlr4::tree::TerminalNode *CONST_KW();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
   class  ExprStmtContext : public SimpleStmtContext {
   public:
     ExprStmtContext(SimpleStmtContext *ctx);
@@ -793,75 +865,19 @@ public:
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
 
-  class  LocalDeclContext : public SimpleStmtContext {
+  class  LocalDeclGroupContext : public SimpleStmtContext {
   public:
-    LocalDeclContext(SimpleStmtContext *ctx);
+    LocalDeclGroupContext(SimpleStmtContext *ctx);
 
     antlr4::Token *reg = nullptr;
     antlr4::Token *cst = nullptr;
+    CParser::LocalDeclaratorContext *localDeclaratorContext = nullptr;
+    std::vector<LocalDeclaratorContext *> decl;
     TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *ASSIGN();
-    ExprContext *expr();
-    antlr4::tree::TerminalNode *REGISTER_KW();
-    antlr4::tree::TerminalNode *CONST_KW();
-
-    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
-  };
-
-  class  StaticLocalArrayDeclContext : public SimpleStmtContext {
-  public:
-    StaticLocalArrayDeclContext(SimpleStmtContext *ctx);
-
-    antlr4::Token *cst = nullptr;
-    antlr4::Token *size = nullptr;
-    antlr4::tree::TerminalNode *STATIC_KW();
-    TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    antlr4::tree::TerminalNode *NUMBER();
-    antlr4::tree::TerminalNode *ASSIGN();
-    ArrayInitContext *arrayInit();
-    antlr4::tree::TerminalNode *CONST_KW();
-
-    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
-  };
-
-  class  StaticLocalDeclContext : public SimpleStmtContext {
-  public:
-    StaticLocalDeclContext(SimpleStmtContext *ctx);
-
-    antlr4::Token *cst = nullptr;
-    antlr4::Token *sign = nullptr;
-    antlr4::Token *val = nullptr;
-    antlr4::Token *identVal = nullptr;
-    antlr4::tree::TerminalNode *STATIC_KW();
-    TypeSpecContext *typeSpec();
-    std::vector<antlr4::tree::TerminalNode *> IDENT();
-    antlr4::tree::TerminalNode* IDENT(size_t i);
-    antlr4::tree::TerminalNode *ASSIGN();
-    antlr4::tree::TerminalNode *CONST_KW();
-    antlr4::tree::TerminalNode *NUMBER();
-    antlr4::tree::TerminalNode *MINUS();
-
-    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
-  };
-
-  class  LocalArrayDeclContext : public SimpleStmtContext {
-  public:
-    LocalArrayDeclContext(SimpleStmtContext *ctx);
-
-    antlr4::Token *reg = nullptr;
-    antlr4::Token *cst = nullptr;
-    antlr4::Token *size = nullptr;
-    TypeSpecContext *typeSpec();
-    antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    antlr4::tree::TerminalNode *NUMBER();
-    antlr4::tree::TerminalNode *ASSIGN();
-    ArrayInitContext *arrayInit();
+    std::vector<LocalDeclaratorContext *> localDeclarator();
+    LocalDeclaratorContext* localDeclarator(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> COMMA();
+    antlr4::tree::TerminalNode* COMMA(size_t i);
     antlr4::tree::TerminalNode *REGISTER_KW();
     antlr4::tree::TerminalNode *CONST_KW();
 
@@ -869,6 +885,93 @@ public:
   };
 
   SimpleStmtContext* simpleStmt();
+
+  class  LocalDeclaratorContext : public antlr4::ParserRuleContext {
+  public:
+    LocalDeclaratorContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+   
+    LocalDeclaratorContext() = default;
+    void copyFrom(LocalDeclaratorContext *context);
+    using antlr4::ParserRuleContext::copyFrom;
+
+    virtual size_t getRuleIndex() const override;
+
+   
+  };
+
+  class  LocalArrayDeclaratorContext : public LocalDeclaratorContext {
+  public:
+    LocalArrayDeclaratorContext(LocalDeclaratorContext *ctx);
+
+    antlr4::Token *size = nullptr;
+    antlr4::tree::TerminalNode *IDENT();
+    antlr4::tree::TerminalNode *LBRACK();
+    antlr4::tree::TerminalNode *RBRACK();
+    antlr4::tree::TerminalNode *NUMBER();
+    antlr4::tree::TerminalNode *ASSIGN();
+    ArrayInitContext *arrayInit();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  LocalScalarDeclaratorContext : public LocalDeclaratorContext {
+  public:
+    LocalScalarDeclaratorContext(LocalDeclaratorContext *ctx);
+
+    antlr4::tree::TerminalNode *IDENT();
+    antlr4::tree::TerminalNode *ASSIGN();
+    ExprContext *expr();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  LocalDeclaratorContext* localDeclarator();
+
+  class  StaticLocalDeclaratorContext : public antlr4::ParserRuleContext {
+  public:
+    StaticLocalDeclaratorContext(antlr4::ParserRuleContext *parent, size_t invokingState);
+   
+    StaticLocalDeclaratorContext() = default;
+    void copyFrom(StaticLocalDeclaratorContext *context);
+    using antlr4::ParserRuleContext::copyFrom;
+
+    virtual size_t getRuleIndex() const override;
+
+   
+  };
+
+  class  StaticLocalArrayDeclaratorContext : public StaticLocalDeclaratorContext {
+  public:
+    StaticLocalArrayDeclaratorContext(StaticLocalDeclaratorContext *ctx);
+
+    antlr4::Token *size = nullptr;
+    antlr4::tree::TerminalNode *IDENT();
+    antlr4::tree::TerminalNode *LBRACK();
+    antlr4::tree::TerminalNode *RBRACK();
+    antlr4::tree::TerminalNode *NUMBER();
+    antlr4::tree::TerminalNode *ASSIGN();
+    ArrayInitContext *arrayInit();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  class  StaticLocalScalarDeclaratorContext : public StaticLocalDeclaratorContext {
+  public:
+    StaticLocalScalarDeclaratorContext(StaticLocalDeclaratorContext *ctx);
+
+    antlr4::Token *sign = nullptr;
+    antlr4::Token *val = nullptr;
+    antlr4::Token *identVal = nullptr;
+    std::vector<antlr4::tree::TerminalNode *> IDENT();
+    antlr4::tree::TerminalNode* IDENT(size_t i);
+    antlr4::tree::TerminalNode *ASSIGN();
+    antlr4::tree::TerminalNode *NUMBER();
+    antlr4::tree::TerminalNode *MINUS();
+
+    virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
+  };
+
+  StaticLocalDeclaratorContext* staticLocalDeclarator();
 
   class  SwitchCaseContext : public antlr4::ParserRuleContext {
   public:

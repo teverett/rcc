@@ -438,9 +438,10 @@ class Assembler {
             return;
         }
 
-        if (mnemonic == "movwf" || mnemonic == "clrf") {
+        if (mnemonic == "movwf" || mnemonic == "clrf" || mnemonic == "mulwf") {
             uint8_t f = fileAddr(operandAt(ops, 0, mnemonic, 1), mnemonic);
-            emitWord(static_cast<uint16_t>((mnemonic == "movwf" ? 0x6E00 : 0x6A00) | f));
+            uint16_t base = mnemonic == "movwf" ? 0x6E00 : mnemonic == "clrf" ? 0x6A00 : 0x0200;
+            emitWord(static_cast<uint16_t>(base | f));
             return;
         }
 

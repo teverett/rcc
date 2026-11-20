@@ -87,9 +87,21 @@ namespace rcc {
 // fixed PRG-ROM window at $8000, not $0600) and its own distinct machine
 // ID, kept for the same `--link` cross-target safety reason as
 // atari2600's, even without a real memory-map hazard to protect against.
+//
+// `Atari5200` (for `--target=5200`) also relocates, but for a different reason than
+// atari2600's: the 5200 has plenty of real RAM ($0000-$3FFF), but its BIOS has already set
+// NMIEN ($D40E) to enable VBLANK/DLI NMIs *before* jumping to the cartridge's own entry point
+// (CARTENTRY, see src/fileformat/a5200/Atari5200RomFormat.h), and that NMI unconditionally
+// dispatches through a 12-byte RAM vector table the BIOS itself owns at $0200-$020B (plus
+// further keyboard/serial/timer IRQ vectors through $021A) - ordinary 6502 zero page ($0000)
+// and this codegen's usual frame-storage base ($0200) would each stomp on BIOS-owned state
+// the console depends on every single frame, crashing or hanging on the very next VBLANK even
+// though the C program itself never touches those cells. `zeroPageBase()` skips past the
+// BIOS's own zero-page use ($0000-$001F) and `frameStackBase()` skips past the whole $0200-
+// $021B vector table.
 class M6502Codegen : public Backend {
    public:
-    enum class Variant { Plain, Atari2600, Nes2A03 };
+    enum class Variant { Plain, Atari2600, Nes2A03, Atari5200 };
 
     explicit M6502Codegen(Variant variant = Variant::Plain) : variant_(variant) {}
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
@@ -97,6 +109,7 @@ class M6502Codegen : public Backend {
         switch (variant_) {
             case Variant::Atari2600: return "atari2600";
             case Variant::Nes2A03: return "2a03";
+            case Variant::Atari5200: return "5200";
             default: return "6502";
         }
     }
@@ -104,6 +117,7 @@ class M6502Codegen : public Backend {
         switch (variant_) {
             case Variant::Atari2600: return "MOS 6502 (Atari 2600)";
             case Variant::Nes2A03: return "Ricoh 2A03 (NES)";
+            case Variant::Atari5200: return "MOS 6502 (Atari 5200)";
             default: return "MOS 6502";
         }
     }
@@ -120,28 +134,45 @@ class M6502Codegen : public Backend {
                                                   const std::string &format) const override;
 
    private:
-    // $0080 (clear of TIA's $0000-$003F mirror) for atari2600, $0000 (the
-    // ordinary convention, also used by 2a03 - see this class's own header
-    // comment) otherwise. The eight 2-byte pseudo-registers
-    // (ptr/ac/bc/cx/dx/fp/sp/aBase) plus the four 8-byte wide-value
-    // buffers (wac/wbc/wtmp/wtmp2 - see this class's own header comment)
-    // occupy [zeroPageBase(), zeroPageBase()+48).
-    uint32_t zeroPageBase() const { return variant_ == Variant::Atari2600 ? 0x0080 : 0x0000; }
+    // $0080 (clear of TIA's $0000-$003F mirror) for atari2600, $0020 (clear of the 5200 BIOS's
+    // own zero-page use, $0000-$001F) for Atari5200, $0000 (the ordinary convention, also used
+    // by 2a03 - see this class's own header comment) otherwise. The eight 2-byte
+    // pseudo-registers (ptr/ac/bc/cx/dx/fp/sp/aBase) plus the four 8-byte wide-value buffers
+    // (wac/wbc/wtmp/wtmp2 - see this class's own header comment) occupy
+    // [zeroPageBase(), zeroPageBase()+48).
+    uint32_t zeroPageBase() const {
+        switch (variant_) {
+            case Variant::Atari2600: return 0x0080;
+            case Variant::Atari5200: return 0x0020;
+            default: return 0x0000;
+        }
+    }
     // Frame-storage bump-allocator region: right after the 48 bytes of
     // pseudo-registers/wide buffers on atari2600 ($00B0, leaving
     // $00B0-$00FF - 80 bytes - for every program's locals/params, shared
     // with the real hardware stack per this class's own header comment),
-    // $0200 otherwise (including 2a03).
-    uint32_t frameStackBase() const { return variant_ == Variant::Atari2600 ? 0x00B0 : 0x0200; }
+    // $0300 for Atari5200 (clear of the BIOS's own $0200-$021B interrupt
+    // vector table - see this class's own header comment), $0200
+    // otherwise (including 2a03).
+    uint32_t frameStackBase() const {
+        switch (variant_) {
+            case Variant::Atari2600: return 0x00B0;
+            case Variant::Atari5200: return 0x0300;
+            default: return 0x0200;
+        }
+    }
     // Whole-program (`--format=raw`, non-object) load address: the
     // conventional 4K-cartridge base $F000 (see M6502LinkerFactory.cpp's
     // own `kAtari2600BaseAddress` comment) for atari2600, NROM's fixed
     // PRG-ROM window $8000 for 2a03 (see M6502LinkerFactory.cpp's own
-    // `kNes2A03BaseAddress` comment), $0600 otherwise.
+    // `kNes2A03BaseAddress` comment), the 16K-cartridge base $8000 for
+    // Atari5200 (see src/fileformat/a5200/Atari5200RomFormat.h), $0600
+    // otherwise.
     uint32_t baseAddress() const {
         switch (variant_) {
             case Variant::Atari2600: return 0xF000;
             case Variant::Nes2A03: return 0x8000;
+            case Variant::Atari5200: return 0x8000;
             default: return 0x0600;
         }
     }
