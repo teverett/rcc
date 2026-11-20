@@ -4,6 +4,14 @@ on:
   push:
   pull_request:
 
+# A new push/PR update on the same branch cancels whatever's still
+# running from an earlier one, so CI doesn't queue up redundant builds
+# of commits nobody cares about anymore. Scoped per-workflow-per-ref:
+# different branches/PRs still run fully in parallel.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   # Keep in lockstep with whatever ANTLR version generated
   # src/generated/ (see scripts/generate-grammars.sh) - the C++

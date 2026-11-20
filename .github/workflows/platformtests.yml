@@ -10,6 +10,15 @@ on:
     workflows: ["CI"]
     types: [completed]
 
+# Same reasoning as ci.yml's own concurrency block: a newer CI run on
+# the same branch cancels whatever platform-tests run an older one on
+# that branch already kicked off. Keyed off head_branch, not github.ref
+# (meaningless on a workflow_run trigger), since that's the branch the
+# triggering CI run actually built.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   contents: read
