@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for the 'register' storage-class keyword (grammar/CParser.g4's
+# Unit tests for the 'register' storage-class keyword (grammar/c/CParser.g4's
 # 'reg' token on param/simpleStmt's non-'static' alternatives,
 # src/ast/BuildAst.cpp's Param::isRegister/Stmt::isRegister) - see
 # docs/language.md's "Register declarations" section for exactly what this

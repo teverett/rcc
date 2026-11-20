@@ -34,7 +34,7 @@ constexpr uint16_t kPowerPCRelocAbs32 = 4;
 
 // Two-pass, in-process assembler for this project's own narrow PowerPC
 // dialect (not a general-purpose PowerPC assembler), parsed via the shared
-// grammar/RccAsm.g4. Every operand is a bare register, number, or label -
+// grammar/rccasm/RccAsm.g4. Every operand is a bare register, number, or label -
 // there is no `0(r4)`/`%hi()`/`%lo()` syntax; an addressing mode that needs
 // one instead gets its own dedicated mnemonic (`ldind`/`stind`, fixed zero
 // displacement), and `lis`/`ori` resolve a label operand to its address's

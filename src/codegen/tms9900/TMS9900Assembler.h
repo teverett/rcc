@@ -28,10 +28,10 @@ constexpr uint16_t kTMS9900RelocAbs16 = 1;
 
 // Two-pass, in-process assembler for the dialect TMS9900Codegen.cpp emits (not a general-
 // purpose TMS9900 assembler, though the opcode table itself is complete - see this file's own
-// header comment on grammar/RccAsm.g4's own shared syntax for why addressing modes are spelled
+// header comment on grammar/rccasm/RccAsm.g4's own shared syntax for why addressing modes are spelled
 // the way they are here).
 //
-// grammar/RccAsm.g4 has no `*Rn`/`@label`/`@label(Rn)`/postfix-`+` syntax (the real TMS9900
+// grammar/rccasm/RccAsm.g4 has no `*Rn`/`@label`/`@label(Rn)`/postfix-`+` syntax (the real TMS9900
 // assembly notation for register-indirect/symbolic/indexed/autoincrement addressing) - rather
 // than extend that shared grammar (used by every other backend's own assembler too) just for
 // this one target, every addressing mode here is instead spelled using the grammar's existing

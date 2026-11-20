@@ -564,7 +564,7 @@ above.
 
 Affects `src/codegen/stm32/STM32Codegen.cpp` and `src/codegen/i386/I386Codegen.cpp`,
 discovered running `make test` after merging in the comma-separated-declarator-list feature
-(`grammar/CParser.g4`/`src/ast/BuildAst.cpp`/`src/ir/IRBuilder.cpp` - see these two tests' own
+(`grammar/c/CParser.g4`/`src/ast/BuildAst.cpp`/`src/ir/IRBuilder.cpp` - see these two tests' own
 header comments). Every other target exercised (`6502`-family, `pdp1`/`pdp7`, `68000`,
 `mc68328`, `8080`, `z80`, `8051`) passes both tests cleanly; only these two fail, and not with a
 crash - `multidecl_array.c` returns 340 instead of 339 on `stm32` (one of the uninitialized
@@ -602,39 +602,6 @@ extension (real `TAX`/`TAY`/`STX`/`STY` support, well past the narrow,
 purpose-built mnemonics every 6502 runtime library here has added so
 far) or some other way to get an X/Y-held result into a byte this
 dialect's `sta` can actually read.
-
-## `tests/pointer_through_int_dispatch.c` fails on every narrow-`int` target tried so far (every 6502-family target, `pdp1`/`pdp7`, `8051`, `8080`, `z80`), missing from `is_known_unsupported()`
-
-Affects `tests/run_tests.sh`'s `is_known_unsupported()` and the shared
-`tests/pointer_through_int_dispatch.c` itself, discovered while running
-`tests/run_tests.sh --target=6502` for the BBC Micro port (unrelated to
-that port's own changes - every narrow-`int` backend already had this
-gap; `pdp1`/`pdp7`/`8051`/`8080`/`z80` hit the identical root cause,
-confirmed by `make test`'s own per-target runs, also unrelated to this
-session's own changes).
-
-The test's own comment says `p = p + 8` is meant to move a plain
-`int`-as-address two elements along `arr` ("`arr[2]` sits 2*4 bytes on"),
-assuming a 4-byte `int`. Every 6502-family target's own native `int` is 2
-bytes (`M6502Codegen.h`'s `isWide()`/`widthOfType()`: "wide" means wider
-than the native 2-byte word), same as `8051`/`8080`/`z80`'s own native
-`int`; `pdp1`/`pdp7`'s own native `int` is a single 18-bit word
-(`Pdp1Codegen.h`/`Pdp7Codegen.h`'s `typeWidths()`: `intUnits = 1`). On
-any of these, the same literal `8` instead moves four elements along -
-past the end of `arr[3]` - and `*p += 100` then corrupts memory just
-past the array instead of updating `arr[2]`, failing the test's own very
-next check. Confirmed directly: isolating just this file's own two
-halves shows the dispatch-table call half passes on its own while the
-pointer-arithmetic half (reduced to `p = p + 8; if (*p != 3) return
-10;`) returns `10`, confirming the byte offset, not the dispatch-table
-call, is the mismatch.
-
-Not yet fixed - needs either this test's own offset made width-aware
-(e.g. `p + 2 * sizeof(int)` instead of the hardcoded `8`, if this
-subset's `sizeof` can appear in that position) or a documented
-per-target expected offset; added to `is_known_unsupported()` for every
-narrow-`int` target confirmed to hit it so far in the meantime rather than
-left as an unexplained failure.
 
 ## `src/generated/CParser.cpp`'s `condExprSempred()` triggers `-Wunused-parameter`
 
@@ -687,7 +654,7 @@ technical manual/disassembly) is actually readable.
 
 ## The C grammar rejects an assignment target wrapped in redundant parens
 
-Affects the C grammar/parser (`grammar/CParser.g4`/`src/generated/CParser.cpp`), discovered
+Affects the C grammar/parser (`grammar/c/CParser.g4`/`src/generated/CParser.cpp`), discovered
 while writing `src/rt/atari5200/atari5200.c`. An assignment whose left-hand side is a
 dereference wrapped in one redundant, otherwise no-op pair of parens -
 `(*(unsigned char *)addr) = value;` - fails with "syntax errors, not compiling";
@@ -704,3 +671,48 @@ with the "is this actually an assignable shape" check (unwrapping any redundant 
 requiring a deref/index/member/plain-ident) moved into `BuildAst.cpp`, replacing the current
 shape-specific alternatives - not yet done; worked around in `atari5200.c`'s own
 hardware-register macros by never emitting the parenthesized shape.
+
+## The 6502 backend corrupts a call made right after a `goto`-skipped local reads a global array
+
+Discovered while building the BASIC frontend's Apple ][ example/runtime
+(`examples/basic-6502-dos33/`, `src/rt/apple2/basic_apple2.c`): `GOSUB`/`RETURN`'s original
+dispatch lowering used a `switch` statement (desugared by `IRBuilder` into a hidden local holding
+the switched-on value), and the runtime call immediately following the `switch`'s own matching
+`goto` received a corrupted pointer argument on `--target=6502` - e.g. a string literal address
+passed to a print call came out pointing at unrelated memory, producing garbage text instead of
+the right string. An `int` argument to a call in the same position looked fine, which is what
+made this easy to miss at first (the bug is argument-content corruption at one specific call
+site, not a structural control-flow bug - the `goto`s and comparisons themselves all land and
+evaluate correctly).
+
+Root cause is still open. What's been ruled out by direct reproduction (`--target=6502`,
+`--format=raw`, via a two-global `int stack[N]; int sp;` test with no BASIC involved):
+- Needs **all** of: a local variable, assigned from a global-array read with a variable index
+  (`tmp = stack[sp];`, not a literal index or a literal value), inside a block only reached via a
+  forward `goto` that skips over other code first - removing any one of those three (the local
+  itself, the array read, or the `goto`-skip) makes the bug disappear.
+- Needs **separate compilation**: the exact same source, `#include`-combined into one file and
+  compiled directly to `--format=raw` (no object files, no `--link`), runs correctly every time.
+  Only compiling it as its own `--format=coff` object and linking it against another
+  separately-compiled object (e.g. `apple2.lib`) reproduces it - independent of `--base`/link
+  address, so it isn't a base-address-dependent relocation bug in the obvious sense.
+- Not a control-flow bug: `--dump-ir`/tracing confirms every `goto` lands on the right label and
+  every `if` evaluates the right comparison. Not simply "any local after a `goto`": a local
+  initialized from a literal (`tmp = 1;`) in the exact same `goto`-skipped position works fine.
+  Not a general multi-call sequencing bug: an arbitrary sequence of plain calls with no local
+  variables and no `goto` at all (`print_str(...); print_int(...); print_str(...); ...`) works
+  fine, including many calls in a row.
+- Inspected and ruled out as the direct cause: `src/ir/IRBuilder.cpp`'s `assignFrameOffsets`
+  (frame-slot assignment walks the actual built tree correctly, including through this exact
+  shape); `M6502Codegen.cpp`'s `genFunction`/`genEpilogue` (the software frame pointer/stack
+  bump-allocator convention is self-consistent and call-balanced by inspection); 6502 label
+  numbering (`newLabel()`/`irLabel()` share one counter, but resolve per-object in
+  `M6502Assembler.cpp`, so can't collide across separately-linked objects); `GenericLinker.cpp`'s
+  `".."` base-shift relocation (takes a trivial, address-independent path for a single-function
+  object, which is what the repro uses).
+
+Not fixed. Worked around in `BasicFrontend.cpp`: `GOSUB`/`RETURN`'s dispatch no longer uses
+`switch` (which needed the hidden local) or any other local of its own, so it doesn't hit this -
+see that file's `appendGosubDispatch` for the `if`/`goto` chain used instead. Revisit with a
+from-scratch 6502-only minimal repro (no runtime library, hand-written globals) and a
+relocation-table dump of the linked object if this needs root-causing for real.

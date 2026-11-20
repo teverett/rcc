@@ -55,7 +55,7 @@ const std::unordered_map<std::string, OpShape> &opShapes() {
     return table;
 }
 
-// --- Parsing, via the shared grammar/RccAsm.g4 ---------------------------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 ---------------------------
 
 enum class SylKind { Number, Symbol };
 struct Syllable {

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Unit tests for the 'const' qualifier (grammar/CParser.g4's 'cst' token on
+# Unit tests for the 'const' qualifier (grammar/c/CParser.g4's 'cst' token on
 # param/globalDecl/simpleStmt, src/ast/BuildAst.cpp's Param::isConst/
 # GlobalVar::isConst/Stmt::isConst, src/ir/IRBuilder.cpp's rejectConstWrite())
 # - see docs/language.md's "Const declarations" section for exactly what

@@ -8,7 +8,7 @@ namespace rcc {
 
 namespace {
 
-// A round-trippable decimal spelling that grammar/RccIRLexer.g4's own
+// A round-trippable decimal spelling that grammar/rccir/RccIRLexer.g4's own
 // FLOAT_NUMBER rule always accepts - fixed-point (%f), never scientific
 // notation, since that rule requires a literal '.' and doesn't accept a
 // dot-less exponent form. No "inf"/"nan" either (this printer only exists
@@ -26,7 +26,7 @@ std::string slotRef(const ir::Slot *s) { return s->sourceName + "#" + std::to_st
 std::string funcRef(const ir::Function *f) { return f->sourceName + "#" + std::to_string(f->id); }
 
 // One fixed spelling per (base, signedness) pair, matching exactly what
-// grammar/RccIRParser.g4's typeSpec accepts.
+// grammar/rccir/RccIRParser.g4's typeSpec accepts.
 std::string typeSpecText(Type t) {
     std::string prefix = t.isUnsigned ? "unsigned " : "";
     std::string base;

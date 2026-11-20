@@ -18,7 +18,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("MCS51Assembler: " + msg); }
 
-// --- Parsing, via the shared grammar/RccAsm.g4; nothing here is specific to the 8051.
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4; nothing here is specific to the 8051.
 
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {

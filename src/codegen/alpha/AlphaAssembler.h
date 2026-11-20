@@ -33,7 +33,7 @@ constexpr uint16_t kAlphaRelocLow = 2;
 constexpr uint16_t kAlphaRelocAbs32 = 3;
 
 // In-process two-pass assembler for the narrow Alpha AXP dialect AlphaCodegen.cpp emits, not a
-// general-purpose Alpha assembler. Parses via the shared grammar/RccAsm.g4. Every encoding here
+// general-purpose Alpha assembler. Parses via the shared grammar/rccasm/RccAsm.g4. Every encoding here
 // is a real, standard Alpha AXP instruction word (little-endian, fixed 4 bytes, no branch-delay
 // slot), bit-for-bit - this dialect only narrows which mnemonics/operand shapes exist:
 //

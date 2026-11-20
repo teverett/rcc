@@ -18,7 +18,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("M16cAssembler: " + msg); }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 // Same Syllable/Group shape as the other backends' assemblers (see
 // M68kAssembler.cpp).
 enum class SylKind { Number, Symbol, Group };

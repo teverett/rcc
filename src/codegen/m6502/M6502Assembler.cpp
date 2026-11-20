@@ -19,7 +19,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("M6502Assembler: " + msg); }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 // A Syllable is a signed sum term: a number, a symbol, or a parenthesized
 // group. No register syntax exists in this dialect.
 

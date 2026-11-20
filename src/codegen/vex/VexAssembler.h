@@ -26,7 +26,7 @@ constexpr uint32_t kVexBaseAddress = 0x0100;
 constexpr uint16_t kVexRelocAbs32 = 1;
 
 // A two-pass, in-process assembler for the dialect VexCodegen.cpp emits, parsed via the shared
-// grammar/RccAsm.g4 (see M6809Assembler.h's own comment for the shared design this follows).
+// grammar/rccasm/RccAsm.g4 (see M6809Assembler.h's own comment for the shared design this follows).
 //
 // Vex v1.3 is an 8-register (R0-R7), 32-bit register machine - no dedicated data stack, no
 // relative-addressing flag, no stack-relative access at all (see docs/SPEC.md). `PSH`/`POP`

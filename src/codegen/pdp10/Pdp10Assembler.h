@@ -25,7 +25,7 @@ constexpr uint16_t kPdp10RelocAbs18 = 1;
 
 // A from-scratch, in-process two-pass assembler for exactly the narrow PDP-10 dialect
 // Pdp10Codegen.cpp emits - not a general-purpose MACRO-10 assembler. Parses via the shared
-// grammar/RccAsm.g4 grammar.
+// grammar/rccasm/RccAsm.g4 grammar.
 //
 // Every instruction here has the same uniform shape "mnemonic ac,E": a 4-bit accumulator
 // field (`ac`, always a bare literal 0-17 - this dialect never needs a symbolic register name,

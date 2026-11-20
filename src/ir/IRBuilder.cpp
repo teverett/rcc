@@ -282,7 +282,7 @@ class Builder {
     // never recomputes a layout itself. Struct definitions must be
     // textually self-contained (a member naming another struct tag
     // requires that tag already registered), matching this subset's
-    // define-before-use rule elsewhere (see grammar/CParser.g4's own
+    // define-before-use rule elsewhere (see grammar/c/CParser.g4's own
     // structDecl comment).
     void registerStructs(const Program &prog) {
         for (const auto &sd : prog.structs) {

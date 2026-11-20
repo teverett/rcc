@@ -1,6 +1,6 @@
 // EXPECT: 5
 //
-// A string literal ("..." - see grammar/CLexer.g4's own STRINGLIT)
+// A string literal ("..." - see grammar/c/CLexer.g4's own STRINGLIT)
 // lowers to the address of a synthetic, anonymous global `char`
 // array holding its decoded bytes plus a trailing NUL (see
 // IRBuilder.cpp's own buildExpr case) - exactly what `&someCharArray`

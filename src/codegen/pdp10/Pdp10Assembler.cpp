@@ -21,7 +21,7 @@ namespace {
 constexpr uint64_t kMask18 = 0777777;
 constexpr uint64_t kMask36 = 0777777777777ULL;
 
-// --- Parsing, via the shared grammar/RccAsm.g4 ---------------------------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 ---------------------------
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {
     char sign = 0;

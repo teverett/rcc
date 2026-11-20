@@ -69,7 +69,7 @@ instruction set leaves gaps that surface later as unexplained assembler errors.
 - Add `src/fileformat/FileFormat.cpp`'s machine-number entry if the new CPU needs one.
 - Add the new `.cpp` files to the root `Makefile`: `BACKEND_DIRS`, the source lists, and the factory
   list.
-- If the assembler is parsed through the ANTLR grammar (`grammar/RccAsm.g4`), extend the grammar and
+- If the assembler is parsed through the ANTLR grammar (`grammar/rccasm/RccAsm.g4`), extend the grammar and
   regenerate. Build the assembler test the way `m6809_assembler_test` is built.
 
 ### Tests for the processor

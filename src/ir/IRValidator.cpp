@@ -50,8 +50,8 @@ void validateIRSyntax(const ir::Program &prog) {
 
     if (errors.count > 0) {
         throw std::runtime_error(
-            "internal error: rcc's own generated IR does not parse against grammar/RccIRLexer.g4 + "
-            "grammar/RccIRParser.g4 (" +
+            "internal error: rcc's own generated IR does not parse against grammar/rccir/RccIRLexer.g4 + "
+            "grammar/rccir/RccIRParser.g4 (" +
             errors.firstMessage + ") - this is a rcc bug (IRPrinter.cpp and the IR grammar have drifted apart), "
                                    "not a problem with your source file");
     }

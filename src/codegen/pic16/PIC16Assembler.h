@@ -68,7 +68,7 @@ constexpr uint16_t kPIC16RelocCodeHi = 4;
 // conditional assembly). Produces real PIC16 machine code (each 14-bit
 // word packed into a 16-bit little-endian cell) wrapped in Intel HEX.
 //
-// Parses via the shared grammar ../../../grammar/RccAsm.g4. Two private
+// Parses via the shared grammar ../../../grammar/rccasm/RccAsm.g4. Two private
 // directives exist only for this dialect: `orgram <addr>` sets the
 // data-space cursor (the data-space equivalent of `org`, which is the
 // code-space word address here); `res <count>` reserves `count` bytes at

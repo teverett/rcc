@@ -26,7 +26,7 @@ constexpr uint16_t kArmRelocMovTHi = 3;
 
 // An in-process two-pass assembler for the narrow ARMv7-A "A32" dialect
 // ArmCodegen.cpp emits, not a general-purpose ARM assembler. Parses via
-// the shared grammar ../../../grammar/RccAsm.g4. Every operand is a plain
+// the shared grammar ../../../grammar/rccasm/RccAsm.g4. Every operand is a plain
 // expression (a number, register name, or label), not real ARM UAL
 // syntax: no `#` immediate prefix, no `[Rn, #imm]` memory operand, no
 // shifted-register operand2 syntax. Addressing modes the grammar can't

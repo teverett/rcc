@@ -18,7 +18,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("MC68328Assembler: " + msg); }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {
     char sign = 0;

@@ -7,10 +7,20 @@
 # the same as any other .o - see docs/using.md's "Link mode".
 RCC      ?= ../../../build/bin/rcc
 TARGET   := apple2.lib
+BASIC_TARGET := basic_apple2.lib
+
+all: $(TARGET) $(BASIC_TARGET)
 
 $(TARGET): apple2.c apple2.h
 	$(RCC) --target=6502 --format=coff --out=$(TARGET) apple2.c
 
-.PHONY: clean
+# The BASIC frontend's own runtime calls (see basic_apple2.h) - built on
+# top of apple2.c's a2_cout()/a2_puts()/a2_crout(), but compiled and
+# linked as its own object so a BASIC program only has to link it
+# alongside apple2.lib; nothing else here needs it.
+$(BASIC_TARGET): basic_apple2.c basic_apple2.h apple2.h
+	$(RCC) --target=6502 --format=coff --out=$(BASIC_TARGET) basic_apple2.c
+
+.PHONY: all clean
 clean:
-	rm -f $(TARGET)
+	rm -f $(TARGET) $(BASIC_TARGET)

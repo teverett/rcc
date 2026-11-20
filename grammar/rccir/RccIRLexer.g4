@@ -25,7 +25,7 @@ lexer grammar RccIRLexer;
 // comment line would be, so ANTLR's own maximal-munch rule always
 // prefers these over treating the line as a comment, with no need for
 // a general `;`-starts-a-comment rule here at all (unlike
-// grammar/RccAsm.g4 - this format uses `;` only as a statement
+// grammar/rccasm/RccAsm.g4 - this format uses `;` only as a statement
 // terminator, never for comments).
 GLOBALS_HEADER   : '; --- globals ---' ;
 FUNCTIONS_HEADER : '; --- functions ---' ;
@@ -119,7 +119,7 @@ NUMBER : '-'? [0-9]+ ;
 // why NaN/Infinity are never actually emitted here).
 FLOAT_NUMBER : '-'? [0-9]+ '.' [0-9]+ ([eE] [+-]? [0-9]+)? ;
 
-// No general `;`-starts-a-comment rule (unlike grammar/RccAsm.g4) -
+// No general `;`-starts-a-comment rule (unlike grammar/rccasm/RccAsm.g4) -
 // IRPrinter.cpp never writes a trailing comment after real content,
 // only the two fixed whole-line headers above, so every other `;` in
 // the input is a real SEMI.

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit tests for float/double language support (src/Type.h's Float/Double
-# BaseType, grammar/CLexer.g4's FLOAT_NUMBER, IRBuilder.cpp's
+# BaseType, grammar/c/CLexer.g4's FLOAT_NUMBER, IRBuilder.cpp's
 # resolveStructType()) - specifically the "backend doesn't support it"
 # path every target not yet migrated to Backend::floatSupport() != None
 # takes (see docs/platforms.md and the per-target TypeWidths::floatUnits/

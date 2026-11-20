@@ -27,7 +27,7 @@ constexpr uint16_t kZ8000RelocAbs16BE = 1;
 // emits (not a general-purpose Z8000 assembler, though the opcode table itself - cross-checked
 // against MAME's own z8000 CPU core decode tables - covers the real Z8000's full register-to-
 // register/register-to-immediate/indexed/direct-address instruction set, not just the forms the
-// codegen happens to use). Parses via the shared grammar/RccAsm.g4 grammar.
+// codegen happens to use). Parses via the shared grammar/rccasm/RccAsm.g4 grammar.
 //
 // Addressing modes, spelled using that shared grammar's existing syntax (see
 // Pdp11Assembler.h's own header comment for the general approach this follows):

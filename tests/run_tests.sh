@@ -3127,6 +3127,9 @@ is_known_unsupported() {
         pdp1:literal_promotes_to_long.c) return 0 ;;
         pdp1:longlong_add_carry_chain.c) return 0 ;;
         pdp1:longlong_sub_borrow_chain.c) return 0 ;;
+        pdp1:pointer_through_int_dispatch.c) return 0 ;; # sizeof(int) is 'unsigned long'; same gap
+        pdp1:pointer_through_int_sizeof_single_step.c) return 0 ;; # same
+        pdp1:pointer_through_int_sizeof_through_call.c) return 0 ;; # same
         pdp1:test_long_arith.c) return 0 ;;
         pdp1:test_unsigned_long_arith.c) return 0 ;;
         pdp1:types_longlong_arith.c) return 0 ;;
@@ -3178,20 +3181,6 @@ is_known_unsupported() {
         # offsets sized for this backend instead.
         6502:place.c) return 0 ;;
         65c02:place.c) return 0 ;;
-        # This file's own "p = p + 8" hardcodes 2*sizeof(int) assuming a 4-byte int (so the
-        # offset lands on arr[2]); every 6502-family target's own native int is 2 bytes
-        # (M6502Codegen.h's own isWide()/widthOfType()), so the same literal 8 instead lands 4
-        # elements past arr[0] - out of bounds, not arr[2] - and the rest of the test fails from
-        # there. See docs/known-bugs.md's own entry for this file.
-        6502:pointer_through_int_dispatch.c) return 0 ;;
-        65c02:pointer_through_int_dispatch.c) return 0 ;;
-        atari2600:pointer_through_int_dispatch.c) return 0 ;;
-        2a03:pointer_through_int_dispatch.c) return 0 ;;
-        pdp1:pointer_through_int_dispatch.c) return 0 ;;
-        pdp7:pointer_through_int_dispatch.c) return 0 ;;
-        8051:pointer_through_int_dispatch.c) return 0 ;;
-        8080:pointer_through_int_dispatch.c) return 0 ;;
-        z80:pointer_through_int_dispatch.c) return 0 ;;
         8086:types_longlong_divmod.c) return 0 ;;          # routine doesn't fit the 512-byte boot sector
         8088:types_longlong_divmod.c) return 0 ;;
         8086:types_longlong_divmod_repeated.c) return 0 ;; # same - doesn't fit the 512-byte boot sector
@@ -3237,6 +3226,9 @@ is_known_unsupported() {
         8051:hex_literal.c) return 0 ;;                     # same - uses an 'unsigned long' local
         8051:types_arrays.c) return 0 ;;                   # wide (long/long long) values unsupported at all
         8051:struct_alignment_size.c) return 0 ;;          # same - sizeof() always yields a 'long'-typed literal
+        8051:pointer_through_int_dispatch.c) return 0 ;;   # same - sizeof(int) is 'unsigned long'
+        8051:pointer_through_int_sizeof_single_step.c) return 0 ;;   # same
+        8051:pointer_through_int_sizeof_through_call.c) return 0 ;;  # same
         8051:struct_packed_array.c) return 0 ;;
         8051:struct_packed_basic.c) return 0 ;;
         8051:unsigned_literal_above_long_max.c) return 0 ;;

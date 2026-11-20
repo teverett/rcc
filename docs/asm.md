@@ -1,7 +1,7 @@
 # The assembly format
 
 rcc's backends share one textual assembly grammar,
-`grammar/RccAsm.g4` — not a general-purpose assembly syntax, but
+`grammar/rccasm/RccAsm.g4` — not a general-purpose assembly syntax, but
 exactly the shape every rcc backend's own in-process assembler ever
 needs to parse: no macros, no section directives, nothing beyond what
 rcc's own codegen is ever observed to emit. Each backend emits its own
@@ -90,7 +90,7 @@ target rather than inventing a third convention.
 
 ## Where it's used
 
-- `grammar/RccAsm.g4` is the single source grammar (lexer + parser
+- `grammar/rccasm/RccAsm.g4` is the single source grammar (lexer + parser
   combined); generated code lives in `src/generated/` and is checked
   into git (see `docs/building.md` for the regeneration workflow).
 - Every backend's own `src/codegen/<target>/<Target>Assembler.cpp`

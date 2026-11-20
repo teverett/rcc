@@ -58,7 +58,11 @@ GENERATED_SRCS := \
     $(GEN_DIR)/RccIRLexer.cpp \
     $(GEN_DIR)/RccIRParser.cpp \
     $(GEN_DIR)/RccIRParserBaseVisitor.cpp \
-    $(GEN_DIR)/RccIRParserVisitor.cpp
+    $(GEN_DIR)/RccIRParserVisitor.cpp \
+    $(GEN_DIR)/BasicLexer.cpp \
+    $(GEN_DIR)/BasicParser.cpp \
+    $(GEN_DIR)/BasicParserBaseVisitor.cpp \
+    $(GEN_DIR)/BasicParserVisitor.cpp
 
 SPACE :=
 SPACE +=
@@ -66,17 +70,23 @@ SPACE +=
 # Each backend lives in its own subdirectory under src/codegen/ -
 # see Codegen.h. Adding a new backend means adding its .cpp here and
 # to BACKEND_DIRS below (for vpath), plus wiring it into main.cpp's
-# makeBackend(). src/ast/, src/ir/, src/fileformat/ and
+# makeBackend(). src/ast/, src/frontend/, src/ir/, src/fileformat/ and
 # src/preprocessor/ hold code shared across backends (AST.h/
-# BuildAst.*; IR.h/IRBuilder.*/IRPrinter.*; FileFormat.h/the per-
+# BuildAst.* - the shared AST every language frontend builds;
+# Frontend.h - the Frontend interface (source file -> AST.h's Program) -
+# plus one subdirectory per language under src/frontend/ implementing it
+# (c/CFrontend.*, basic/BasicFrontend.*, ...; see FRONTEND_DIRS below);
+# IR.h/IRBuilder.*/IRPrinter.*; FileFormat.h/the per-
 # format Reader/Writer pairs under src/fileformat/<name>/ every
 # backend's own assembler and every TargetLinker share;
-# Preprocessor.* - the `#include`/`#define`/`#if` etc. pass that runs
-# on every source file before ANTLR ever sees it) - not backend-
+# Preprocessor.* - the `#include`/`#define`/`#if` etc. pass CFrontend
+# runs on every source file before ANTLR ever sees it) - not backend-
 # specific, but still their own subdirectories needing the same vpath
 # treatment.
 BACKEND_DIRS := $(SRC_DIR)/codegen/pdp1 $(SRC_DIR)/codegen/pdp7 $(SRC_DIR)/codegen/x86_8086 $(SRC_DIR)/codegen/m6502 $(SRC_DIR)/codegen/m65c02 $(SRC_DIR)/codegen/m68k $(SRC_DIR)/codegen/mc68328 $(SRC_DIR)/codegen/pdp11 $(SRC_DIR)/codegen/pdp10 $(SRC_DIR)/codegen/i8080 $(SRC_DIR)/codegen/pic16 $(SRC_DIR)/codegen/pic18 $(SRC_DIR)/codegen/z80 $(SRC_DIR)/codegen/i8008 $(SRC_DIR)/codegen/stm8 $(SRC_DIR)/codegen/m16c $(SRC_DIR)/codegen/m32c $(SRC_DIR)/codegen/r32c $(SRC_DIR)/codegen/mips $(SRC_DIR)/codegen/riscv32 $(SRC_DIR)/codegen/riscv64 $(SRC_DIR)/codegen/mcs51 $(SRC_DIR)/codegen/stm32 $(SRC_DIR)/codegen/i386 $(SRC_DIR)/codegen/armm $(SRC_DIR)/codegen/arm $(SRC_DIR)/codegen/arm64 $(SRC_DIR)/codegen/powerpc $(SRC_DIR)/codegen/sparc $(SRC_DIR)/codegen/vax $(SRC_DIR)/codegen/avr $(SRC_DIR)/codegen/alpha $(SRC_DIR)/codegen/saturn $(SRC_DIR)/codegen/tms320c6713 $(SRC_DIR)/codegen/m6809 $(SRC_DIR)/codegen/tms9900 $(SRC_DIR)/codegen/z8000 $(SRC_DIR)/codegen/cp1610 $(SRC_DIR)/codegen/parrotvm $(SRC_DIR)/codegen/vex $(SRC_DIR)/codegen/moarvm
 AST_DIR      := $(SRC_DIR)/ast
+FRONTEND_DIR := $(SRC_DIR)/frontend
+FRONTEND_DIRS := $(FRONTEND_DIR)/c $(FRONTEND_DIR)/basic
 IR_DIR       := $(SRC_DIR)/ir
 LINKER_DIR   := $(SRC_DIR)/linker
 FACTORY_DIR  := $(LINKER_DIR)/factory
@@ -182,6 +192,8 @@ HAND_SRCS := \
     $(FACTORY_DIR)/VexLinkerFactory.cpp \
     $(PREPROCESSOR_DIR)/Preprocessor.cpp \
     $(AST_DIR)/BuildAst.cpp \
+    $(FRONTEND_DIR)/c/CFrontend.cpp \
+    $(FRONTEND_DIR)/basic/BasicFrontend.cpp \
     $(IR_DIR)/IRBuilder.cpp \
     $(IR_DIR)/IRPrinter.cpp \
     $(IR_DIR)/IRValidator.cpp \
@@ -280,7 +292,7 @@ HAND_SRCS := \
 ALL_SRCS := $(GENERATED_SRCS) $(HAND_SRCS)
 OBJS     := $(patsubst %,$(OBJ_DIR)/%.o,$(notdir $(ALL_SRCS)))
 
-vpath %.cpp $(GEN_DIR):$(SRC_DIR):$(AST_DIR):$(IR_DIR):$(LINKER_DIR):$(FACTORY_DIR):$(PREPROCESSOR_DIR):$(subst $(SPACE),:,$(OPTIMIZERS_DIRS)):$(subst $(SPACE),:,$(BACKEND_DIRS)):$(subst $(SPACE),:,$(FILEFORMAT_DIRS))
+vpath %.cpp $(GEN_DIR):$(SRC_DIR):$(AST_DIR):$(subst $(SPACE),:,$(FRONTEND_DIRS)):$(IR_DIR):$(LINKER_DIR):$(FACTORY_DIR):$(PREPROCESSOR_DIR):$(subst $(SPACE),:,$(OPTIMIZERS_DIRS)):$(subst $(SPACE),:,$(BACKEND_DIRS)):$(subst $(SPACE),:,$(FILEFORMAT_DIRS))
 
 .PHONY: all clean generate build rt test test-hosted-internal
 
@@ -409,11 +421,19 @@ $(BIN_DIR)/smsrom_format_test: tests/smsrom_format_test.cpp $(FILEFORMAT_DIR)/sm
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/smsrom_format_test.cpp $(FILEFORMAT_DIR)/smsrom/SmsRomFormat.cpp -o $@
 
 # Unlike the file-format tests above, this links against the generated
-# ANTLR grammar (M6809Assembler.cpp parses via grammar/RccAsm.g4), so it
+# ANTLR grammar (M6809Assembler.cpp parses via grammar/rccasm/RccAsm.g4), so it
 # needs the same $(CPPFLAGS)/$(LDFLAGS)/$(LDLIBS) the main binary does.
 $(BIN_DIR)/m6809_assembler_test: tests/m6809_assembler_test.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/m6809_assembler_test.cpp $(SRC_DIR)/codegen/m6809/M6809Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
+# Links against the generated BasicLexer/BasicParser (ANTLR) plus
+# IRBuilder/IRValidator, so - like m6809_assembler_test above - it needs
+# the main binary's own $(CPPFLAGS)/$(LDFLAGS)/$(LDLIBS), not the plain
+# -I$(SRC_DIR) the file-format tests get away with.
+$(BIN_DIR)/basic_frontend_test: tests/basic_frontend_test.cpp $(FRONTEND_DIR)/basic/BasicFrontend.cpp $(FRONTEND_DIR)/basic/BasicFrontend.h $(GEN_DIR)/BasicLexer.cpp $(GEN_DIR)/BasicParser.cpp $(GEN_DIR)/BasicParserBaseVisitor.cpp $(GEN_DIR)/BasicParserVisitor.cpp $(IR_DIR)/IRBuilder.cpp $(IR_DIR)/IRValidator.cpp $(IR_DIR)/IRPrinter.cpp $(GEN_DIR)/RccIRLexer.cpp $(GEN_DIR)/RccIRParser.cpp $(GEN_DIR)/RccIRParserBaseVisitor.cpp $(GEN_DIR)/RccIRParserVisitor.cpp $(SRC_DIR)/Type.cpp $(SRC_DIR)/StructLayout.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/basic_frontend_test.cpp $(FRONTEND_DIR)/basic/BasicFrontend.cpp $(GEN_DIR)/BasicLexer.cpp $(GEN_DIR)/BasicParser.cpp $(GEN_DIR)/BasicParserBaseVisitor.cpp $(GEN_DIR)/BasicParserVisitor.cpp $(IR_DIR)/IRBuilder.cpp $(IR_DIR)/IRValidator.cpp $(IR_DIR)/IRPrinter.cpp $(GEN_DIR)/RccIRLexer.cpp $(GEN_DIR)/RccIRParser.cpp $(GEN_DIR)/RccIRParserBaseVisitor.cpp $(GEN_DIR)/RccIRParserVisitor.cpp $(SRC_DIR)/Type.cpp $(SRC_DIR)/StructLayout.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
 $(BIN_DIR)/m6502_assembler_test: tests/m6502_assembler_test.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
@@ -474,7 +494,7 @@ $(BIN_DIR)/moarvm_codegen_test: tests/moarvm_codegen_test.cpp $(SRC_DIR)/codegen
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) -I$(SRC_DIR) tests/moarvm_codegen_test.cpp $(SRC_DIR)/codegen/moarvm/MoarVmCodegen.cpp $(SRC_DIR)/codegen/moarvm/MoarVmAssembler.cpp $(SRC_DIR)/Type.cpp -o $@
 
-# Links against the generated ANTLR grammar (VexAssembler.cpp parses via grammar/RccAsm.g4), so
+# Links against the generated ANTLR grammar (VexAssembler.cpp parses via grammar/rccasm/RccAsm.g4), so
 # it needs the same $(CPPFLAGS)/$(LDFLAGS)/$(LDLIBS) the main binary does - see
 # $(BIN_DIR)/m6809_assembler_test's own comment.
 $(BIN_DIR)/vex_assembler_test: tests/vex_assembler_test.cpp $(SRC_DIR)/codegen/vex/VexAssembler.cpp $(SRC_DIR)/codegen/vex/VexAssembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
@@ -516,7 +536,7 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test $(BIN_DIR)/basic_frontend_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
@@ -546,6 +566,7 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	$(BIN_DIR)/parrotvm_codegen_test
 	$(BIN_DIR)/moarvm_codegen_test
 	$(BIN_DIR)/vex_assembler_test
+	$(BIN_DIR)/basic_frontend_test
 	python3 tests/qemu_wait_test.py
 	python3 tests/m6809_link_test.py $(TARGET)
 	python3 tests/i8080_link_test.py $(TARGET)

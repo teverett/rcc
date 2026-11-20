@@ -22,7 +22,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("PIC16Assembler: " + msg); }
 
-// --- Parsing, via the shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 -----------------------
 
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {

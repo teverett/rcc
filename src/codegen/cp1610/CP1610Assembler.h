@@ -22,7 +22,7 @@ constexpr uint16_t kCP1610RelocAbs16 = 1;
 
 // A from-scratch, in-process two-pass assembler for exactly the CP1610 dialect
 // CP1610Codegen.cpp emits (opcode table cross-checked against MAME's own cp1610.cpp/1610dasm.cpp
-// decode tables). Parses via the shared grammar/RccAsm.g4 grammar.
+// decode tables). Parses via the shared grammar/rccasm/RccAsm.g4 grammar.
 //
 // Word-addressed, unlike every other backend here: `org`/a label's own value/`dw`'s own address
 // are all in WORD units (one CP1610 memory location, holding one full 16-bit value), not bytes -

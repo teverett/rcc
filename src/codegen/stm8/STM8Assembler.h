@@ -21,7 +21,7 @@ constexpr uint16_t kSTM8RelocAbs16 = 1;
 // In-process two-pass assembler for this project's own narrow STM8 dialect
 // (not a general-purpose STM8 assembler); the encoding is this project's
 // own invention, not guaranteed to match a real STM8 toolchain byte-for-byte.
-// Parses via the shared grammar/RccAsm.g4; a register name (a/x/y/sp) is
+// Parses via the shared grammar/rccasm/RccAsm.g4; a register name (a/x/y/sp) is
 // just a bare identifier there, so this file decides per mnemonic/operand
 // position whether an identifier is a register or a label reference.
 // Two deliberate departures from real STM8 hardware:

@@ -28,7 +28,7 @@ constexpr uint16_t kI8080RelocAbs16 = 1;
 // output is valid input to any accurate 8080 (or object-code-compatible Z80) emulator or
 // disassembler.
 //
-// Parses via the shared grammar ../../../grammar/RccAsm.g4; a register name (`a`, `b`, ..., `h`,
+// Parses via the shared grammar ../../../grammar/rccasm/RccAsm.g4; a register name (`a`, `b`, ..., `h`,
 // `l`, `m`, `sp`, `psw`) is syntactically just a bare identifier to that grammar, so this file
 // decides, per mnemonic and operand position, whether an identifier names a register or a
 // symbol to resolve against the label table.

@@ -1,5 +1,5 @@
 
-// Generated from /Users/tom/projects/pcc/grammar/RccIRLexer.g4 by ANTLR 4.13.2
+// Generated from /Users/tom/projects/pcc/grammar/rccir/RccIRLexer.g4 by ANTLR 4.13.2
 
 
 #include "RccIRLexer.h"

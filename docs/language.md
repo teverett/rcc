@@ -207,7 +207,7 @@ that name.
 `&`, `^`, `|`, `<<`, `>>`, `~` sit at the same relative precedence real
 C puts them: shifts bind tighter than relational comparisons but
 looser than `+`/`-`; `&`/`^`/`|` bind looser than equality but tighter
-than `&&` (see `grammar/CParser.g4`'s own `condExpr`). Every backend
+than `&&` (see `grammar/c/CParser.g4`'s own `condExpr`). Every backend
 implements all of them, but not always with a single matching native
 instruction — a backend missing some piece of hardware synthesizes it
 from what it does have (e.g. PDP-7 has no hardware `or` and no

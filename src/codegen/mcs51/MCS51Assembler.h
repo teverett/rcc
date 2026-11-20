@@ -23,7 +23,7 @@ constexpr uint16_t kMCS51RelocAbs16 = 1;
 
 // Two-pass in-process assembler for this project's own MCS-51 dialect
 // (not a general-purpose 8051 assembler), parsed via the shared
-// ../../../grammar/RccAsm.g4 grammar. No register operand syntax: each
+// ../../../grammar/rccasm/RccAsm.g4 grammar. No register operand syntax: each
 // mnemonic implies its own registers ("mova"/"movai"/"movd"/"movdi",
 // since real 8051 `MOV` alone is ambiguous between several encodings),
 // and XDATA indirection uses dedicated `movxr`/`movxw` mnemonics

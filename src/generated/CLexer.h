@@ -1,5 +1,5 @@
 
-// Generated from /Users/tom/projects/pcc/grammar/CLexer.g4 by ANTLR 4.13.2
+// Generated from /Users/tom/projects/pcc/grammar/c/CLexer.g4 by ANTLR 4.13.2
 
 #pragma once
 

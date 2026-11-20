@@ -29,20 +29,32 @@ GEN_DIR="$ROOT_DIR/src/generated"
 rm -rf "$GEN_DIR"
 mkdir -p "$GEN_DIR"
 
-# Same three invocations, and the same lexer-before-parser-in-one-
-# invocation reason, as the Makefile's own (now-removed) grammar-
+# One subdirectory per grammar under grammar/ (c/, rccasm/, rccir/,
+# basic/, ...) - every generated file still lands flat in $GEN_DIR
+# regardless of which subdirectory its .g4 source came from.
+#
+# Same per-grammar invocations, and the same lexer-before-parser-in-
+# one-invocation reason, as the Makefile's own (now-removed) grammar-
 # generation rules used to document: a split lexer/parser pair's
 # parser needs its lexer's own .tokens file, which only exists once
 # that lexer has been generated - one invocation naming both files
 # (lexer first) generates it as a side effect before the parser half
 # of the same invocation needs it.
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
-    "$GRAMMAR_DIR/CLexer.g4" "$GRAMMAR_DIR/CParser.g4"
+    "$GRAMMAR_DIR/c/CLexer.g4" "$GRAMMAR_DIR/c/CParser.g4"
 
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
-    "$GRAMMAR_DIR/RccAsm.g4"
+    "$GRAMMAR_DIR/rccasm/RccAsm.g4"
 
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
-    "$GRAMMAR_DIR/RccIRLexer.g4" "$GRAMMAR_DIR/RccIRParser.g4"
+    "$GRAMMAR_DIR/rccir/RccIRLexer.g4" "$GRAMMAR_DIR/rccir/RccIRParser.g4"
+
+# BasicLexer.g4/BasicParser.g4 (see ../docs/basic-language.md) aren't
+# wired into the Makefile or main.cpp yet - no BuildBasicAst.cpp exists
+# to consume this output - but generating it here now means the
+# grammar itself is validated by the real ANTLR tool as it's developed,
+# same as every other grammar in this script.
+$ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
+    "$GRAMMAR_DIR/basic/BasicLexer.g4" "$GRAMMAR_DIR/basic/BasicParser.g4"
 
 echo "Regenerated $GEN_DIR - review the diff and commit it along with the .g4 change." >&2

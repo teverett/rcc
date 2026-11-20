@@ -29,14 +29,10 @@
 #include <sys/wait.h>
 #endif
 
-#include "ANTLRInputStream.h"
-#include "BaseErrorListener.h"
 #include "codegen/Codegen.h"
 #include "codegen/i386/I386Assembler.h"
-#include "ast/BuildAst.h"
-#include "CLexer.h"
-#include "CParser.h"
-#include "CommonTokenStream.h"
+#include "frontend/basic/BasicFrontend.h"
+#include "frontend/c/CFrontend.h"
 #include "ir/IRBuilder.h"
 #include "ir/IRPrinter.h"
 #include "ir/IRValidator.h"
@@ -50,7 +46,6 @@
 #include "optimizers/induction_nonneg/InductionNonNegative.h"
 #include "optimizers/local_cse/LocalCSE.h"
 #include "optimizers/unused_global_elimination/UnusedGlobalElimination.h"
-#include "preprocessor/Preprocessor.h"
 #include "codegen/moarvm/MoarVmCodegen.h"
 #include "codegen/parrotvm/ParrotVmCodegen.h"
 #include "codegen/pdp1/Pdp1Codegen.h"
@@ -141,22 +136,10 @@
 
 namespace {
 
-// ANTLR's default error listener only prints to stderr and keeps
-// going; this one also lets main() know a syntax error happened at
-// all, so it can refuse to compile a tree built from broken input.
-class CountingErrorListener : public antlr4::BaseErrorListener {
-   public:
-    void syntaxError(antlr4::Recognizer *, antlr4::Token *, size_t, size_t, const std::string &,
-                      std::exception_ptr) override {
-        count++;
-    }
-    int count = 0;
-};
-
 void usage(const char *argv0) {
     std::cerr << "Usage: " << argv0
               << " [--target=<target>[-<host>]] [--format=asm|<target-specific>] [--out file]\n"
-                 "       [--optimize] [--dump-ir] [--dump-asm] file.c [file2.c ...]\n"
+                 "       [--optimize] [--dump-ir] [--dump-asm] file.c|file.bas [file2.c|file2.bas ...]\n"
                  "   or: " << argv0
               << " --link [--target=<target>[-<host>]] --format=<target-native> [--gc-sections] [--base=<word-addr>|0x<hex>|$<hex>] [--out file] file1.o [file2.o ...]\n"
                  "\n"
@@ -169,8 +152,8 @@ void usage(const char *argv0) {
                  "--platform=6502-dos33). --list-platforms prints every --target-host combination and\n"
                  "every --platform name this build actually accepts, one per line.\n"
                  "\n"
-                 "A non-coff --format takes exactly one .c file - real separate compilation\n"
-                 "is now the only way to combine more than one: compile each file on its own\n"
+                 "A non-coff --format takes exactly one source file (.c or .bas) - real separate\n"
+                 "compilation is now the only way to combine more than one: compile each file on its own\n"
                  "with --format=coff (one invocation, several files, each compiled completely\n"
                  "independently - one build/<name>.o per file), then combine every .o with\n"
                  "--link into the final program. Hosted ELF/i386, PE/i386 and Mach-O/arm64\n"
@@ -180,13 +163,35 @@ void usage(const char *argv0) {
                  "linker scripts, and unsupported imports are rejected explicitly.\n";
 }
 
-// Strips directory and ".c" (e.g. "src/s5.c" -> "s5") for naming
-// --dump-ir/--dump-asm output files.
+// Strips directory and a known source extension (e.g. "src/s5.c" -> "s5",
+// "src/prog.bas" -> "prog") for naming --dump-ir/--dump-asm output files.
 std::string baseName(const std::string &srcPath) {
     size_t slash = srcPath.find_last_of('/');
     std::string base = (slash == std::string::npos) ? srcPath : srcPath.substr(slash + 1);
-    if (base.size() > 2 && base.substr(base.size() - 2) == ".c") base = base.substr(0, base.size() - 2);
+    for (const std::string &ext : {std::string(".c"), std::string(".bas")}) {
+        if (base.size() > ext.size() && base.substr(base.size() - ext.size()) == ext) {
+            return base.substr(0, base.size() - ext.size());
+        }
+    }
     return base;
+}
+
+// Which Frontend (source file -> rcc::AST.h's Program - see
+// frontend/Frontend.h) a source file's own extension selects. Each file
+// in one compile picks its own frontend independently - see
+// compileOneFile's own call to this - though mixing languages in one
+// program is of limited use today since every frontend that can
+// synthesize its own `main` (currently just BasicFrontend) will collide
+// with another file's `main`, same as two C files each defining `main`
+// already do.
+std::unique_ptr<rcc::Frontend> makeFrontend(const std::string &srcPath) {
+    if (srcPath.size() > 4 && srcPath.substr(srcPath.size() - 4) == ".bas") {
+        return std::make_unique<rcc::BasicFrontend>();
+    }
+    if (srcPath.size() > 2 && srcPath.substr(srcPath.size() - 2) == ".c") {
+        return std::make_unique<rcc::CFrontend>();
+    }
+    throw std::runtime_error(srcPath + ": unrecognized source file extension (expected .c or .bas)");
 }
 
 // MinGW's mkdir() (no <sys/stat.h>) takes no mode argument, so every
@@ -501,48 +506,14 @@ void listPlatforms() {
     }
 }
 
-// Parses one file into its own Program, then appends its functions/globals
-// onto `combined`; name resolution (IRBuilder) runs once, afterward, over
-// the whole concatenated list, so no file needs to declare another's
-// function first.
-void parseAndMergeFile(const std::string &srcPath, const std::string &source, rcc::Program &combined) {
-    CountingErrorListener errors;
-
-    antlr4::ANTLRInputStream input(source);
-    CLexer lexer(&input);
-    lexer.removeErrorListeners();
-    lexer.addErrorListener(&errors);
-
-    antlr4::CommonTokenStream tokens(&lexer);
-    CParser parser(&tokens);
-    parser.removeErrorListeners();
-    parser.addErrorListener(&errors);
-
-    CParser::ProgramContext *tree = parser.program();
-    if (errors.count > 0) throw std::runtime_error(srcPath + ": syntax errors, not compiling");
-
-    rcc::Program fileProg = rcc::buildProgram(tree);
-    for (auto &fn : fileProg.functions) {
-        fn.sourceFile = srcPath;
-        combined.functions.push_back(std::move(fn));
-    }
-    for (auto &g : fileProg.globals) {
-        g.sourceFile = srcPath;
-        combined.globals.push_back(std::move(g));
-    }
-    for (auto &s : fileProg.structs) {
-        s.sourceFile = srcPath;
-        combined.structs.push_back(std::move(s));
-    }
-}
-
 // Compiles exactly one source file with no visibility into any other file
 // on this invocation. `allowExternal` (true only for --format=coff) is
 // threaded through to both buildIR() and Backend::generate()'s objectMode.
 std::string compileOneFile(const std::string &srcPath, const std::map<std::string, std::string> &predefinedMacros,
                              rcc::Backend &backend, bool allowExternal, bool optimize, bool dumpIr, bool dumpAsm) {
     rcc::Program prog;
-    parseAndMergeFile(srcPath, rcc::preprocess(srcPath, predefinedMacros), prog);
+    std::unique_ptr<rcc::Frontend> frontend = makeFrontend(srcPath);
+    frontend->parseAndMergeFile(srcPath, predefinedMacros, prog);
 
     rcc::ir::Program irProg = rcc::buildIR(prog, backend.typeWidths(), allowExternal);
 
@@ -948,9 +919,9 @@ int main(int argc, char **argv) {
     }
 
     // Real separate compilation is the only way to combine more than one
-    // .c file; any other format takes exactly one source file.
+    // source file; any other format takes exactly one.
     if (!backend->isObjectFormat(format) && srcPaths.size() != 1) {
-        std::cerr << "--format=" << format << " takes exactly one .c file (got " << srcPaths.size()
+        std::cerr << "--format=" << format << " takes exactly one source file (got " << srcPaths.size()
                    << ") - compile each file as an object format, then --link them together; see --help\n";
         return 1;
     }

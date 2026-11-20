@@ -64,7 +64,7 @@ guessing. Do not reconstruct opcode tables from memory.
 ### 3. Diff the manifest against the assembler
 
 List every manifest entry the assembler does not encode, or encodes wrongly. Implement them all,
-in the assembler (`<Cpu>Assembler.cpp`) and, if the grammar needs it, in `grammar/RccAsm.g4`,
+in the assembler (`<Cpu>Assembler.cpp`) and, if the grammar needs it, in `grammar/rccasm/RccAsm.g4`,
 regenerating as the project does. Keep CPU variants honest: an instruction that exists only on a
 later variant is not accepted for an earlier one.
 

@@ -24,7 +24,9 @@ int main() {
     arr[1] = 2;
     arr[2] = 3;
     p = &arr[0];
-    p = p + 8;   // unscaled byte addition (p is plain int, not int*) - arr[2] sits 2*4 bytes on
+    p = p + sizeof(int) + sizeof(int);  // unscaled addition in this target's own addressing
+                                         // unit (p is plain int, not int*) - arr[2] sits
+                                         // 2*sizeof(int) units on
 
     *p += 100;   // arr[2] = 103
     if (arr[2] != 103) return 0;

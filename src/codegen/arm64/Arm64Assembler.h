@@ -29,7 +29,7 @@ constexpr uint16_t kArm64DarwinRelocPageoff12 = 6;
 
 // An in-process two-pass assembler for the narrow AArch64 ("A64") dialect
 // Arm64Codegen.cpp emits, not a general-purpose A64 assembler. Parses via
-// the shared grammar ../../../grammar/RccAsm.g4. Every operand is a plain
+// the shared grammar ../../../grammar/rccasm/RccAsm.g4. Every operand is a plain
 // expression (a number, register name, or label); every load/store goes
 // through the dedicated `ldind`/`stind` mnemonics instead of a bracketed
 // memory operand, always a fixed zero displacement.

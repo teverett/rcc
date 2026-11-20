@@ -29,7 +29,7 @@ constexpr uint16_t kM16cRelocAbs16 = 1;
 // (unlike real M16C short PC-relative conditional jumps), so there is no
 // branch-range limit to work around.
 //
-// Parses via the shared grammar ../../../grammar/RccAsm.g4; a register name
+// Parses via the shared grammar ../../../grammar/rccasm/RccAsm.g4; a register name
 // is syntactically just an identifier, so this file decides per operand
 // whether an identifier names a register or a label (see classifyOperand()
 // in M16cAssembler.cpp).

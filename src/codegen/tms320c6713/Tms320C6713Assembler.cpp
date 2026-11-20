@@ -19,7 +19,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("Tms320C6713Assembler: " + msg); }
 
-// --- Parsing, via the shared grammar/RccAsm.g4 (same shape as AlphaAssembler.cpp's own) ------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 (same shape as AlphaAssembler.cpp's own) ------
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {
     char sign = 0;

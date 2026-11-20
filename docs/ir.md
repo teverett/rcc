@@ -40,7 +40,7 @@ int main#3()
 
 ## Shape
 
-Described by `grammar/RccIRLexer.g4` + `grammar/RccIRParser.g4`:
+Described by `grammar/rccir/RccIRLexer.g4` + `grammar/rccir/RccIRParser.g4`:
 
 ```
 program    : '; --- globals ---' globalDecl*
@@ -131,7 +131,7 @@ expr : NUMBER                                    // int literal
 A function or global declared with a trailing `@ addr` (e.g.
 `int vector() @ 020 { ... }`) carries `hasAddress=true`/`address=addr`
 on its `IR.h` `Function`/`Slot` (the grammar's own `'@' addr=NUMBER`,
-on `functionDecl`/`globalDecl` — see `grammar/CParser.g4`). This pins
+on `functionDecl`/`globalDecl` — see `grammar/c/CParser.g4`). This pins
 that function's entry point, or that global's storage, to an exact
 spot instead of wherever the backend would otherwise lay it out —
 meant for things a real machine's own hardware fixes in place

@@ -22,7 +22,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("I8086Assembler: " + msg); }
 
-// --- Parsing, via the shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 -----------------------
 
 // `Group` is a parenthesized sub-expression (NASM's "510-($-$$)" idiom, used for
 // boot-sector/placement padding). Its syllables evaluate recursively to one combined

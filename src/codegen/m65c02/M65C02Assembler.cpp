@@ -19,7 +19,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("M65C02Assembler: " + msg); }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 // A signed sum of numbers/symbols/parenthesized groups. No register syntax
 // exists in this dialect, so every operand is just one of these.
 

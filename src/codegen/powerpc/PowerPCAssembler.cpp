@@ -18,7 +18,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("PowerPCAssembler: " + msg); }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 // Shared Syllable/Group expression shape, as in M68kAssembler.cpp.
 enum class SylKind { Number, Symbol, Group };
 struct Syllable {

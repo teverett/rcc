@@ -21,7 +21,7 @@ constexpr uint16_t kI8008RelocAbs16Hi = 3;
 
 // In-process two-pass assembler for the subset of real Intel 8008 assembly I8008Codegen.cpp emits (no macros,
 // conditional assembly, or `--format=coff` support). Uses the 8008's real register codes: a=0,b=1,c=2,d=3,e=4,h=5,
-// l=6,m=7 (different from the 8080/Z80's numbering). Parses via the shared grammar/RccAsm.g4; supports `name = expr`
+// l=6,m=7 (different from the 8080/Z80's numbering). Parses via the shared grammar/rccasm/RccAsm.g4; supports `name = expr`
 // equates (Line::Equate) to pin fixed memory cells to addresses the test harness's Python 8008 emulator can read
 // directly. Every instruction's size is fixed by its mnemonic alone, never by an operand's resolved value.
 // Throws std::runtime_error on any assembly error.

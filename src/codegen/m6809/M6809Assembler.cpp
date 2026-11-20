@@ -19,7 +19,7 @@ namespace {
 
 [[noreturn]] void fail(const std::string &msg) { throw std::runtime_error("M6809Assembler: " + msg); }
 
-// --- Parsing, via the shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the shared grammar/rccasm/RccAsm.g4 -----------------------
 // An Operand also remembers whether it was bracketed (`[expr]`), since
 // that distinguishes extended addressing from an immediate value (see
 // M6809Assembler.h).

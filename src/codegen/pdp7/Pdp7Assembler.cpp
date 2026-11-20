@@ -70,7 +70,7 @@ const std::unordered_map<std::string, uint32_t> &builtins() {
     return table;
 }
 
-// --- Parsing, via the one shared grammar/RccAsm.g4 -----------------------
+// --- Parsing, via the one shared grammar/rccasm/RccAsm.g4 -----------------------
 //
 // The shared grammar is generic across backends: a statement is
 // "mnemonic, operand (',' operand)*" with no notion of what the

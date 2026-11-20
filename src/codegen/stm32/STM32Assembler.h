@@ -24,7 +24,7 @@ constexpr uint16_t kSTM32RelocMovTHi = 3;
 constexpr uint16_t kSTM32RelocBranch25 = 4;
 
 // In-process two-pass assembler for the narrow Thumb-2/ARMv7-M dialect STM32Codegen.cpp emits.
-// Parses via the shared grammar/RccAsm.g4 grammar; its `[expr]` bracket operand maps directly
+// Parses via the shared grammar/rccasm/RccAsm.g4 grammar; its `[expr]` bracket operand maps directly
 // onto ARM's `[Rn]` register-indirect syntax.
 //
 // `mul <Rn>,<Rd>` computes `Rd = Rd * Rn`; `and`/`orr`/`eor`/`mvn <Rd>,<Rm>` compute
