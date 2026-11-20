@@ -1019,13 +1019,24 @@ class Builder {
 
     // A decimal literal's type is the first of its suffix's type and the
     // wider ones after it (int, long, long long, each unsigned when
-    // suffixed 'u') that can represent its value on this target.
+    // suffixed 'u') that can represent its value on this target. `value`
+    // is usually non-negative (an AST IntLit's own token can never be
+    // negative - unary minus is always a separate node), but the Unary
+    // case below also calls this directly with an already-negated value,
+    // so a signed candidate type's own asymmetric range (down to
+    // -2^(bits-1), only up to +2^(bits-1)-1) has to be checked properly
+    // rather than assuming non-negative.
     Type literalType(long value, Type suffixType) {
         Type t = suffixType;
         while (t.base != BaseType::LongLong) {
             int bits = widthOf(t, widths_) * widths_.unitBits;
             int valueBits = t.isUnsigned ? bits : bits - 1;
-            if (valueBits >= 63 || static_cast<unsigned long>(value) < (1UL << valueBits)) break;
+            if (valueBits >= 63) break;
+            if (value >= 0) {
+                if (static_cast<unsigned long>(value) < (1UL << valueBits)) break;
+            } else if (!t.isUnsigned && value >= -(1L << valueBits)) {
+                break;
+            }
             t.base = t.base == BaseType::Int ? BaseType::Long : BaseType::LongLong;
         }
         return t;
@@ -1242,6 +1253,26 @@ class Builder {
                     }
                     out->rhs = buildAddressableOperand(*e.rhs);
                     out->type = pointerTo(out->rhs->type);
+                    return out;
+                }
+                // `-<literal>`: size the literal's type from its real,
+                // negated value directly, not from its positive magnitude
+                // first. `literalType()` sizes a value against each
+                // candidate type's own signed range, which is asymmetric
+                // (an N-bit two's complement type holds down to -2^(N-1)
+                // but only up to +2^(N-1)-1) - a magnitude of exactly
+                // 2^(N-1) (e.g. 131072 on this project's 18-bit pdp7
+                // `int`) doesn't fit as a positive N-bit value, so sizing
+                // it unnegated widens to the next type, even though its
+                // true negation is that type's own legal minimum and fits
+                // perfectly. ConstantFolding.cpp later collapses
+                // `Unary(-, IntLit)` into a plain IntLit anyway but keeps
+                // whatever type this build step already gave it, so this
+                // has to be the one place that gets it right.
+                if (e.op == "-" && e.rhs->kind == ExprKind::IntLit) {
+                    out->kind = ir::ExprKind::IntLit;
+                    out->intValue = -e.rhs->intValue;
+                    out->type = literalType(out->intValue, e.rhs->type);
                     return out;
                 }
                 ir::ExprPtr operand = buildExpr(*e.rhs);
