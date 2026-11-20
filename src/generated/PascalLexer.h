@@ -22,8 +22,8 @@ public:
     DOTDOT = 37, LE = 38, GE = 39, NE = 40, SEMI = 41, COLON = 42, COMMA = 43, 
     DOT = 44, LPAREN = 45, RPAREN = 46, LBRACK = 47, RBRACK = 48, EQ = 49, 
     LT = 50, GT = 51, PLUS = 52, MINUS = 53, STAR = 54, SLASH = 55, CARET = 56, 
-    IDENT = 57, REALLIT = 58, INTLIT = 59, STRINGLIT = 60, BRACE_COMMENT = 61, 
-    PAREN_COMMENT = 62, WS = 63
+    AT = 57, IDENT = 58, REALLIT = 59, INTLIT = 60, STRINGLIT = 61, BRACE_COMMENT = 62, 
+    PAREN_COMMENT = 63, WS = 64
   };
 
   explicit PascalLexer(antlr4::CharStream *input);

@@ -223,6 +223,10 @@ public:
     return visitChildren(ctx);
   }
 
+  virtual std::any visitAddrOfFactor(PascalParser::AddrOfFactorContext *ctx) override {
+    return visitChildren(ctx);
+  }
+
   virtual std::any visitSetElement(PascalParser::SetElementContext *ctx) override {
     return visitChildren(ctx);
   }

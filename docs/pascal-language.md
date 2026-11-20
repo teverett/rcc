@@ -22,7 +22,9 @@ no Pascal-specific changes.
   supports it, so `real` is in the *grammar* but not usable until a
   target does.
 - **Pointers**: `^T`, any depth, same as C's `T*` (`ptrDepth` in
-  `Type.h`).
+  `Type.h`). `@x`/`@arr[i]` (Turbo Pascal's own spelling, not ISO
+  7185's `New`) is the only way to give one a value - there's no heap
+  allocator in this frontend's runtime model.
 - **Fixed arrays**: `array[lo..hi] of T`, any number of dimensions
   (`array[1..3, 1..4] of integer`). Lowers onto the same flat
   `arraySize`/`arrayDims` machinery multi-dimensional C arrays and

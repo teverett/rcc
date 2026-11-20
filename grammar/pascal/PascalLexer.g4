@@ -73,6 +73,9 @@ SLASH   : '/' ;
 // (p^) - same single token, disambiguated by grammar position, not
 // by the lexer.
 CARET   : '^' ;
+// Address-of, Turbo Pascal's own spelling (no 'New'/heap allocator
+// exists in this frontend's runtime model - see docs/pascal-language.md).
+AT      : '@' ;
 
 IDENT : [A-Za-z_][A-Za-z0-9_]* ;
 

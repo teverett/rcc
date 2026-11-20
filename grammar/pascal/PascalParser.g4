@@ -179,6 +179,9 @@ factor
     // "Sets". Reuses rangeSpec for a sub-range element so `5..9` is
     // legal here without a second copy of that production.
     | LBRACK (setElement (COMMA setElement)*)? RBRACK   # setFactor
+    // Address-of (`@x`, `@arr[i]`) - the only way this frontend gives a
+    // pointer variable something to point at; see docs/pascal-language.md.
+    | AT designator              # addrOfFactor
     ;
 
 setElement

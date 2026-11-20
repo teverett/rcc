@@ -123,6 +123,8 @@ public:
 
     virtual std::any visitSetFactor(PascalParser::SetFactorContext *context) = 0;
 
+    virtual std::any visitAddrOfFactor(PascalParser::AddrOfFactorContext *context) = 0;
+
     virtual std::any visitSetElement(PascalParser::SetElementContext *context) = 0;
 
     virtual std::any visitConstExpr(PascalParser::ConstExprContext *context) = 0;

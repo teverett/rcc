@@ -33,6 +33,7 @@
 #include "codegen/i386/I386Assembler.h"
 #include "frontend/basic/BasicFrontend.h"
 #include "frontend/c/CFrontend.h"
+#include "frontend/pascal/PascalFrontend.h"
 #include "ir/IRBuilder.h"
 #include "ir/IRPrinter.h"
 #include "ir/IRValidator.h"
@@ -139,7 +140,7 @@ namespace {
 void usage(const char *argv0) {
     std::cerr << "Usage: " << argv0
               << " [--target=<target>[-<host>]] [--format=asm|<target-specific>] [--out file]\n"
-                 "       [--optimize] [--dump-ir] [--dump-asm] file.c|file.bas [file2.c|file2.bas ...]\n"
+                 "       [--optimize] [--dump-ir] [--dump-asm] file.c|file.bas|file.pas [file2.c|file2.bas|file2.pas ...]\n"
                  "   or: " << argv0
               << " --link [--target=<target>[-<host>]] --format=<target-native> [--gc-sections] [--base=<word-addr>|0x<hex>|$<hex>] [--out file] file1.o [file2.o ...]\n"
                  "\n"
@@ -152,7 +153,7 @@ void usage(const char *argv0) {
                  "--platform=6502-dos33). --list-platforms prints every --target-host combination and\n"
                  "every --platform name this build actually accepts, one per line.\n"
                  "\n"
-                 "A non-coff --format takes exactly one source file (.c or .bas) - real separate\n"
+                 "A non-coff --format takes exactly one source file (.c, .bas, or .pas) - real separate\n"
                  "compilation is now the only way to combine more than one: compile each file on its own\n"
                  "with --format=coff (one invocation, several files, each compiled completely\n"
                  "independently - one build/<name>.o per file), then combine every .o with\n"
@@ -168,7 +169,7 @@ void usage(const char *argv0) {
 std::string baseName(const std::string &srcPath) {
     size_t slash = srcPath.find_last_of('/');
     std::string base = (slash == std::string::npos) ? srcPath : srcPath.substr(slash + 1);
-    for (const std::string &ext : {std::string(".c"), std::string(".bas")}) {
+    for (const std::string &ext : {std::string(".c"), std::string(".bas"), std::string(".pas")}) {
         if (base.size() > ext.size() && base.substr(base.size() - ext.size()) == ext) {
             return base.substr(0, base.size() - ext.size());
         }
@@ -181,17 +182,20 @@ std::string baseName(const std::string &srcPath) {
 // in one compile picks its own frontend independently - see
 // compileOneFile's own call to this - though mixing languages in one
 // program is of limited use today since every frontend that can
-// synthesize its own `main` (currently just BasicFrontend) will collide
-// with another file's `main`, same as two C files each defining `main`
-// already do.
+// synthesize its own `main` (BasicFrontend and PascalFrontend, so far)
+// will collide with another file's `main`, same as two C files each
+// defining `main` already do.
 std::unique_ptr<rcc::Frontend> makeFrontend(const std::string &srcPath) {
     if (srcPath.size() > 4 && srcPath.substr(srcPath.size() - 4) == ".bas") {
         return std::make_unique<rcc::BasicFrontend>();
     }
+    if (srcPath.size() > 4 && srcPath.substr(srcPath.size() - 4) == ".pas") {
+        return std::make_unique<rcc::PascalFrontend>();
+    }
     if (srcPath.size() > 2 && srcPath.substr(srcPath.size() - 2) == ".c") {
         return std::make_unique<rcc::CFrontend>();
     }
-    throw std::runtime_error(srcPath + ": unrecognized source file extension (expected .c or .bas)");
+    throw std::runtime_error(srcPath + ": unrecognized source file extension (expected .c, .bas, or .pas)");
 }
 
 // MinGW's mkdir() (no <sys/stat.h>) takes no mode argument, so every
