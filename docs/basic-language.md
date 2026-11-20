@@ -37,9 +37,11 @@ wide scope (classic BASIC has no block scoping at all - GOSUB shares
 the caller's variables, it isn't a function call into a fresh scope).
 
 `DIM A(n)` declares a single-dimension, 0-based array of `n+1`
-elements (matching classic BASIC's inclusive upper bound); no
-multi-dimensional arrays, matching rcc's own C-subset array
-restriction.
+elements (matching classic BASIC's inclusive upper bound). `DIM
+A(r,c)` (any number of dimensions) declares a multi-dimensional array
+the same way - each dimension is 0-based inclusive, and `A(i,j)` must
+subscript every declared dimension at once, matching rcc's own C-subset
+`int a[r][c];` (see `docs/language.md`'s own array section).
 
 String values support only concatenation (`+`) and comparison - no
 other string arithmetic - so this frontend's runtime support needs no
@@ -66,7 +68,6 @@ alone.
 No user-defined functions/procedures (`GOSUB` targets share the
 caller's variables, not a parameter list), no block `IF`, no
 `DATA`/`READ`, no floating point (see above), no string functions
-beyond `+`/comparison, no multi-dimensional arrays. These match the
-same "smallest subset that's still recognizably the language" approach
-`docs/language.md` takes for the C frontend, not an attempt at a full
-BASIC implementation.
+beyond `+`/comparison. These match the same "smallest subset that's
+still recognizably the language" approach `docs/language.md` takes for
+the C frontend, not an attempt at a full BASIC implementation.

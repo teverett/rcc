@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <stdexcept>
+#include <tuple>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -95,6 +96,23 @@ long parsePlainNumber(antlr4::Token *tok, antlr4::ParserRuleContext *ctx, const 
         if (ch < '0' || ch > '9') err(ctx, std::string(what) + " may not have a 'u'/'l' integer suffix");
     }
     return parseDigits(text, ctx, what);
+}
+
+// `('[' dims+=NUMBER ']')+`: one or more dimension sizes on an array
+// declarator (`int a[3][4];` -> {3,4}). Returns each dimension and their
+// product (the flat element count every existing single-dimension array
+// already stores as arraySize).
+std::pair<std::vector<int>, int> parseArrayDims(const std::vector<antlr4::Token *> &dimTokens,
+                                                 antlr4::ParserRuleContext *ctx, const char *what) {
+    std::vector<int> dims;
+    long product = 1;
+    for (auto *tok : dimTokens) {
+        long d = parsePlainNumber(tok, ctx, what);
+        if (d <= 0) err(ctx, std::string(what) + " must be a positive integer");
+        dims.push_back(static_cast<int>(d));
+        product *= d;
+    }
+    return {dims, static_cast<int>(product)};
 }
 
 // Resolves a value that's either a plain (optionally negated) NUMBER or
@@ -372,6 +390,17 @@ StmtPtr buildStmt(CParser::StatementContext *ctx);
 StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx);
 ExprPtr makeIncDec(antlr4::ParserRuleContext *ctx, const std::string &opToken, bool yieldOld);
 
+// `('[' idx+=expr ']')+` subscripts on an Index/Assign/CompoundAssign
+// target: `lhs` always holds the first (the one-dimensional case every
+// existing consumer already expects), and `indices` additionally holds
+// every subscript, in order, only when there's more than one.
+void buildIndices(const std::vector<CParser::ExprContext *> &idxCtxs, Expr &e) {
+    e.lhs = buildExpr(idxCtxs[0]);
+    if (idxCtxs.size() > 1) {
+        for (auto *idxCtx : idxCtxs) e.indices.push_back(buildExpr(idxCtx));
+    }
+}
+
 ExprPtr makeBinary(antlr4::ParserRuleContext *ctx, const std::string &op, ExprPtr lhs, ExprPtr rhs) {
     auto e = std::make_unique<Expr>();
     e->kind = ExprKind::Binary;
@@ -393,7 +422,7 @@ ExprPtr buildCondExpr(CParser::CondExprContext *ctx) {
         auto e = makeIncDec(c, c->op->getText(), /*yieldOld=*/true);
         e->kind = ExprKind::CompoundAssign;
         e->name = c->IDENT()->getText();
-        e->lhs = buildExpr(c->idx);
+        buildIndices(c->idx, *e);
         return e;
     }
     if (auto *c = dynamic_cast<CParser::PostIncDecDerefExprContext *>(ctx)) {
@@ -412,7 +441,7 @@ ExprPtr buildCondExpr(CParser::CondExprContext *ctx) {
         auto e = makeIncDec(c, c->op->getText(), /*yieldOld=*/false);
         e->kind = ExprKind::CompoundAssign;
         e->name = c->IDENT()->getText();
-        e->lhs = buildExpr(c->idx);
+        buildIndices(c->idx, *e);
         return e;
     }
     if (auto *c = dynamic_cast<CParser::PreIncDecDerefExprContext *>(ctx)) {
@@ -455,7 +484,7 @@ ExprPtr buildCondExpr(CParser::CondExprContext *ctx) {
         e->kind = ExprKind::Index;
         e->line = c->getStart()->getLine();
         e->name = c->IDENT()->getText();
-        e->lhs = buildExpr(c->expr());
+        buildIndices(c->idx, *e);
         return e;
     }
     if (auto *c = dynamic_cast<CParser::VarExprContext *>(ctx)) {
@@ -632,7 +661,7 @@ ExprPtr buildExpr(CParser::ExprContext *ctx) {
         e->line = c->getStart()->getLine();
         e->op = op;
         e->name = c->IDENT()->getText();
-        e->lhs = buildExpr(c->idx);
+        buildIndices(c->idx, *e);
         e->rhs = buildExpr(c->val);
         return e;
     }
@@ -722,8 +751,7 @@ StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
                 s->line = arr->getStart()->getLine();
                 s->declName = arr->IDENT()->getText();
                 s->type = baseType;
-                s->arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
-                if (s->arraySize <= 0) err(arr, "array size must be a positive integer");
+                std::tie(s->arrayDims, s->arraySize) = parseArrayDims(arr->dims, arr, "an array size");
                 s->arrayInit = buildArrayInit(arr->arrayInit());
                 padArrayInit(s->arrayInit, s->arraySize, arr);
                 s->isConst = isConst;
@@ -760,8 +788,7 @@ StmtPtr buildSimpleStmt(CParser::SimpleStmtContext *ctx) {
                 s->line = arr->getStart()->getLine();
                 s->declName = arr->IDENT()->getText();
                 s->type = baseType;
-                s->arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
-                if (s->arraySize <= 0) err(arr, "array size must be a positive integer");
+                std::tie(s->arrayDims, s->arraySize) = parseArrayDims(arr->dims, arr, "an array size");
                 s->arrayInit = buildArrayInit(arr->arrayInit());
                 padArrayInit(s->arrayInit, s->arraySize, arr);
                 s->isConst = isConst;
@@ -1072,8 +1099,7 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                     g.isConst = isConst;
                     if (auto *extArr = dynamic_cast<CParser::ExternArrayDeclaratorContext *>(d)) {
                         g.name = extArr->IDENT()->getText();
-                        g.arraySize = static_cast<int>(parsePlainNumber(extArr->size, extArr, "an array size"));
-                        if (g.arraySize <= 0) err(extArr, "array size must be a positive integer");
+                        std::tie(g.arrayDims, g.arraySize) = parseArrayDims(extArr->dims, extArr, "an array size");
                     } else if (auto *extSc = dynamic_cast<CParser::ExternScalarDeclaratorContext *>(d)) {
                         g.name = extSc->IDENT()->getText();
                     } else {
@@ -1093,8 +1119,7 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                     g.isConst = isConst;
                     if (auto *arr = dynamic_cast<CParser::GlobalArrayDeclaratorContext *>(d)) {
                         g.name = arr->IDENT()->getText();
-                        g.arraySize = static_cast<int>(parsePlainNumber(arr->size, arr, "an array size"));
-                        if (g.arraySize <= 0) err(arr, "array size must be a positive integer");
+                        std::tie(g.arrayDims, g.arraySize) = parseArrayDims(arr->dims, arr, "an array size");
                         g.arrayInit = buildArrayInit(arr->arrayInit());
                         padArrayInit(g.arrayInit, g.arraySize, arr);
                         if (arr->addr) {

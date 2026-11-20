@@ -46,6 +46,15 @@ struct Slot {
     SlotKind kind = SlotKind::Local;
     Type type;                          // scalar type, or array element type
     int arraySize = 0;                 // 0 = scalar
+    // Declared dimension sizes for a multi-dimensional array (product ==
+    // arraySize, row-major: the last dimension is contiguous); empty or a
+    // single element for an ordinary one-dimensional array. Only consulted
+    // while lowering an Expr::Index/Assign/CompoundAssign with more than
+    // one subscript (see IRBuilder's buildArrayIndexOffset) - every other
+    // reader of a Slot (every codegen backend among them) only ever sees
+    // the already-combined single linear offset, same as a one-dimensional
+    // array always has.
+    std::vector<int> arrayDims;
     bool hasInit = false;               // scalar: literal initializer given
     long initValue = 0;                  // scalar initializer value
     double floatInitValue = 0;           // scalar initializer value when type.base is Float/Double

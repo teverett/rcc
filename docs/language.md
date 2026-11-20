@@ -98,6 +98,17 @@ Deliberate simplifications, not bugs:
 - An array never implicitly decays to a pointer — indexing (`arr[i]`)
   or an explicit `&arr[0]`/`&arr` is required to get its address; a
   bare array name used anywhere else is a compile error.
+- An array may have more than one dimension (`int a[3][4];`, any of a
+  global, local, `static` local, or `extern` declaration); each
+  dimension is a separate `[N]` on the declarator, and an access
+  subscripts every one of them at once (`a[i][j]`, never `a[i]` alone
+  on a multi-dimensional array). Storage is row-major and flat — the
+  same single `arraySize` words as an ordinary one-dimensional array,
+  just with the frontend combining `a[i][j]` into one linear offset
+  (`i*4 + j` here) before IRBuilder ever sees it, so no codegen backend
+  needs to know the difference. A flat initializer list still works
+  (`int a[2][3] = {1,2,3,4,5,6};`, filling row-major); a struct member,
+  by contrast, stays one-dimensional only (`int arr[N]`, no `[N][M]`).
 - An array's initializer is always a literal list (`{1, -2, 3}`; each
   literal may be negated), or a bare symbol name standing for that
   symbol's own address — the

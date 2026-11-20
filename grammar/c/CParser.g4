@@ -194,12 +194,12 @@ globalDecl
     ;
 
 externDeclarator
-    : IDENT '[' size=NUMBER ']'   # externArrayDeclarator
+    : IDENT ('[' dims+=NUMBER ']')+   # externArrayDeclarator
     | IDENT                       # externScalarDeclarator
     ;
 
 globalDeclarator
-    : IDENT '[' size=NUMBER ']' ('=' arrayInit)? ('@' addr=NUMBER)?    # globalArrayDeclarator
+    : IDENT ('[' dims+=NUMBER ']')+ ('=' arrayInit)? ('@' addr=NUMBER)?    # globalArrayDeclarator
     // The initializer is a plain (optionally negated) literal, or an
     // already-declared enum constant's bare name (identVal) - see
     // BuildAst.cpp's resolveConstOrEnum.
@@ -271,7 +271,7 @@ simpleStmt
     ;
 
 localDeclarator
-    : IDENT '[' size=NUMBER ']' ('=' arrayInit)?    # localArrayDeclarator
+    : IDENT ('[' dims+=NUMBER ']')+ ('=' arrayInit)?    # localArrayDeclarator
     | IDENT ('=' expr)?                              # localScalarDeclarator
     ;
 
@@ -279,7 +279,7 @@ localDeclarator
 // constant form a global's is (plain, optionally negated, NUMBER) rather
 // than a general expr - see simpleStmt's own comment above.
 staticLocalDeclarator
-    : IDENT '[' size=NUMBER ']' ('=' arrayInit)?                       # staticLocalArrayDeclarator
+    : IDENT ('[' dims+=NUMBER ']')+ ('=' arrayInit)?                       # staticLocalArrayDeclarator
     | IDENT ('=' (sign='-'? val=NUMBER | identVal=IDENT))?              # staticLocalScalarDeclarator
     ;
 
@@ -310,7 +310,7 @@ assignOp
 
 expr
     : '*' ptr=condExpr op=assignOp val=expr         # assignDerefExpr
-    | IDENT '[' idx=expr ']' op=assignOp val=expr   # assignIndexExpr
+    | IDENT ('[' idx+=expr ']')+ op=assignOp val=expr   # assignIndexExpr
     | IDENT op=assignOp val=expr                     # assignExpr
     // base.name = val / base.name[idx] = val (and '->' likewise). `base`
     // is a general condExpr (not just IDENT) so this also covers an
@@ -344,7 +344,7 @@ condExpr
     // own postfix-expression precedence (binds tighter than the
     // prefix form a few lines down).
     : IDENT op=('++'|'--')                            # postIncDecVarExpr
-    | IDENT '[' idx=expr ']' op=('++'|'--')           # postIncDecIndexExpr
+    | IDENT ('[' idx+=expr ']')+ op=('++'|'--')           # postIncDecIndexExpr
     | '*' ptr=condExpr op=('++'|'--')                 # postIncDecDerefExpr
     | IDENT '(' argList? ')'                          # callExpr
     // Calling through a computed function address (e.g.
@@ -359,7 +359,7 @@ condExpr
     // until the callee is known, which for this alternative it isn't,
     // at compile time.
     | '(' expr ')' '(' argList? ')'                   # callPtrExpr
-    | IDENT '[' expr ']'                              # indexExpr
+    | IDENT ('[' idx+=expr ']')+                      # indexExpr
     | IDENT                                           # varExpr
     | NUMBER                                          # numExpr
     | FLOAT_NUMBER                                    # floatNumExpr
@@ -392,7 +392,7 @@ condExpr
     // postfix form above, operator first; sits at this same tier as
     // the other prefix unary operators, matching real C.
     | op=('++'|'--') IDENT                            # preIncDecVarExpr
-    | op=('++'|'--') IDENT '[' idx=expr ']'           # preIncDecIndexExpr
+    | op=('++'|'--') IDENT ('[' idx+=expr ']')+       # preIncDecIndexExpr
     | op=('++'|'--') '*' ptr=condExpr                 # preIncDecDerefExpr
     | condExpr op=('*'|'/'|'%') condExpr               # mulExpr
     | condExpr op=('+'|'-') condExpr                   # addExpr

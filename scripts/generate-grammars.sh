@@ -49,11 +49,8 @@ $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
     "$GRAMMAR_DIR/rccir/RccIRLexer.g4" "$GRAMMAR_DIR/rccir/RccIRParser.g4"
 
-# BasicLexer.g4/BasicParser.g4 (see ../docs/basic-language.md) aren't
-# wired into the Makefile or main.cpp yet - no BuildBasicAst.cpp exists
-# to consume this output - but generating it here now means the
-# grammar itself is validated by the real ANTLR tool as it's developed,
-# same as every other grammar in this script.
+# BasicLexer.g4/BasicParser.g4 (see ../docs/basic-language.md), consumed
+# by src/frontend/basic/BasicFrontend.cpp.
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
     "$GRAMMAR_DIR/basic/BasicLexer.g4" "$GRAMMAR_DIR/basic/BasicParser.g4"
 

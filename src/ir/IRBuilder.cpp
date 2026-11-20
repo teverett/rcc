@@ -379,7 +379,7 @@ class Builder {
     void registerGlobalsAndFunctions(const Program &prog) {
         for (const auto &g : prog.globals) {
             if (globalByName_.count(g.name)) err(g.line, "redeclaration of global '" + g.name + "'");
-            ir::Slot *slot = allocSlot(ir::SlotKind::Global, g.name, g.arraySize);
+            ir::Slot *slot = allocSlot(ir::SlotKind::Global, g.name, g.arraySize, g.arrayDims);
             slot->type = resolveStructType(g.type, g.line);
             // Registers an 'extern' global's kind (data) before any
             // '&name'/array-init element elsewhere in this file is resolved.
@@ -573,12 +573,14 @@ class Builder {
         return "__rcc_local_" + sanitized + "_" + name;
     }
 
-    ir::Slot *allocSlot(ir::SlotKind kind, const std::string &name, int arraySize = 0) {
+    ir::Slot *allocSlot(ir::SlotKind kind, const std::string &name, int arraySize = 0,
+                        std::vector<int> arrayDims = {}) {
         auto slot = std::make_unique<ir::Slot>();
         slot->id = nextSlotId_++;
         slot->sourceName = name;
         slot->kind = kind;
         slot->arraySize = arraySize;
+        slot->arrayDims = std::move(arrayDims);
         ir::Slot *raw = slot.get();
         prog_.slots.push_back(std::move(slot));
         return raw;
@@ -653,6 +655,55 @@ class Builder {
         return buildPointerBinary("+", std::move(ptrVar), buildExpr(idxExpr), line);
     }
 
+    // `e.lhs` alone for a one-dimensional access (the common case, and the
+    // only one `slot->arrayDims` ever needs to say nothing about); for a
+    // real array declared with more than one dimension and indexed with
+    // more than one subscript (`a[i][j]`, e.indices holds all of them),
+    // combines them row-major into the one linear element index every
+    // other reader of an Index/Assign/CompoundAssign (every codegen
+    // backend among them) already expects: idx0*dims[1]*...*dims[N-1] +
+    // idx1*dims[2]*...*dims[N-1] + ... + idxN-1.
+    ir::ExprPtr buildArrayIndexOffset(ir::Slot *slot, const Expr &e, int line) {
+        size_t declaredDims = slot->arrayDims.size();
+        size_t suppliedIndices = e.indices.empty() ? 1 : e.indices.size();
+        if (declaredDims <= 1) {
+            if (suppliedIndices > 1) {
+                // An implicitly-external name (no 'extern int
+                // name[...][...];' anywhere in this file) never got any
+                // declared dimensions to combine a real multi-subscript
+                // access against - see this function's own comment.
+                err(line, "'" + e.name +
+                              "' is indexed with more than one subscript but was never declared with its own "
+                              "dimension sizes - add an 'extern ... " + e.name + "[...][...];' declaring them");
+            }
+            return buildExpr(*e.lhs);
+        }
+        if (suppliedIndices != declaredDims) {
+            err(line, "'" + e.name + "' was declared with " + std::to_string(declaredDims) +
+                          " dimensions but indexed with " + std::to_string(suppliedIndices));
+        }
+        Type intTy{BaseType::Int, false};
+        ir::ExprPtr acc = buildExpr(*e.indices[0]);
+        for (size_t i = 1; i < slot->arrayDims.size(); ++i) {
+            auto mul = std::make_unique<ir::Expr>();
+            mul->kind = ir::ExprKind::Binary;
+            mul->op = "*";
+            mul->line = line;
+            mul->type = intTy;
+            mul->lhs = std::move(acc);
+            mul->rhs = makeIntLit(slot->arrayDims[i], intTy, line);
+            auto add = std::make_unique<ir::Expr>();
+            add->kind = ir::ExprKind::Binary;
+            add->op = "+";
+            add->line = line;
+            add->type = intTy;
+            add->lhs = std::move(mul);
+            add->rhs = buildExpr(*e.indices[i]);
+            acc = std::move(add);
+        }
+        return acc;
+    }
+
     // Resolves a Var/Index/function-name operand for `&`, skipping the
     // bare-array check below: &arr is the array's address, &f is f's entry
     // address (never a call). A bare IDENT is tried as a variable, then a
@@ -686,7 +737,7 @@ class Builder {
             out->slot = resolveVar(e.name, e.line);
             out->type = out->slot->type;
             markIndexedIfExternal(out->slot);
-            out->lhs = buildExpr(*e.lhs);
+            out->lhs = buildArrayIndexOffset(out->slot, e, e.line);
             return out;
         }
         err(e.line, "'&' requires a plain variable, array element, or function name, e.g. &x, &arr[i], or &f");
@@ -1043,7 +1094,7 @@ class Builder {
                 out->slot = slot;
                 out->type = slot->type;
                 markIndexedIfExternal(out->slot);
-                out->lhs = buildExpr(*e.lhs);
+                out->lhs = buildArrayIndexOffset(slot, e, e.line);
                 return out;
             }
             case ExprKind::Assign: {
@@ -1066,7 +1117,7 @@ class Builder {
                 out->slot = slot;
                 if (e.lhs) {
                     markIndexedIfExternal(out->slot);  // arr[i] = ... - e.lhs is the index
-                    out->lhs = buildExpr(*e.lhs);
+                    out->lhs = buildArrayIndexOffset(slot, e, e.line);
                 }
                 out->type = out->slot->type;
                 rejectStructByValue(out->type, e.line, "a whole-struct assignment ('a = b;')");
@@ -1098,7 +1149,7 @@ class Builder {
                 out->yieldOld = e.yieldOld;
                 if (e.lhs) {
                     markIndexedIfExternal(out->slot);  // arr[i] op= ... - e.lhs is the index
-                    out->lhs = buildExpr(*e.lhs);
+                    out->lhs = buildArrayIndexOffset(slot, e, e.line);
                 }
                 out->type = out->slot->type;
                 rejectStructByValue(out->type, e.line, "a compound assignment on a struct");
@@ -1516,7 +1567,7 @@ class Builder {
                     std::string mangled = mangleStaticName(
                         currentSourceFile_,
                         currentFunctionName_ + "_" + s.declName + "_" + std::to_string(nextStaticLocalId_++));
-                    ir::Slot *slot = allocSlot(ir::SlotKind::Global, mangled, s.arraySize);
+                    ir::Slot *slot = allocSlot(ir::SlotKind::Global, mangled, s.arraySize, s.arrayDims);
                     slot->type = resolveStructType(s.type, s.line);
                     slot->isStatic = true;
                     slot->isConst = s.isConst;
@@ -1553,7 +1604,7 @@ class Builder {
                     return out;
                 }
                 out->kind = ir::StmtKind::LocalDecl;
-                ir::Slot *slot = allocSlot(ir::SlotKind::Local, s.declName, s.arraySize);
+                ir::Slot *slot = allocSlot(ir::SlotKind::Local, s.declName, s.arraySize, s.arrayDims);
                 slot->type = resolveStructType(s.type, s.line);
                 slot->isConst = s.isConst;
                 slot->isRegister = s.isRegister;

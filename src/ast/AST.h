@@ -58,6 +58,11 @@ struct Expr {
     std::unique_ptr<Expr> lhs;  // Binary lhs, Index/Assign(CompoundAssign) subscript, DerefAssign
                                  // (CompoundDerefAssign) pointer, CallPtr callee, Ternary condition,
                                  // MemberAccess/MemberAssign(CompoundMemberAssign) base expression
+    // Index/Assign(CompoundAssign) on a multi-dimensional array (`a[i][j]`):
+    // every subscript in source order, including the first (which `lhs`
+    // above also holds, for a plain one-dimensional access). Empty for a
+    // one-dimensional access - IRBuilder falls back to `lhs` alone then.
+    std::vector<std::unique_ptr<Expr>> indices;
     std::unique_ptr<Expr> rhs;                  // Binary rhs, Assign(DerefAssign/CompoundAssign) value,
                                                   // Unary/Cast operand, Sizeof expression, Ternary then-branch,
                                                   // MemberAssign/CompoundMemberAssign value
@@ -128,6 +133,10 @@ struct Stmt {
     Type type;                                     // LocalDecl: declared type (scalar, or array element type)
     ExprPtr initOrReturnOrExpr;                   // LocalDecl init / Return value / ExprStmt expr
     int arraySize = 0;                            // LocalDecl: >0 means an array of this many words
+    // LocalDecl: declared dimension sizes for a multi-dimensional array
+    // (e.g. {3,4} for `int a[3][4]`), product == arraySize; empty or a
+    // single element for an ordinary one-dimensional array.
+    std::vector<int> arrayDims;
     std::vector<ArrayInitElem> arrayInit;         // LocalDecl array: initializer (padded with 0s)
     std::string asmText;                           // Asm: raw text between the braces, verbatim
     // LocalDecl: 'static' storage duration - initOrReturnOrExpr (if set) must be a
@@ -188,6 +197,10 @@ struct GlobalVar {
     double floatInitValue = 0;   // valid only when hasFloatInit
     int line = 0;
     int arraySize = 0;            // >0 means an array of this many words
+    // Declared dimension sizes for a multi-dimensional array (product ==
+    // arraySize); empty or a single element for an ordinary one-dimensional
+    // array - see Stmt::arrayDims's own comment.
+    std::vector<int> arrayDims;
     std::vector<ArrayInitElem> arrayInit;  // array initializer (padded with 0s); unused for scalars
     bool hasAddress = false;       // '@' address given explicitly
     long address = 0;

@@ -185,6 +185,9 @@ class Lowerer {
     Program &combined_;
     std::map<std::string, Type> varTypes_;
     std::set<std::string> arrayVars_;
+    // Per-array declared dimension count (DIM A(10,10) -> 2), only used to
+    // validate a use site's own subscript count - see ensureArray/lowerIndices.
+    std::map<std::string, size_t> arrayDimCount_;
     bool gosubGlobalsAdded_ = false;
     bool gosubUsed_ = false;
     int gosubCounter_ = 0;
@@ -213,7 +216,14 @@ class Lowerer {
         combined_.globals.push_back(std::move(g));
     }
 
-    void ensureArray(const std::string &name, int size, int line) {
+    // `sizes` is one entry per DIM dimension (DIM A(10,10) -> {10,10}),
+    // each an inclusive 0..n upper bound, same as the one-dimensional case
+    // already was. GlobalVar::arrayDims/arraySize follow the same
+    // product-of-dimensions convention BuildAst.cpp uses for a C
+    // `int a[3][4];` (see AST.h's own comment) - IRBuilder's
+    // buildArrayIndexOffset combines a multi-subscript access the same way
+    // regardless of which frontend produced the declaration.
+    void ensureArray(const std::string &name, const std::vector<int> &sizes, int line) {
         if (varTypes_.count(name) || arrayVars_.count(name)) {
             err(line, srcPath_, "array '" + name + "' is already declared");
         }
@@ -221,10 +231,16 @@ class Lowerer {
         Type type{BaseType::Int};
         varTypes_[name] = type;
         arrayVars_.insert(name);
+        arrayDimCount_[name] = sizes.size();
         GlobalVar g;
         g.name = name;
         g.type = type;
-        g.arraySize = size + 1;  // DIM A(n) is an inclusive 0..n range.
+        g.arraySize = 1;
+        for (int sz : sizes) {
+            int dim = sz + 1;  // DIM A(n) is an inclusive 0..n range.
+            g.arrayDims.push_back(dim);
+            g.arraySize *= dim;
+        }
         g.arrayInit.resize(g.arraySize);  // zero-filled, same as a plain C `int a[n];` - see BuildAst.cpp's own padArrayInit.
         g.line = line;
         g.sourceFile = srcPath_;
@@ -395,6 +411,26 @@ class Lowerer {
         return e;
     }
 
+    // Validates `idxCtxs.size()` against the array's own declared
+    // dimension count, then lowers every subscript into `e` the same way
+    // BuildAst.cpp's own buildIndices does: `lhs` always holds the first
+    // (the one-dimensional case IRBuilder already expects), `indices`
+    // additionally holds all of them when there's more than one.
+    void lowerIndices(const std::string &name, const std::vector<BasicParser::ExprContext *> &idxCtxs, Expr &e,
+                       int line) {
+        auto it = arrayDimCount_.find(name);
+        size_t declared = it != arrayDimCount_.end() ? it->second : 1;
+        if (idxCtxs.size() != declared) {
+            err(line, srcPath_,
+                "'" + name + "' was DIM'd with " + std::to_string(declared) + " dimension(s) but indexed with " +
+                    std::to_string(idxCtxs.size()));
+        }
+        e.lhs = lowerExpr(idxCtxs[0]);
+        if (idxCtxs.size() > 1) {
+            for (auto *idxCtx : idxCtxs) e.indices.push_back(lowerExpr(idxCtx));
+        }
+    }
+
     ExprPtr makeCompoundAssign(const std::string &name, const std::string &op, ExprPtr val, int line) {
         auto e = std::make_unique<Expr>();
         e->kind = ExprKind::CompoundAssign;
@@ -427,9 +463,11 @@ class Lowerer {
         int line = lineOf(s);
         if (auto *c = dynamic_cast<BasicParser::LetStmtContext *>(s)) {
             std::string name = c->target->getText();
-            if (c->idx) {
+            if (!c->idx.empty()) {
                 if (!arrayVars_.count(name)) err(line, srcPath_, "array '" + name + "' used before DIM");
-                return makeExprStmt(makeAssign(name, lowerExpr(c->idx), lowerExpr(c->val), line), line);
+                auto e = makeAssign(name, nullptr, lowerExpr(c->val), line);
+                lowerIndices(name, c->idx, *e, line);
+                return makeExprStmt(std::move(e), line);
             }
             ensureScalar(name, line);
             return makeExprStmt(makeAssign(name, nullptr, lowerExpr(c->val), line), line);
@@ -455,7 +493,9 @@ class Lowerer {
             return makeGoto("__basic_gosub_dispatch", line);
         }
         if (auto *c = dynamic_cast<BasicParser::DimStmtContext *>(s)) {
-            ensureArray(c->name->getText(), std::stoi(c->size->getText()), line);
+            std::vector<int> sizes;
+            for (auto *tok : c->dims) sizes.push_back(std::stoi(tok->getText()));
+            ensureArray(c->name->getText(), sizes, line);
             return makeEmpty(line);
         }
         if (dynamic_cast<BasicParser::EndStmtContext *>(s)) {
@@ -572,7 +612,7 @@ class Lowerer {
             e->kind = ExprKind::Index;
             e->line = line;
             e->name = name;
-            e->lhs = lowerExpr(c->idx);
+            lowerIndices(name, c->idx, *e, line);
             return e;
         }
         if (auto *c = dynamic_cast<BasicParser::VarExprContext *>(ctx)) {

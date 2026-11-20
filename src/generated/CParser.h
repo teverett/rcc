@@ -515,11 +515,15 @@ public:
   public:
     ExternArrayDeclaratorContext(ExternDeclaratorContext *ctx);
 
-    antlr4::Token *size = nullptr;
+    antlr4::Token *numberToken = nullptr;
+    std::vector<antlr4::Token *> dims;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    antlr4::tree::TerminalNode *NUMBER();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> NUMBER();
+    antlr4::tree::TerminalNode* NUMBER(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -563,16 +567,19 @@ public:
   public:
     GlobalArrayDeclaratorContext(GlobalDeclaratorContext *ctx);
 
-    antlr4::Token *size = nullptr;
+    antlr4::Token *numberToken = nullptr;
+    std::vector<antlr4::Token *> dims;
     antlr4::Token *addr = nullptr;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    std::vector<antlr4::tree::TerminalNode *> NUMBER();
-    antlr4::tree::TerminalNode* NUMBER(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
     antlr4::tree::TerminalNode *ASSIGN();
     ArrayInitContext *arrayInit();
     antlr4::tree::TerminalNode *AT();
+    std::vector<antlr4::tree::TerminalNode *> NUMBER();
+    antlr4::tree::TerminalNode* NUMBER(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -903,13 +910,17 @@ public:
   public:
     LocalArrayDeclaratorContext(LocalDeclaratorContext *ctx);
 
-    antlr4::Token *size = nullptr;
+    antlr4::Token *numberToken = nullptr;
+    std::vector<antlr4::Token *> dims;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    antlr4::tree::TerminalNode *NUMBER();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
     antlr4::tree::TerminalNode *ASSIGN();
     ArrayInitContext *arrayInit();
+    std::vector<antlr4::tree::TerminalNode *> NUMBER();
+    antlr4::tree::TerminalNode* NUMBER(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -944,13 +955,17 @@ public:
   public:
     StaticLocalArrayDeclaratorContext(StaticLocalDeclaratorContext *ctx);
 
-    antlr4::Token *size = nullptr;
+    antlr4::Token *numberToken = nullptr;
+    std::vector<antlr4::Token *> dims;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    antlr4::tree::TerminalNode *NUMBER();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
     antlr4::tree::TerminalNode *ASSIGN();
     ArrayInitContext *arrayInit();
+    std::vector<antlr4::tree::TerminalNode *> NUMBER();
+    antlr4::tree::TerminalNode* NUMBER(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -1088,15 +1103,18 @@ public:
   public:
     AssignIndexExprContext(ExprContext *ctx);
 
-    CParser::ExprContext *idx = nullptr;
+    CParser::ExprContext *exprContext = nullptr;
+    std::vector<ExprContext *> idx;
     CParser::AssignOpContext *op = nullptr;
     CParser::ExprContext *val = nullptr;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
+    AssignOpContext *assignOp();
     std::vector<ExprContext *> expr();
     ExprContext* expr(size_t i);
-    AssignOpContext *assignOp();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -1229,13 +1247,17 @@ public:
     PreIncDecIndexExprContext(CondExprContext *ctx);
 
     antlr4::Token *op = nullptr;
-    CParser::ExprContext *idx = nullptr;
+    CParser::ExprContext *exprContext = nullptr;
+    std::vector<ExprContext *> idx;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    ExprContext *expr();
     antlr4::tree::TerminalNode *INC();
     antlr4::tree::TerminalNode *DEC();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
+    std::vector<ExprContext *> expr();
+    ExprContext* expr(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -1293,14 +1315,18 @@ public:
   public:
     PostIncDecIndexExprContext(CondExprContext *ctx);
 
-    CParser::ExprContext *idx = nullptr;
+    CParser::ExprContext *exprContext = nullptr;
+    std::vector<ExprContext *> idx;
     antlr4::Token *op = nullptr;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    antlr4::tree::TerminalNode *RBRACK();
-    ExprContext *expr();
     antlr4::tree::TerminalNode *INC();
     antlr4::tree::TerminalNode *DEC();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
+    std::vector<ExprContext *> expr();
+    ExprContext* expr(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };
@@ -1498,10 +1524,15 @@ public:
   public:
     IndexExprContext(CondExprContext *ctx);
 
+    CParser::ExprContext *exprContext = nullptr;
+    std::vector<ExprContext *> idx;
     antlr4::tree::TerminalNode *IDENT();
-    antlr4::tree::TerminalNode *LBRACK();
-    ExprContext *expr();
-    antlr4::tree::TerminalNode *RBRACK();
+    std::vector<antlr4::tree::TerminalNode *> LBRACK();
+    antlr4::tree::TerminalNode* LBRACK(size_t i);
+    std::vector<antlr4::tree::TerminalNode *> RBRACK();
+    antlr4::tree::TerminalNode* RBRACK(size_t i);
+    std::vector<ExprContext *> expr();
+    ExprContext* expr(size_t i);
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };

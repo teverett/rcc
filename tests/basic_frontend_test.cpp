@@ -125,6 +125,26 @@ void testArrayAndControlFlowErrors() {
     requireThrows([] { compileBasic("10 FOR I = 1 TO 3\n20 END\n"); }, "FOR with no matching NEXT");
 }
 
+// DIM A(r,c) declares a multi-dimensional array (GlobalVar::arrayDims);
+// A(i,j) must combine both subscripts into one linear IR offset via
+// IRBuilder's buildArrayIndexOffset - this exercises that path through
+// both a read and a write.
+void testMultiDimArray() {
+    compileBasic(
+        "10 DIM A(2,3)\n"
+        "20 LET A(1,2) = 7\n"
+        "30 LET B = A(1,2)\n"
+        "40 END\n");
+}
+
+// Indexing a multi-dimensional array with the wrong number of
+// subscripts is a frontend-level check (lowerIndices), not something
+// IRBuilder itself would catch.
+void testMultiDimArraySubscriptCountMismatch() {
+    requireThrows([] { compileBasic("10 DIM A(2,3)\n20 LET B = A(1)\n30 END\n"); },
+                  "dimension(s) but indexed with");
+}
+
 }  // namespace
 
 int main() {
@@ -133,6 +153,8 @@ int main() {
         testNestedForNext();
         testGosubReturnDispatch();
         testArrayAndControlFlowErrors();
+        testMultiDimArray();
+        testMultiDimArraySubscriptCountMismatch();
     } catch (const std::exception &e) {
         std::cerr << "FAIL: " << e.what() << "\n";
         return 1;

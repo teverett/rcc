@@ -28,7 +28,7 @@ line
 // already consumed before either is reached, so there's no conflict with
 // `line`'s own leading NUMBER).
 statement
-    : 'LET'? target=IDENT ('(' idx=expr ')')? '=' val=expr                        # letStmt
+    : 'LET'? target=IDENT ('(' idx+=expr (',' idx+=expr)* ')')? '=' val=expr      # letStmt
     | 'PRINT' printList?                                                          # printStmt
     | 'INPUT' (prompt=STRINGLIT ',')? target=IDENT                                # inputStmt
     | 'IF' cond=expr 'THEN' thenStmt=statement ('ELSE' elseStmt=statement)?       # ifStmt
@@ -37,7 +37,7 @@ statement
     | 'GOTO' target=NUMBER                                                       # gotoStmt
     | 'GOSUB' target=NUMBER                                                       # gosubStmt
     | 'RETURN'                                                                    # returnStmt
-    | 'DIM' name=IDENT '(' size=NUMBER ')'                                        # dimStmt
+    | 'DIM' name=IDENT '(' dims+=NUMBER (',' dims+=NUMBER)* ')'                   # dimStmt
     | 'END'                                                                       # endStmt
     // 'IF X THEN 100' (no explicit GOTO) is the standard BASIC shorthand
     // for 'IF X THEN GOTO 100' - a bare line number, reachable only
@@ -62,7 +62,7 @@ printList
 // lowered, not here - same "grammar only admits the syntax" approach
 // CParser.g4 takes throughout).
 expr
-    : target=IDENT '(' idx=expr ')'                     # indexExpr
+    : target=IDENT '(' idx+=expr (',' idx+=expr)* ')'   # indexExpr
     | IDENT                                             # varExpr
     | NUMBER                                            # numExpr
     | STRINGLIT                                         # stringExpr
