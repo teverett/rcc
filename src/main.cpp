@@ -43,6 +43,7 @@
 #include "optimizers/constant_propagation/ConstantPropagation.h"
 #include "optimizers/dead_code_elimination/DeadCodeElimination.h"
 #include "optimizers/dead_store_elimination/DeadStoreElimination.h"
+#include "optimizers/guard_nonneg/GuardNonNegative.h"
 #include "optimizers/identical_code_folding/IdenticalCodeFolding.h"
 #include "optimizers/induction_nonneg/InductionNonNegative.h"
 #include "optimizers/local_cse/LocalCSE.h"
@@ -552,6 +553,12 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // them doesn't actually matter beyond that.
         rcc::InductionNonNegative indNonNeg;
         indNonNeg.run(irProg, srcPath);
+        // After InductionNonNegative so a slot it already proved
+        // non-negative is skipped here too (see GuardNonNegative.h) -
+        // the two passes recognize disjoint idioms, so ordering between
+        // them otherwise doesn't matter.
+        rcc::GuardNonNegative guardNonNeg;
+        guardNonNeg.run(irProg, srcPath);
         // Before DeadCodeElimination, so a LocalDecl this pass strips down
         // to a bare, unread declaration looks unused to it too.
         rcc::DeadStoreElimination dse;
