@@ -38,7 +38,7 @@ namespace rcc {
 //
 // Every 8080 jump/call is a full 16-bit absolute address, so there's no branch-range workaround
 // needed anywhere in this backend.
-class I8080Codegen : public Backend {
+class I8080Codegen : public Backend, protected TextCodegenBase {
    public:
     // Label for one scratch word; `role` is "a"/"b"/"ret", `i` is the word index (0 = least
     // significant). Public so the free function in I8080Codegen.cpp's anonymous namespace can
@@ -187,7 +187,9 @@ class I8080Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // "label: db lo, hi, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

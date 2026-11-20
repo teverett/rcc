@@ -29,41 +29,44 @@ void PIC18Codegen::declareRam(const std::string &lbl, int count, bool zeroAtStar
 
 void PIC18Codegen::copy2(const std::string &dst, const std::string &src) {
     if (dst == src) return;
-    code_ << "    movff " << src << "," << dst << "\n";
-    code_ << "    movff " << src << "+1," << dst << "+1\n";
+    emit("movff", cat(src, ",", dst));
+    emit("movff", cat(src, "+1,", dst, "+1"));
 }
 
-void PIC18Codegen::clear2(const std::string &lbl) { code_ << "    clrf " << lbl << "\n    clrf " << lbl << "+1\n"; }
+void PIC18Codegen::clear2(const std::string &lbl) {
+    emit("clrf", lbl);
+    emit("clrf", cat(lbl, "+1"));
+}
 
 void PIC18Codegen::shiftOneBit(const std::string &lbl, bool isLeft) {
-    code_ << "    bcf STATUS,0\n";
+    emit("bcf", "STATUS,0");
     if (isLeft) {
-        code_ << "    rlcf " << lbl << ",f\n";
-        code_ << "    rlcf " << lbl << "+1,f\n";
+        emit("rlcf", cat(lbl, ",f"));
+        emit("rlcf", cat(lbl, "+1,f"));
     } else {
-        code_ << "    rrcf " << lbl << "+1,f\n";
-        code_ << "    rrcf " << lbl << ",f\n";
+        emit("rrcf", cat(lbl, "+1,f"));
+        emit("rrcf", cat(lbl, ",f"));
     }
 }
 
 // dst = a + b via ADDWFC's carry chain; no manual fixup needed.
 void PIC18Codegen::add16(const std::string &dst, const std::string &a, const std::string &b) {
-    code_ << "    movf " << b << ",w\n";
-    code_ << "    addwf " << a << ",w\n";
-    code_ << "    movwf " << dst << "\n";
-    code_ << "    movf " << b << "+1,w\n";
-    code_ << "    addwfc " << a << "+1,w\n";
-    code_ << "    movwf " << dst << "+1\n";
+    emit("movf", cat(b, ",w"));
+    emit("addwf", cat(a, ",w"));
+    emit("movwf", dst);
+    emit("movf", cat(b, "+1,w"));
+    emit("addwfc", cat(a, "+1,w"));
+    emit("movwf", cat(dst, "+1"));
 }
 
 // dst = a - b via SUBWFB's borrow chain.
 void PIC18Codegen::sub16(const std::string &dst, const std::string &a, const std::string &b) {
-    code_ << "    movf " << b << ",w\n";
-    code_ << "    subwf " << a << ",w\n";
-    code_ << "    movwf " << dst << "\n";
-    code_ << "    movf " << b << "+1,w\n";
-    code_ << "    subwfb " << a << "+1,w\n";
-    code_ << "    movwf " << dst << "+1\n";
+    emit("movf", cat(b, ",w"));
+    emit("subwf", cat(a, ",w"));
+    emit("movwf", dst);
+    emit("movf", cat(b, "+1,w"));
+    emit("subwfb", cat(a, "+1,w"));
+    emit("movwf", cat(dst, "+1"));
 }
 
 // Size, in bytes, of `FSTACK`: more headroom for simultaneous call
@@ -75,28 +78,38 @@ constexpr int kFrameStackBytes = 48;
 // caller computed for this call's frame, immediately before `call`) as
 // this call's `FP`.
 void PIC18Codegen::emitPrologue() {
-    code_ << "    movf NFP,w\n    addlw 255\n    movwf ptr\n";  // ptr = NFP-1 (255 == -1 mod 256)
-    code_ << "    movf ptr,w\n    movwf FSR0L\n";
-    code_ << "    movf FP,w\n    movwf INDF0\n";  // [NFP-1] = caller's FP
-    code_ << "    movf NFP,w\n    movwf FP\n";
+    emit("movf", "NFP,w");
+    emit("addlw", "255");  // ptr = NFP-1 (255 == -1 mod 256)
+    emit("movwf", "ptr");
+    emit("movf", "ptr,w");
+    emit("movwf", "FSR0L");
+    emit("movf", "FP,w");
+    emit("movwf", "INDF0");  // [NFP-1] = caller's FP
+    emit("movf", "NFP,w");
+    emit("movwf", "FP");
 }
 
 // Reverse: restores the caller's `FP` from `FP-1`, before `return`.
 void PIC18Codegen::emitEpilogue() {
-    code_ << "    movf FP,w\n    addlw 255\n    movwf ptr\n";  // ptr = FP-1
-    code_ << "    movf ptr,w\n    movwf FSR0L\n";
-    code_ << "    movf INDF0,w\n    movwf FP\n";
+    emit("movf", "FP,w");
+    emit("addlw", "255");  // ptr = FP-1
+    emit("movwf", "ptr");
+    emit("movf", "ptr,w");
+    emit("movwf", "FSR0L");
+    emit("movf", "INDF0,w");
+    emit("movwf", "FP");
 }
 
 void PIC18Codegen::slotAddrToPtr(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    movlw " << label(slot) << "\n    movwf ptr\n";
+        emit("movlw", label(slot));
+        emit("movwf", "ptr");
         return;
     }
     int off = slotFrameOffsetBytes(slot);
-    code_ << "    movf FP,w\n";
-    if (off != 0) code_ << "    addlw " << off << "\n";
-    code_ << "    movwf ptr\n";
+    emit("movf", "FP,w");
+    if (off != 0) emit("addlw", off);
+    emit("movwf", "ptr");
 }
 
 void PIC18Codegen::loadSlotToAc(const ir::Slot *slot) {
@@ -121,73 +134,88 @@ void PIC18Codegen::storeAcToSlot(const ir::Slot *slot) {
 
 void PIC18Codegen::inc16(const std::string &lbl) {
     std::string Lskip = newLabel();
-    code_ << "    incfsz " << lbl << ",f\n";
-    code_ << "    goto " << Lskip << "\n";
-    code_ << "    incf " << lbl << "+1,f\n";
-    code_ << Lskip << ":\n";
+    emit("incfsz", cat(lbl, ",f"));
+    emit("goto", Lskip);
+    emit("incf", cat(lbl, "+1,f"));
+    emitLabel(Lskip);
 }
 
-void PIC18Codegen::testAcZero() { code_ << "    movf ac,w\n    iorwf ac+1,w\n"; }
+void PIC18Codegen::testAcZero() {
+    emit("movf", "ac,w");
+    emit("iorwf", "ac+1,w");
+}
 
 void PIC18Codegen::gotoIfZero(const std::string &target) {
-    code_ << "    btfsc STATUS,2\n";
-    code_ << "    goto " << target << "\n";
+    emit("btfsc", "STATUS,2");
+    emit("goto", target);
 }
 
 void PIC18Codegen::gotoIfNonZero(const std::string &target) {
-    code_ << "    btfss STATUS,2\n";
-    code_ << "    goto " << target << "\n";
+    emit("btfss", "STATUS,2");
+    emit("goto", target);
 }
 
 // POSTINC0 reads/writes through FSR0 and auto-increments it in the same
 // instruction, one fewer than PIC16's FSR/INDF-plus-explicit-INCF pair.
 void PIC18Codegen::storeAcIndirect(int width) {
-    code_ << "    movf ptr,w\n    movwf FSR0L\n";
+    emit("movf", "ptr,w");
+    emit("movwf", "FSR0L");
     if (width == 1) {
-        code_ << "    movf ac,w\n    movwf INDF0\n";
+        emit("movf", "ac,w");
+        emit("movwf", "INDF0");
         return;
     }
-    code_ << "    movf ac,w\n    movwf POSTINC0\n";
-    code_ << "    movf ac+1,w\n    movwf INDF0\n";
+    emit("movf", "ac,w");
+    emit("movwf", "POSTINC0");
+    emit("movf", "ac+1,w");
+    emit("movwf", "INDF0");
 }
 
 void PIC18Codegen::loadAcIndirect(int width, bool isUnsigned) {
-    code_ << "    movf ptr,w\n    movwf FSR0L\n";
+    emit("movf", "ptr,w");
+    emit("movwf", "FSR0L");
     if (width == 1) {
-        code_ << "    movf INDF0,w\n    movwf ac\n";
+        emit("movf", "INDF0,w");
+        emit("movwf", "ac");
         signExtendAcHighByte(isUnsigned);
         return;
     }
-    code_ << "    movf POSTINC0,w\n    movwf ac\n";
-    code_ << "    movf INDF0,w\n    movwf ac+1\n";
+    emit("movf", "POSTINC0,w");
+    emit("movwf", "ac");
+    emit("movf", "INDF0,w");
+    emit("movwf", "ac+1");
 }
 
 void PIC18Codegen::signExtendAcHighByte(bool isUnsigned) {
     if (isUnsigned) {
-        code_ << "    clrf ac+1\n";
+        emit("clrf", "ac+1");
         return;
     }
-    code_ << "    movf ac,w\n    andlw 0x80\n";
+    emit("movf", "ac,w");
+    emit("andlw", "0x80");
     std::string Lneg = newLabel(), Ldone = newLabel();
     gotoIfNonZero(Lneg);
-    code_ << "    clrf ac+1\n    goto " << Ldone << "\n";
-    code_ << Lneg << ":\n    movlw 0xFF\n    movwf ac+1\n";
-    code_ << Ldone << ":\n";
+    emit("clrf", "ac+1");
+    emit("goto", Ldone);
+    emitLabel(Lneg);
+    emit("movlw", "0xFF");
+    emit("movwf", "ac+1");
+    emitLabel(Ldone);
 }
 
 void PIC18Codegen::loadAcFromLabel(const std::string &lbl, int width, bool isUnsigned) {
-    code_ << "    movff " << lbl << ",ac\n";
+    emit("movff", cat(lbl, ",ac"));
     if (width == 1) {
         signExtendAcHighByte(isUnsigned);
         return;
     }
-    code_ << "    movff " << lbl << "+1,ac+1\n";
+    emit("movff", cat(lbl, "+1,ac+1"));
 }
 
 void PIC18Codegen::storeAcToLabel(const std::string &lbl, int width) {
-    code_ << "    movff ac," << lbl << "\n";
+    emit("movff", cat("ac,", lbl));
     if (width == 1) return;
-    code_ << "    movff ac+1," << lbl << "+1\n";
+    emit("movff", cat("ac+1,", lbl, "+1"));
 }
 
 // Runtime push/pop on the shared `SSTACK` region via `SP`/FSR0.
@@ -196,29 +224,46 @@ void PIC18Codegen::storeAcToLabel(const std::string &lbl, int width) {
 // explicitly before each plain INDF0 access. `SP` is kept in sync with
 // FSR0L by copying it back out afterward.
 void PIC18Codegen::pushCell2(const std::string &src) {
-    code_ << "    movf SP,w\n    movwf FSR0L\n";
-    code_ << "    movf " << src << ",w\n    movwf POSTINC0\n";
-    code_ << "    movf " << src << "+1,w\n    movwf POSTINC0\n";
-    code_ << "    movf FSR0L,w\n    movwf SP\n";
+    emit("movf", "SP,w");
+    emit("movwf", "FSR0L");
+    emit("movf", cat(src, ",w"));
+    emit("movwf", "POSTINC0");
+    emit("movf", cat(src, "+1,w"));
+    emit("movwf", "POSTINC0");
+    emit("movf", "FSR0L,w");
+    emit("movwf", "SP");
 }
 
 void PIC18Codegen::popCell2(const std::string &dst) {
-    code_ << "    movf SP,w\n    movwf FSR0L\n";
-    code_ << "    decf FSR0L,f\n    movf INDF0,w\n    movwf " << dst << "+1\n";
-    code_ << "    decf FSR0L,f\n    movf INDF0,w\n    movwf " << dst << "\n";
-    code_ << "    movf FSR0L,w\n    movwf SP\n";
+    emit("movf", "SP,w");
+    emit("movwf", "FSR0L");
+    emit("decf", "FSR0L,f");
+    emit("movf", "INDF0,w");
+    emit("movwf", cat(dst, "+1"));
+    emit("decf", "FSR0L,f");
+    emit("movf", "INDF0,w");
+    emit("movwf", dst);
+    emit("movf", "FSR0L,w");
+    emit("movwf", "SP");
 }
 
 void PIC18Codegen::pushPtrCell() {
-    code_ << "    movf SP,w\n    movwf FSR0L\n";
-    code_ << "    movf ptr,w\n    movwf POSTINC0\n";
-    code_ << "    movf FSR0L,w\n    movwf SP\n";
+    emit("movf", "SP,w");
+    emit("movwf", "FSR0L");
+    emit("movf", "ptr,w");
+    emit("movwf", "POSTINC0");
+    emit("movf", "FSR0L,w");
+    emit("movwf", "SP");
 }
 
 void PIC18Codegen::popPtrCell() {
-    code_ << "    movf SP,w\n    movwf FSR0L\n";
-    code_ << "    decf FSR0L,f\n    movf INDF0,w\n    movwf ptr\n";
-    code_ << "    movf FSR0L,w\n    movwf SP\n";
+    emit("movf", "SP,w");
+    emit("movwf", "FSR0L");
+    emit("decf", "FSR0L,f");
+    emit("movf", "INDF0,w");
+    emit("movwf", "ptr");
+    emit("movf", "FSR0L,w");
+    emit("movwf", "SP");
 }
 
 std::string PIC18Codegen::generate(const ir::Program &prog, bool objectMode) {
@@ -232,7 +277,16 @@ std::string PIC18Codegen::generate(const ir::Program &prog, bool objectMode) {
     if (objectMode) {
         // Plain compile-time equates, identical in every object and in
         // PIC18LinkerFactory.cpp's entry object, so none need relocation.
-        code_ << "ac = 0\nbc = 2\ncx = 4\ndx = 6\nptr = 8\nSP = 9\nSSTACK = 10\nFP = 34\nNFP = 35\nFSTACK = 36\n";
+        emitEquate("ac", 0);
+        emitEquate("bc", 2);
+        emitEquate("cx", 4);
+        emitEquate("dx", 6);
+        emitEquate("ptr", 8);
+        emitEquate("SP", 9);
+        emitEquate("SSTACK", 10);
+        emitEquate("FP", 34);
+        emitEquate("NFP", 35);
+        emitEquate("FSTACK", 36);
     } else {
         declareRam("ac", 2, false);
         declareRam("bc", 2, false);
@@ -326,12 +380,13 @@ std::map<std::string, std::string> PIC18Codegen::perFileAsm() const { return per
 void PIC18Codegen::genFunction(const ir::FunctionBody &fn, const std::string &extraPrologue) {
     paramCount_ = static_cast<int>(fn.func->params.size());
     frameSizeBytes_ = paramCount_ * 2 + fn.func->frameSize;
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     emitPrologue();
-    code_ << extraPrologue;
+    code_ << extraPrologue;  // a pre-built blob (globalInit's own text), not a hardcoded instruction
     genStmt(*fn.body);
     emitEpilogue();
-    code_ << "    return\n\n";
+    emit("return");
+    emitRaw("");
 }
 
 void PIC18Codegen::genStmt(const ir::Stmt &s) {
@@ -348,17 +403,17 @@ void PIC18Codegen::genStmt(const ir::Stmt &s) {
             gotoIfZero(s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    goto " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("goto", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testAcZero();
             gotoIfZero(Lend);
@@ -366,25 +421,25 @@ void PIC18Codegen::genStmt(const ir::Stmt &s) {
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    goto " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("goto", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    goto " << loopLabels_.back().second << "\n";
+            emit("goto", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    goto " << loopLabels_.back().first << "\n";
+            emit("goto", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
             emitEpilogue();
-            code_ << "    return\n";
+            emit("return");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -403,16 +458,15 @@ void PIC18Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    goto " << irLabel(s.labelId) << "\n";
+            emit("goto", irLabel(s.labelId));
             return;
         }
     }
@@ -438,8 +492,10 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
-            code_ << "    movlw " << (v16 & 0xFF) << "\n    movwf ac\n";
-            code_ << "    movlw " << ((v16 >> 8) & 0xFF) << "\n    movwf ac+1\n";
+            emit("movlw", v16 & 0xFF);
+            emit("movwf", "ac");
+            emit("movlw", (v16 >> 8) & 0xFF);
+            emit("movwf", "ac+1");
             return;
         }
         case ir::ExprKind::Var: {
@@ -465,7 +521,8 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // ac = pointer value
-            code_ << "    movf ac,w\n    movwf ptr\n";
+            emit("movf", "ac,w");
+            emit("movwf", "ptr");
             pushPtrCell();
             genExpr(*e.rhs);
             popPtrCell();
@@ -494,7 +551,8 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // ac = pointer value
-            code_ << "    movf ac,w\n    movwf ptr\n";
+            emit("movf", "ac,w");
+            emit("movwf", "ptr");
             genCompoundThroughPtr(e);
             return;
         }
@@ -505,26 +563,29 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
             std::string Ldone = newLabel();
             gotoIfZero(Lelse);
             genExpr(*e.rhs);
-            code_ << "    goto " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("goto", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    comf ac,f\n    comf ac+1,f\n";
+                emit("comf", "ac,f");
+                emit("comf", "ac+1,f");
                 inc16("ac");
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // ac = pointer value
-                code_ << "    movf ac,w\n    movwf ptr\n";
+                emit("movf", "ac,w");
+                emit("movwf", "ptr");
                 loadAcIndirect(widthOfType(e.type), e.type.isUnsigned);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    comf ac,f\n    comf ac+1,f\n";
+                emit("comf", "ac,f");
+                emit("comf", "ac+1,f");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -541,14 +602,17 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
                 // ptr = FP + newFrameOff + i*2, recomputed fresh for every
                 // argument since evaluating one may itself call through a
                 // complete frame.
-                code_ << "    movf FP,w\n    addlw " << (newFrameOff + static_cast<int>(i) * 2) << "\n";
-                code_ << "    movwf ptr\n";
+                emit("movf", "FP,w");
+                emit("addlw", newFrameOff + static_cast<int>(i) * 2);
+                emit("movwf", "ptr");
                 storeAcIndirect(2);  // every argument reserves a native-int-width slot
             }
             // NFP = FP + newFrameOff, recomputed fresh immediately before
             // `call` so no argument evaluation above can have clobbered it.
-            code_ << "    movf FP,w\n    addlw " << newFrameOff << "\n    movwf NFP\n";
-            code_ << "    call " << label(e.func) << "\n";
+            emit("movf", "FP,w");
+            emit("addlw", newFrameOff);
+            emit("movwf", "NFP");
+            emit("call", label(e.func));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -566,16 +630,22 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
             // evaluating the callee, which may itself call through a
             // normal frame.
             int newFrameOff = frameSizeBytes_ + 1;
-            code_ << "    movf FP,w\n    addlw " << newFrameOff << "\n    movwf NFP\n";
+            emit("movf", "FP,w");
+            emit("addlw", newFrameOff);
+            emit("movwf", "NFP");
             std::string Lret = newLabel();
-            code_ << "    push\n";
-            code_ << "    movlwcl " << Lret << "\n    movwf TOSL\n";
-            code_ << "    movlwch " << Lret << "\n    movwf TOSH\n";
-            code_ << "    clrf TOSU\n";
-            code_ << "    clrf PCLATU\n";
-            code_ << "    movf ac+1,w\n    movwf PCLATH\n";
-            code_ << "    movf ac,w\n    movwf PCL\n";
-            code_ << Lret << ":\n";
+            emit("push");
+            emit("movlwcl", Lret);
+            emit("movwf", "TOSL");
+            emit("movlwch", Lret);
+            emit("movwf", "TOSH");
+            emit("clrf", "TOSU");
+            emit("clrf", "PCLATU");
+            emit("movf", "ac+1,w");
+            emit("movwf", "PCLATH");
+            emit("movf", "ac,w");
+            emit("movwf", "PCL");
+            emitLabel(Lret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -588,7 +658,7 @@ void PIC18Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // Global-interrupt enable/disable: INTCON<7> (GIE).
-            code_ << "    " << (e.op == "ion" ? "bsf" : "bcf") << " INTCON,7\n";
+            emit(e.op == "ion" ? "bsf" : "bcf", "INTCON,7");
             return;
         }
         case ir::ExprKind::Func:
@@ -604,20 +674,24 @@ void PIC18Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
         // `slot` is the array itself; its base address is computed into
         // `bc`, since `ac` still holds `index*2`.
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    movlw " << label(slot) << "\n    movwf bc\n";
+            emit("movlw", label(slot));
+            emit("movwf", "bc");
         } else {
-            code_ << "    movf FP,w\n";
+            emit("movf", "FP,w");
             int off = slotFrameOffsetBytes(slot);
-            if (off != 0) code_ << "    addlw " << off << "\n";
-            code_ << "    movwf bc\n";
+            if (off != 0) emit("addlw", off);
+            emit("movwf", "bc");
         }
     } else {
         // `slot` holds a pointer value - save index*2 in `bc` before
         // loadSlotToAc() overwrites `ac` with that value.
-        code_ << "    movf ac,w\n    movwf bc\n";
+        emit("movf", "ac,w");
+        emit("movwf", "bc");
         loadSlotToAc(slot);  // ac = the pointer's own current value
     }
-    code_ << "    movf bc,w\n    addwf ac,w\n    movwf ptr\n";
+    emit("movf", "bc,w");
+    emit("addwf", "ac,w");
+    emit("movwf", "ptr");
 }
 
 void PIC18Codegen::genIndex(const ir::Expr &e) {
@@ -653,21 +727,24 @@ void PIC18Codegen::emitInitElem(std::ostream &out, const std::string &base, int 
 void PIC18Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    movlw " << label(operand.slot) << "\n    movwf ac\n";
+            emit("movlw", label(operand.slot));
+            emit("movwf", "ac");
         } else {
             // A Local/Param's address is FP plus a compile-time offset -
             // a runtime value, unlike a Global's fixed label above.
-            code_ << "    movf FP,w\n";
+            emit("movf", "FP,w");
             int off = slotFrameOffsetBytes(operand.slot);
-            if (off != 0) code_ << "    addlw " << off << "\n";
-            code_ << "    movwf ac\n";
+            if (off != 0) emit("addlw", off);
+            emit("movwf", "ac");
         }
-        code_ << "    clrf ac+1\n";
+        emit("clrf", "ac+1");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    movf ptr,w\n    movwf ac\n    clrf ac+1\n";
+        emit("movf", "ptr,w");
+        emit("movwf", "ac");
+        emit("clrf", "ac+1");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
@@ -676,8 +753,10 @@ void PIC18Codegen::genAddrOf(const ir::Expr &operand) {
         // instruction word, so there's no single instruction for taking
         // a function's address as plain data; see genExpr's CallPtr case
         // for calling through a value in this form.
-        code_ << "    movlwcl " << label(operand.func) << "\n    movwf ac\n";
-        code_ << "    movlwch " << label(operand.func) << "\n    movwf ac+1\n";
+        emit("movlwcl", label(operand.func));
+        emit("movwf", "ac");
+        emit("movlwch", label(operand.func));
+        emit("movwf", "ac+1");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -715,8 +794,12 @@ void PIC18Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.rhs);
         popCell2("bc");
         const char *insn = (op == "&") ? "andwf" : (op == "|") ? "iorwf" : "xorwf";
-        code_ << "    movf bc,w\n    " << insn << " ac,w\n    movwf ac\n";
-        code_ << "    movf bc+1,w\n    " << insn << " ac+1,w\n    movwf ac+1\n";
+        emit("movf", "bc,w");
+        emit(insn, "ac,w");
+        emit("movwf", "ac");
+        emit("movf", "bc+1,w");
+        emit(insn, "ac+1,w");
+        emit("movwf", "ac+1");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -738,16 +821,18 @@ void PIC18Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLef
     genExpr(lhs);
     pushCell2("ac");
     genExpr(rhs);
-    code_ << "    movf ac,w\n    movwf cx\n";
+    emit("movf", "ac,w");
+    emit("movwf", "cx");
     popCell2("ac");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    movf cx,w\n";
-    code_ << "    btfsc STATUS,2\n    goto " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("movf", "cx,w");
+    emit("btfsc", "STATUS,2");
+    emit("goto", Ldone);
     shiftOneBit("ac", isLeft);
-    code_ << "    decf cx,f\n";
-    code_ << "    goto " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("decf", "cx,f");
+    emit("goto", Lloop);
+    emitLabel(Ldone);
 }
 
 // True when `e` is an integer-promoted `unsigned char` (or narrower unsigned) operand: the
@@ -764,10 +849,10 @@ void PIC18Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
         genExpr(rhs);
         // popCell2() uses W as scratch, so bc=lhs must be popped before ac=rhs is read into W.
         popCell2("bc");
-        code_ << "    movf ac,w\n";
-        code_ << "    mulwf bc\n";
-        code_ << "    movff PRODL,ac\n";
-        code_ << "    movff PRODH,ac+1\n";
+        emit("movf", "ac,w");
+        emit("mulwf", "bc");
+        emit("movff", "PRODL,ac");
+        emit("movff", "PRODH,ac+1");
         return;
     }
     genExpr(lhs);
@@ -776,20 +861,24 @@ void PIC18Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     copy2("dx", "ac");
     popCell2("bc");
     clear2("ac");
-    code_ << "    movlw 16\n    movwf cx\n";
+    emit("movlw", 16);
+    emit("movwf", "cx");
     std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    movf cx,w\n";
-    code_ << "    btfsc STATUS,2\n    goto " << Ldone << "\n";
-    code_ << "    movf dx,w\n    andlw 1\n";
-    code_ << "    btfsc STATUS,2\n    goto " << Lskipadd << "\n";
+    emitLabel(Lloop);
+    emit("movf", "cx,w");
+    emit("btfsc", "STATUS,2");
+    emit("goto", Ldone);
+    emit("movf", "dx,w");
+    emit("andlw", 1);
+    emit("btfsc", "STATUS,2");
+    emit("goto", Lskipadd);
     add16("ac", "ac", "bc");
-    code_ << Lskipadd << ":\n";
+    emitLabel(Lskipadd);
     shiftOneBit("bc", /*isLeft=*/true);
     shiftOneBit("dx", /*isLeft=*/false);
-    code_ << "    decf cx,f\n";
-    code_ << "    goto " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("decf", "cx,f");
+    emit("goto", Lloop);
+    emitLabel(Ldone);
 }
 
 void PIC18Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder) {
@@ -800,13 +889,14 @@ void PIC18Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
     popCell2("dx");
     clear2("ac");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
+    emitLabel(Lloop);
     sub16("cx", "dx", "bc");
-    code_ << "    btfss STATUS,0\n    goto " << Ldone << "\n";
+    emit("btfss", "STATUS,0");
+    emit("goto", Ldone);
     copy2("dx", "cx");
     inc16("ac");
-    code_ << "    goto " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("goto", Lloop);
+    emitLabel(Ldone);
     if (wantRemainder) copy2("ac", "dx");
 }
 
@@ -825,20 +915,24 @@ void PIC18Codegen::genCompoundOp(const std::string &op, Type) {
     if (op == "*") {
         copy2("dx", "ac");  // dx = multiplier (rhs) - bc already holds the multiplicand (old)
         clear2("ac");
-        code_ << "    movlw 16\n    movwf cx\n";
+        emit("movlw", 16);
+        emit("movwf", "cx");
         std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    movf cx,w\n";
-        code_ << "    btfsc STATUS,2\n    goto " << Ldone << "\n";
-        code_ << "    movf dx,w\n    andlw 1\n";
-        code_ << "    btfsc STATUS,2\n    goto " << Lskipadd << "\n";
+        emitLabel(Lloop);
+        emit("movf", "cx,w");
+        emit("btfsc", "STATUS,2");
+        emit("goto", Ldone);
+        emit("movf", "dx,w");
+        emit("andlw", 1);
+        emit("btfsc", "STATUS,2");
+        emit("goto", Lskipadd);
         add16("ac", "ac", "bc");
-        code_ << Lskipadd << ":\n";
+        emitLabel(Lskipadd);
         shiftOneBit("bc", /*isLeft=*/true);
         shiftOneBit("dx", /*isLeft=*/false);
-        code_ << "    decf cx,f\n";
-        code_ << "    goto " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("decf", "cx,f");
+        emit("goto", Lloop);
+        emitLabel(Ldone);
         return;
     }
     if (op == "/" || op == "%") {
@@ -846,33 +940,40 @@ void PIC18Codegen::genCompoundOp(const std::string &op, Type) {
         copy2("bc", "ac");   // bc = divisor (rhs)
         clear2("ac");
         std::string Lloop = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
+        emitLabel(Lloop);
         sub16("cx", "dx", "bc");
-        code_ << "    btfss STATUS,0\n    goto " << Ldone << "\n";
+        emit("btfss", "STATUS,0");
+        emit("goto", Ldone);
         copy2("dx", "cx");
         inc16("ac");
-        code_ << "    goto " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("goto", Lloop);
+        emitLabel(Ldone);
         if (op == "%") copy2("ac", "dx");
         return;
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "andwf" : (op == "|") ? "iorwf" : "xorwf";
-        code_ << "    movf bc,w\n    " << insn << " ac,w\n    movwf ac\n";
-        code_ << "    movf bc+1,w\n    " << insn << " ac+1,w\n    movwf ac+1\n";
+        emit("movf", "bc,w");
+        emit(insn, "ac,w");
+        emit("movwf", "ac");
+        emit("movf", "bc+1,w");
+        emit(insn, "ac+1,w");
+        emit("movwf", "ac+1");
         return;
     }
     // "<<" or ">>"
-    code_ << "    movf ac,w\n    movwf cx\n";  // cx = shift count (rhs's own low byte)
-    copy2("ac", "bc");                           // ac = value to shift (old)
+    emit("movf", "ac,w");
+    emit("movwf", "cx");  // cx = shift count (rhs's own low byte)
+    copy2("ac", "bc");    // ac = value to shift (old)
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    movf cx,w\n";
-    code_ << "    btfsc STATUS,2\n    goto " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("movf", "cx,w");
+    emit("btfsc", "STATUS,2");
+    emit("goto", Ldone);
     shiftOneBit("ac", op == "<<");
-    code_ << "    decf cx,f\n";
-    code_ << "    goto " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("decf", "cx,f");
+    emit("goto", Lloop);
+    emitLabel(Ldone);
 }
 
 // `ptr` holds the resolved address on entry, stashed via pushPtrCell()
@@ -915,13 +1016,18 @@ void PIC18Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs,
     genExpr(rhs);
     popCell2("bc");  // bc = lhs, ac = rhs
     sub16("cx", "bc", "ac");
-    code_ << "    movf cx,w\n    iorwf cx+1,w\n";
+    emit("movf", "cx,w");
+    emit("iorwf", "cx+1,w");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << (wantEqual ? "btfsc" : "btfss") << " STATUS,2\n    goto " << Ltrue << "\n";
+    emit(wantEqual ? "btfsc" : "btfss", "STATUS,2");
+    emit("goto", Ltrue);
     clear2("ac");
-    code_ << "    goto " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movlw 1\n    movwf ac\n    clrf ac+1\n";
-    code_ << Ldone << ":\n";
+    emit("goto", Ldone);
+    emitLabel(Ltrue);
+    emit("movlw", 1);
+    emit("movwf", "ac");
+    emit("clrf", "ac+1");
+    emitLabel(Ldone);
 }
 
 // Signed 16-bit "a < b" via the N-xor-OV rule: after sub16()'s final
@@ -933,26 +1039,33 @@ void PIC18Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool in
     popCell2("bc");  // bc = a, ac = b
     sub16("cx", "bc", "ac");  // cx = a - b; STATUS<N,OV> reflect the signed result
     std::string LovSet = newLabel(), Lless = newLabel(), Lnotless = newLabel(), Ldone = newLabel();
-    code_ << "    btfsc STATUS,3\n    goto " << LovSet << "\n";
-    code_ << "    btfsc STATUS,4\n    goto " << Lless << "\n";
-    code_ << "    goto " << Lnotless << "\n";
-    code_ << LovSet << ":\n";
-    code_ << "    btfss STATUS,4\n    goto " << Lless << "\n";
-    code_ << "    goto " << Lnotless << "\n";
-    code_ << Lless << ":\n";
+    emit("btfsc", "STATUS,3");
+    emit("goto", LovSet);
+    emit("btfsc", "STATUS,4");
+    emit("goto", Lless);
+    emit("goto", Lnotless);
+    emitLabel(LovSet);
+    emit("btfss", "STATUS,4");
+    emit("goto", Lless);
+    emit("goto", Lnotless);
+    emitLabel(Lless);
     if (!invert) {
-        code_ << "    movlw 1\n    movwf ac\n    clrf ac+1\n";
+        emit("movlw", 1);
+        emit("movwf", "ac");
+        emit("clrf", "ac+1");
     } else {
         clear2("ac");
     }
-    code_ << "    goto " << Ldone << "\n";
-    code_ << Lnotless << ":\n";
+    emit("goto", Ldone);
+    emitLabel(Lnotless);
     if (!invert) {
         clear2("ac");
     } else {
-        code_ << "    movlw 1\n    movwf ac\n    clrf ac+1\n";
+        emit("movlw", 1);
+        emit("movwf", "ac");
+        emit("clrf", "ac+1");
     }
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void PIC18Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -963,10 +1076,14 @@ void PIC18Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(rhs);
     testAcZero();
     gotoIfZero(Lfalse);
-    code_ << Ltrue << ":\n    movlw 1\n    movwf ac\n    clrf ac+1\n    goto " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("movlw", 1);
+    emit("movwf", "ac");
+    emit("clrf", "ac+1");
+    emit("goto", Ldone);
+    emitLabel(Lfalse);
     clear2("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void PIC18Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -977,11 +1094,14 @@ void PIC18Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(rhs);
     testAcZero();
     gotoIfNonZero(Ltrue);
-    code_ << Lfalse << ":\n";
+    emitLabel(Lfalse);
     clear2("ac");
-    code_ << "    goto " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movlw 1\n    movwf ac\n    clrf ac+1\n";
-    code_ << Ldone << ":\n";
+    emit("goto", Ldone);
+    emitLabel(Ltrue);
+    emit("movlw", 1);
+    emit("movwf", "ac");
+    emit("clrf", "ac+1");
+    emitLabel(Ldone);
 }
 
 void PIC18Codegen::genLogicalNot(const ir::Expr &rhs) {
@@ -990,9 +1110,12 @@ void PIC18Codegen::genLogicalNot(const ir::Expr &rhs) {
     std::string Ltrue = newLabel(), Ldone = newLabel();
     gotoIfZero(Ltrue);
     clear2("ac");
-    code_ << "    goto " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movlw 1\n    movwf ac\n    clrf ac+1\n";
-    code_ << Ldone << ":\n";
+    emit("goto", Ldone);
+    emitLabel(Ltrue);
+    emit("movlw", 1);
+    emit("movwf", "ac");
+    emit("clrf", "ac+1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> PIC18Codegen::assembleInProcess(const std::string &asmText,

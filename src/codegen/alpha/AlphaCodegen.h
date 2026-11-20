@@ -70,7 +70,7 @@ namespace rcc {
 // Every call goes through `jsr`/`ret` (there is no CALLS-style single instruction that builds a
 // whole call frame the way VAX's does) - see genFunction()/the `Call`/`CallPtr` cases of
 // genExpr().
-class AlphaCodegen : public Backend {
+class AlphaCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "alpha"; }
@@ -179,7 +179,9 @@ class AlphaCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

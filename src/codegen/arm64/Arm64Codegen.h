@@ -73,7 +73,7 @@ namespace rcc {
 // flags and no `cmp` needed for control flow.
 //
 // A64 branches/calls have no delay slot.
-class Arm64Codegen : public Backend {
+class Arm64Codegen : public Backend, protected TextCodegenBase {
    public:
     void setHostedAbi(bool enabled) { darwinHosted_ = enabled; }
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
@@ -206,7 +206,6 @@ class Arm64Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

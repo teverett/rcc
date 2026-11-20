@@ -44,7 +44,7 @@ namespace rcc {
 // Unlike the PDP-11, every branch/call/jump here targets a full 16-bit absolute address (`jp
 // cc,addr`/`call addr`), so there's no short-branch range to work around and no `safeBranch()`
 // equivalent is needed.
-class Z8000Codegen : public Backend {
+class Z8000Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "z8000"; }
@@ -143,7 +143,6 @@ class Z8000Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

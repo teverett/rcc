@@ -52,7 +52,7 @@ namespace rcc {
 //
 // Every conditional branch only has a byte displacement, so the assembler's `j<cc>` /
 // `jbr` pseudo-instructions are used throughout; see VaxAssembler.h.
-class VaxCodegen : public Backend {
+class VaxCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "vax"; }
@@ -160,7 +160,8 @@ class VaxCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat() and
+    // `code_` itself come from TextCodegenBase (see Codegen.h).
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted at the end
     std::map<std::string, std::string> perFileAsm_;
 

@@ -46,26 +46,31 @@ void STM8Codegen::declareArray(const std::string &lbl, const std::vector<ir::Arr
 }
 
 void STM8Codegen::copy16(const std::string &dst, const std::string &src) {
-    code_ << "    ldw x, " << src << "\n    ldw " << dst << ", x\n";
+    emit("ldw", "x, " + src);
+    emit("ldw", dst + ", x");
 }
 
 // Assumes `x` already holds the target address.
 void STM8Codegen::storeIndirect(const std::string &src) {
-    code_ << "    ld a, " << src << "\n    stxind\n";
-    code_ << "    incw x\n";
-    code_ << "    ld a, " << src << "+1\n    stxind\n";
+    emit("ld", "a, " + src);
+    emit("stxind");
+    emit("incw", "x");
+    emit("ld", "a, " + src + "+1");
+    emit("stxind");
 }
 
 void STM8Codegen::loadIndirect(const std::string &dst) {
-    code_ << "    ldxind\n    ld " << dst << ", a\n";
-    code_ << "    incw x\n";
-    code_ << "    ldxind\n    ld " << dst << "+1, a\n";
+    emit("ldxind");
+    emit("ld", dst + ", a");
+    emit("incw", "x");
+    emit("ldxind");
+    emit("ld", dst + "+1, a");
 }
 
 void STM8Codegen::shiftOneBit(const std::string &lbl, bool isLeft) {
-    code_ << "    ldw x, " << lbl << "\n";
-    code_ << "    " << (isLeft ? "slaw" : "srlw") << " x\n";
-    code_ << "    ldw " << lbl << ", x\n";
+    emit("ldw", "x, " + lbl);
+    emit(isLeft ? "slaw" : "srlw", "x");
+    emit("ldw", lbl + ", x");
 }
 
 // STM8 has no sign-extend instruction; tests the byte's top bit instead
@@ -73,25 +78,28 @@ void STM8Codegen::shiftOneBit(const std::string &lbl, bool isLeft) {
 // branches once. `a` must already hold the byte to extend, and ends up
 // holding the fill byte (0xFF or 0x00).
 void STM8Codegen::genSignFillByte() {
-    code_ << "    andi a, 0x80\n    tnza\n";
+    emit("andi", "a, 0x80");
+    emit("tnza");
     std::string Lneg = newLabel(), Ldone = newLabel();
-    code_ << "    jrne " << Lneg << "\n";
-    code_ << "    ldi a, 0\n    jp " << Ldone << "\n";
-    code_ << Lneg << ":\n    ldi a, 0xFF\n";
-    code_ << Ldone << ":\n";
+    emit("jrne", Lneg);
+    emit("ldi", "a, 0");
+    emit("jp", Ldone);
+    emitLabel(Lneg);
+    emit("ldi", "a, 0xFF");
+    emitLabel(Ldone);
 }
 
 // Assumes `x` already holds the effective storage address.
 void STM8Codegen::loadOperand(Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    ldxind\n";
-        code_ << "    ld ac+1, a\n";
+        emit("ldxind");
+        emit("ld", "ac+1, a");
         if (type.isUnsigned) {
-            code_ << "    ldi a, 0\n";
+            emit("ldi", "a, 0");
         } else {
             genSignFillByte();  // a is unchanged by "ld ac+1,a" above
         }
-        code_ << "    ld ac, a\n";
+        emit("ld", "ac, a");
         return;
     }
     loadAcIndirect();
@@ -99,7 +107,8 @@ void STM8Codegen::loadOperand(Type type) {
 
 void STM8Codegen::storeOperand(Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    ld a, ac+1\n    stxind\n";
+        emit("ld", "a, ac+1");
+        emit("stxind");
         return;
     }
     storeAcIndirect();
@@ -109,24 +118,29 @@ void STM8Codegen::storeOperand(Type type) {
 // `role`'s wideScratch() cells.
 void STM8Codegen::popWideInto(const char *role, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pop x\n    ldw " << wideScratch(role, i) << ", x\n";
+        emit("pop", "x");
+        emit("ldw", wideScratch(role, i) + ", x");
     }
 }
 
 void STM8Codegen::pushWideFrom(const char *role, int words) {
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    ldw x, " << wideScratch(role, i) << "\n    push x\n";
+        emit("ldw", "x, " + wideScratch(role, i));
+        emit("push", "x");
     }
 }
 
 void STM8Codegen::genWideWordAddr(const ir::Slot *slot, int words, int wordIndex) {
     int byteOff = 2 * (words - 1 - wordIndex);
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    ldwi x, " << label(slot) << (byteOff ? ("+" + std::to_string(byteOff)) : "") << "\n";
+        emit("ldwi", "x, " + label(slot) + (byteOff ? ("+" + std::to_string(byteOff)) : ""));
         return;
     }
     genSlotAddress(slot);
-    if (byteOff > 0) code_ << "    ldwi y, " << byteOff << "\n    addw x, y\n";
+    if (byteOff > 0) {
+        emit("ldwi", cat("y, ", byteOff));
+        emit("addw", "x, y");
+    }
 }
 
 // Pushes `slot`'s `words`-word value onto the real hardware stack, word 0
@@ -135,7 +149,8 @@ void STM8Codegen::genWideLoad(const ir::Slot *slot, int words) {
     for (int i = words - 1; i >= 0; i--) {
         genWideWordAddr(slot, words, i);
         loadIndirect("bc");
-        code_ << "    ldw x, bc\n    push x\n";
+        emit("ldw", "x, bc");
+        emit("push", "x");
     }
 }
 
@@ -143,7 +158,8 @@ void STM8Codegen::genWideLoadLiteral(long value, int words) {
     auto uv = static_cast<unsigned long>(value);
     for (int i = words - 1; i >= 0; i--) {
         uint16_t w = static_cast<uint16_t>((uv >> (16 * i)) & 0xFFFF);
-        code_ << "    ldwi x, " << w << "\n    push x\n";
+        emit("ldwi", cat("x, ", w));
+        emit("push", "x");
     }
 }
 
@@ -151,7 +167,8 @@ void STM8Codegen::genWideLoadLiteral(long value, int words) {
 // top) into `slot`'s storage.
 void STM8Codegen::genWideStore(const ir::Slot *slot, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pop x\n    ldw bc, x\n";
+        emit("pop", "x");
+        emit("ldw", "bc, x");
         genWideWordAddr(slot, words, i);
         storeIndirect("bc");
     }
@@ -162,19 +179,27 @@ void STM8Codegen::genWideStore(const ir::Slot *slot, int words) {
 void STM8Codegen::pushWideFromAddress(const std::string &addrCell, int words) {
     for (int i = words - 1; i >= 0; i--) {
         int byteOff = 2 * (words - 1 - i);
-        code_ << "    ldw x, " << addrCell << "\n";
-        if (byteOff > 0) code_ << "    ldwi y, " << byteOff << "\n    addw x, y\n";
+        emit("ldw", "x, " + addrCell);
+        if (byteOff > 0) {
+            emit("ldwi", cat("y, ", byteOff));
+            emit("addw", "x, y");
+        }
         loadIndirect("bc");
-        code_ << "    ldw x, bc\n    push x\n";
+        emit("ldw", "x, bc");
+        emit("push", "x");
     }
 }
 
 void STM8Codegen::popWideToAddress(const std::string &addrCell, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pop x\n    ldw bc, x\n";
+        emit("pop", "x");
+        emit("ldw", "bc, x");
         int byteOff = 2 * (words - 1 - i);
-        code_ << "    ldw x, " << addrCell << "\n";
-        if (byteOff > 0) code_ << "    ldwi y, " << byteOff << "\n    addw x, y\n";
+        emit("ldw", "x, " + addrCell);
+        if (byteOff > 0) {
+            emit("ldwi", cat("y, ", byteOff));
+            emit("addw", "x, y");
+        }
         storeIndirect("bc");
     }
 }
@@ -204,13 +229,13 @@ void STM8Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAd
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    ld a, " << aBytes[k] << "\n";
+        emit("ld", "a, " + aBytes[k]);
         if (isAdd) {
-            code_ << "    " << (k == 0 ? "add a, " : "adc a, ") << bBytes[k] << "\n";
+            emit(k == 0 ? "add" : "adc", "a, " + bBytes[k]);
         } else {
-            code_ << "    " << (k == 0 ? "sub a, " : "sbc a, ") << bBytes[k] << "\n";
+            emit(k == 0 ? "sub" : "sbc", "a, " + bBytes[k]);
         }
-        code_ << "    ld " << aBytes[k] << ", a\n";
+        emit("ld", aBytes[k] + ", a");
     }
     pushWideFrom("a", words);
 }
@@ -222,12 +247,18 @@ void STM8Codegen::genWideNegate(int words) {
     popWideInto("a", words);
     auto bytes = wideByteLabelsLsbFirst("a", words);
     for (const auto &b : bytes) {
-        code_ << "    ld a, " << b << "\n    cpl a\n    ld " << b << ", a\n";
+        emit("ld", "a, " + b);
+        emit("cpl", "a");
+        emit("ld", b + ", a");
     }
     for (size_t k = 0; k < bytes.size(); k++) {
-        code_ << "    ld a, " << bytes[k] << "\n";
-        code_ << "    " << (k == 0 ? "addi a, 1\n" : "adc a, zero\n");
-        code_ << "    ld " << bytes[k] << ", a\n";
+        emit("ld", "a, " + bytes[k]);
+        if (k == 0) {
+            emit("addi", "a, 1");
+        } else {
+            emit("adc", "a, zero");
+        }
+        emit("ld", bytes[k] + ", a");
     }
     pushWideFrom("a", words);
 }
@@ -241,8 +272,9 @@ void STM8Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, const
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    ld a, " << aBytes[k] << "\n    " << insn << " a, " << bBytes[k] << "\n";
-        code_ << "    ld " << aBytes[k] << ", a\n";
+        emit("ld", "a, " + aBytes[k]);
+        emit(insn, "a, " + bBytes[k]);
+        emit("ld", aBytes[k] + ", a");
     }
     pushWideFrom("a", words);
 }
@@ -254,17 +286,25 @@ void STM8Codegen::genWideEqualityCompare(const ir::Expr &lhs, const ir::Expr &rh
     popWideInto("a", words);
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
-    code_ << "    ldi a, 0\n    ld lc, a\n";
+    emit("ldi", "a, 0");
+    emit("ld", "lc, a");
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    ld a, " << aBytes[k] << "\n    xor a, " << bBytes[k] << "\n";
-        code_ << "    or a, lc\n    ld lc, a\n";
+        emit("ld", "a, " + aBytes[k]);
+        emit("xor", "a, " + bBytes[k]);
+        emit("or", "a, lc");
+        emit("ld", "lc, a");
     }
-    code_ << "    ld a, lc\n    tnza\n";
+    emit("ld", "a, lc");
+    emit("tnza");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << (wantEqual ? "jreq" : "jrne") << " " << Ltrue << "\n";
-    code_ << "    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit(wantEqual ? "jreq" : "jrne", Ltrue);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 // Compares most-significant byte first; only that byte needs the
@@ -280,26 +320,31 @@ void STM8Codegen::genWideLessCompare(const ir::Expr &a, const ir::Expr &b, bool 
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     for (size_t idx = aBytes.size(); idx-- > 0;) {
         bool top = idx == aBytes.size() - 1;
-        code_ << "    ld a, " << bBytes[idx] << "\n";
-        if (top && !isUnsigned) code_ << "    xori a, 0x80\n";
-        code_ << "    ld lc, a\n";
-        code_ << "    ld a, " << aBytes[idx] << "\n";
-        if (top && !isUnsigned) code_ << "    xori a, 0x80\n";
-        code_ << "    sub a, lc\n";
+        emit("ld", "a, " + bBytes[idx]);
+        if (top && !isUnsigned) emit("xori", "a, 0x80");
+        emit("ld", "lc, a");
+        emit("ld", "a, " + aBytes[idx]);
+        if (top && !isUnsigned) emit("xori", "a, 0x80");
+        emit("sub", "a, lc");
         if (idx == 0) {
-            code_ << "    jrult " << (invert ? Lfalse : Ltrue) << "\n";
-            code_ << "    jp " << (invert ? Ltrue : Lfalse) << "\n";
+            emit("jrult", invert ? Lfalse : Ltrue);
+            emit("jp", invert ? Ltrue : Lfalse);
         } else {
             std::string Lcontinue = newLabel();
-            code_ << "    jreq " << Lcontinue << "\n";
-            code_ << "    jrult " << (invert ? Lfalse : Ltrue) << "\n";
-            code_ << "    jp " << (invert ? Ltrue : Lfalse) << "\n";
-            code_ << Lcontinue << ":\n";
+            emit("jreq", Lcontinue);
+            emit("jrult", invert ? Lfalse : Ltrue);
+            emit("jp", invert ? Ltrue : Lfalse);
+            emitLabel(Lcontinue);
         }
     }
-    code_ << Lfalse << ":\n    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lfalse);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 void STM8Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned,
@@ -323,33 +368,42 @@ void STM8Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool is
     genExpr(lhs);
     popWideInto("a", words);
     genExpr(rhs);
-    code_ << "    ld a, ac+1\n    ld lc, a\n";
+    emit("ld", "a, ac+1");
+    emit("ld", "lc, a");
     auto bytesMsbFirst = wideByteLabelsLsbFirst("a", words);
     std::reverse(bytesMsbFirst.begin(), bytesMsbFirst.end());
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ld a, lc\n    tnza\n";
-    code_ << "    jreq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("ld", "a, lc");
+    emit("tnza");
+    emit("jreq", Ldone);
     if (isLeft) {
-        code_ << "    rcf\n";
+        emit("rcf");
         for (size_t idx = bytesMsbFirst.size(); idx-- > 0;) {
-            code_ << "    ld a, " << bytesMsbFirst[idx] << "\n    rlc a\n    ld " << bytesMsbFirst[idx] << ", a\n";
+            emit("ld", "a, " + bytesMsbFirst[idx]);
+            emit("rlc", "a");
+            emit("ld", bytesMsbFirst[idx] + ", a");
         }
     } else {
         for (size_t idx = 0; idx < bytesMsbFirst.size(); idx++) {
             if (idx == 0 && !isUnsigned) {
-                code_ << "    ld a, " << bytesMsbFirst[idx] << "\n    rlc a\n";
-                code_ << "    ld a, " << bytesMsbFirst[idx] << "\n    rrc a\n";
+                emit("ld", "a, " + bytesMsbFirst[idx]);
+                emit("rlc", "a");
+                emit("ld", "a, " + bytesMsbFirst[idx]);
+                emit("rrc", "a");
             } else {
-                if (idx == 0) code_ << "    rcf\n";
-                code_ << "    ld a, " << bytesMsbFirst[idx] << "\n    rrc a\n";
+                if (idx == 0) emit("rcf");
+                emit("ld", "a, " + bytesMsbFirst[idx]);
+                emit("rrc", "a");
             }
-            code_ << "    ld " << bytesMsbFirst[idx] << ", a\n";
+            emit("ld", bytesMsbFirst[idx] + ", a");
         }
     }
-    code_ << "    ld a, lc\n    dec a\n    ld lc, a\n";
-    code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("ld", "a, lc");
+    emit("dec", "a");
+    emit("ld", "lc, a");
+    emit("jp", Lloop);
+    emitLabel(Ldone);
     pushWideFrom("a", words);
 }
 
@@ -379,11 +433,12 @@ void STM8Codegen::genConvert(const ir::Expr &e) {
         genExpr(*e.lhs);
         if (widthOfType(to) == 1) {
             if (to.isUnsigned) {
-                code_ << "    ldi a, 0\n    ld ac, a\n";
+                emit("ldi", "a, 0");
+                emit("ld", "ac, a");
             } else {
-                code_ << "    ld a, ac+1\n";
+                emit("ld", "a, ac+1");
                 genSignFillByte();
-                code_ << "    ld ac, a\n";
+                emit("ld", "ac, a");
             }
         }
         return;
@@ -392,14 +447,16 @@ void STM8Codegen::genConvert(const ir::Expr &e) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
         popWideInto("a", words);
-        code_ << "    ldw x, " << wideScratch("a", 0) << "\n    ldw ac, x\n";
+        emit("ldw", "x, " + wideScratch("a", 0));
+        emit("ldw", "ac, x");
         if (widthOfType(to) == 1) {
             if (to.isUnsigned) {
-                code_ << "    ldi a, 0\n    ld ac, a\n";
+                emit("ldi", "a, 0");
+                emit("ld", "ac, a");
             } else {
-                code_ << "    ld a, ac+1\n";
+                emit("ld", "a, ac+1");
                 genSignFillByte();
-                code_ << "    ld ac, a\n";
+                emit("ld", "ac, a");
             }
         }
         return;
@@ -407,19 +464,21 @@ void STM8Codegen::genConvert(const ir::Expr &e) {
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);
-        code_ << "    ldw x, ac\n    ldw " << wideScratch("a", 0) << ", x\n";
+        emit("ldw", "x, ac");
+        emit("ldw", wideScratch("a", 0) + ", x");
         // A pointer value is always zero-extended: from.isUnsigned would
         // otherwise describe the pointee's signedness, not the pointer's,
         // and a pointer has no sign to extend regardless.
         bool extendUnsigned = isPointer(from) || from.isUnsigned;
         for (int i = 1; i < toWords; i++) {
             if (extendUnsigned) {
-                code_ << "    ldwi x, 0\n    ldw " << wideScratch("a", i) << ", x\n";
+                emit("ldwi", "x, 0");
+                emit("ldw", wideScratch("a", i) + ", x");
             } else {
-                code_ << "    ld a, ac\n";
+                emit("ld", "a, ac");
                 genSignFillByte();
-                code_ << "    ld " << wideScratch("a", i) << ", a\n";
-                code_ << "    ld " << wideScratch("a", i) << "+1, a\n";
+                emit("ld", wideScratch("a", i) + ", a");
+                emit("ld", wideScratch("a", i) + "+1, a");
             }
         }
         pushWideFrom("a", toWords);
@@ -431,15 +490,15 @@ void STM8Codegen::genConvert(const ir::Expr &e) {
     genExpr(*e.lhs);
     popWideInto("a", fromWords);
     if (toWords > fromWords) {
-        code_ << "    ld a, " << wideScratch("a", fromWords - 1) << "\n";
+        emit("ld", "a, " + wideScratch("a", fromWords - 1));
         if (from.isUnsigned) {
-            code_ << "    ldi a, 0\n";
+            emit("ldi", "a, 0");
         } else {
             genSignFillByte();
         }
         for (int i = fromWords; i < toWords; i++) {
-            code_ << "    ld " << wideScratch("a", i) << ", a\n";
-            code_ << "    ld " << wideScratch("a", i) << "+1, a\n";
+            emit("ld", wideScratch("a", i) + ", a");
+            emit("ld", wideScratch("a", i) + "+1, a");
         }
     }
     pushWideFrom("a", toWords);
@@ -455,17 +514,22 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
     // STM8LinkerFactory.cpp synthesizes exactly one once every object is
     // merged and `main`'s linked address is resolvable. An object file's
     // own base is `org 0`; placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    ldwi sp, " << kStackTop << "\n";
-        code_ << "    ldwi x, " << kFrameStackTop << "\n    ldw fsp, x\n";
-        code_ << "    ldwi x, 0\n    ldw fp, x\n";
-        code_ << "    call " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("ldwi", cat("sp, ", kStackTop));
+        emit("ldwi", cat("x, ", kFrameStackTop));
+        emit("ldw", "fsp, x");
+        emit("ldwi", "x, 0");
+        emit("ldw", "fp, x");
+        emit("call", label(mainFn));
         // The result sits in `ac` once execution reaches `halt`; also left
         // in `x` for a quick look via a register dump.
-        code_ << "    ldw x, ac\n";
-        code_ << "halt:\n    jp halt\n\n";
+        emit("ldw", "x, ac");
+        emitLabel("halt");
+        emit("jp", "halt");
+        emitRaw("");
     }
 
     // Every genExpr() call in the whole linked program shares these cells,
@@ -546,13 +610,13 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> STM8Codegen::perFileAsm() const { return perFileAsm_; }
 
 void STM8Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     currentFunction_ = fn.func;
     genPrologue(*fn.func);
     genStmt(*fn.body);
     genEpilogue(*fn.func);
     currentFunction_ = nullptr;
-    code_ << "\n";
+    emitRaw("");
 }
 
 // --- Per-call frame management ------------------------------------------
@@ -570,15 +634,22 @@ void STM8Codegen::genFunction(const ir::FunctionBody &fn) {
 // spare register to hold a live frame pointer. They're independent of the
 // real hardware `sp` (used only for call/ret and genBinary()'s push/pop scratch).
 void STM8Codegen::pushFrameWord(const std::string &cell) {
-    code_ << "    ldw x, fsp\n    ldwi y, 2\n    subw x, y\n    ldw fsp, x\n";
+    emit("ldw", "x, fsp");
+    emit("ldwi", "y, 2");
+    emit("subw", "x, y");
+    emit("ldw", "fsp, x");
     storeIndirect(cell);  // x still holds the just-decremented fsp
 }
 
 void STM8Codegen::genPrologue(const ir::Function &fn) {
     pushFrameWord("fp");
-    code_ << "    ldw x, fsp\n    ldw fp, x\n";
+    emit("ldw", "x, fsp");
+    emit("ldw", "fp, x");
     if (fn.frameSize > 0) {
-        code_ << "    ldw x, fp\n    ldwi y, " << fn.frameSize << "\n    subw x, y\n    ldw fsp, x\n";
+        emit("ldw", "x, fp");
+        emit("ldwi", cat("y, ", fn.frameSize));
+        emit("subw", "x, y");
+        emit("ldw", "fsp, x");
     }
 }
 
@@ -587,25 +658,33 @@ void STM8Codegen::genPrologue(const ir::Function &fn) {
 // `call`. Uses `bc` as scratch, never `ac`, since `ac` already holds the
 // live return value by the time this runs.
 void STM8Codegen::genEpilogue(const ir::Function &fn) {
-    code_ << "    ldw x, fp\n";
+    emit("ldw", "x, fp");
     loadIndirect("bc");  // bc = the caller's saved fp
     int numParams = static_cast<int>(fn.params.size());
-    code_ << "    ldw x, fp\n    ldwi y, " << ((numParams + 1) * 2) << "\n    addw x, y\n    ldw fsp, x\n";
-    code_ << "    ldw x, bc\n    ldw fp, x\n";
-    code_ << "    ret\n";
+    emit("ldw", "x, fp");
+    emit("ldwi", cat("y, ", (numParams + 1) * 2));
+    emit("addw", "x, y");
+    emit("ldw", "fsp, x");
+    emit("ldw", "x, bc");
+    emit("ldw", "fp, x");
+    emit("ret");
 }
 
 void STM8Codegen::genSlotAddress(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    ldwi x, " << label(slot) << "\n";
+        emit("ldwi", "x, " + label(slot));
         return;
     }
     if (slot->kind == ir::SlotKind::Param) {
-        code_ << "    ldw x, fp\n    ldwi y, " << slot->frameOffset << "\n    addw x, y\n";
+        emit("ldw", "x, fp");
+        emit("ldwi", cat("y, ", slot->frameOffset));
+        emit("addw", "x, y");
         return;
     }
     int below = ir::localOffsetDescendingWide(*slot, typeWidths());
-    code_ << "    ldw x, fp\n    ldwi y, " << below << "\n    subw x, y\n";
+    emit("ldw", "x, fp");
+    emit("ldwi", cat("y, ", below));
+    emit("subw", "x, y");
 }
 
 void STM8Codegen::genStmt(const ir::Stmt &s) {
@@ -619,40 +698,40 @@ void STM8Codegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    jreq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("jreq", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    jreq " << Lend << "\n";
+            emit("jreq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jp " << loopLabels_.back().second << "\n";
+            emit("jp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jp " << loopLabels_.back().first << "\n";
+            emit("jp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -681,15 +760,17 @@ void STM8Codegen::genStmt(const ir::Stmt &s) {
                         // (relative to this call's `fp`), unlike a Global's
                         // or Function's compile-time constant address.
                         genSlotAddress(elem.slot);
-                        code_ << "    ldw ac, x\n";
+                        emit("ldw", "ac, x");
                     } else {
-                        code_ << "    ldwi x, " << arrayElemText(elem) << "\n    ldw ac, x\n";
+                        emit("ldwi", "x, " + arrayElemText(elem));
+                        emit("ldw", "ac, x");
                     }
                     genSlotAddress(s.declSlot);  // x = address of element 0
                     if (i > 0) {
                         // Element i sits above element 0, the array's
                         // lowest address.
-                        code_ << "    ldwi y, " << (i * stride) << "\n    addw x, y\n";
+                        emit("ldwi", cat("y, ", i * stride));
+                        emit("addw", "x, y");
                     }
                     storeOperand(s.declSlot->type);
                 }
@@ -711,16 +792,15 @@ void STM8Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jp " << irLabel(s.labelId) << "\n";
+            emit("jp", irLabel(s.labelId));
             return;
         }
     }
@@ -736,7 +816,8 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
                 return;
             }
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
-            code_ << "    ldwi x, " << v16 << "\n    ldw ac, x\n";
+            emit("ldwi", cat("x, ", v16));
+            emit("ldw", "ac, x");
             return;
         }
         case ir::ExprKind::Var: {
@@ -759,9 +840,10 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs - never wide (see genIndex()'s known limitation)
                 genIndexAddr(e.slot, *e.lhs);  // ptr = target address
-                code_ << "    ldw x, ptr\n    push x\n";
+                emit("ldw", "x, ptr");
+                emit("push", "x");
                 genExpr(*e.rhs);
-                code_ << "    pop x\n";
+                emit("pop", "x");
                 storeOperand(e.slot->type);
                 return;
             }
@@ -815,17 +897,17 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jreq " << Lelse << "\n";
+            emit("jreq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);              // ac = pointer value
-            code_ << "    ldw ptr, ac\n";
+            emit("ldw", "ptr, ac");
             genCompoundThroughPtr(e);
             return;
         }
@@ -834,14 +916,15 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
             // typed pointer, or a plain native word for untyped-int-as-address.
             genExpr(*e.lhs);  // ac = pointer value
             if (isWide(e.type)) {
-                code_ << "    ldw ptr, ac\n";
+                emit("ldw", "ptr, ac");
                 genExpr(*e.rhs);
                 popWideToAddress("ptr", wordCountOf(e.type));
                 return;
             }
-            code_ << "    ldw x, ac\n    push x\n";
+            emit("ldw", "x, ac");
+            emit("push", "x");
             genExpr(*e.rhs);
-            code_ << "    pop x\n";
+            emit("pop", "x");
             storeOperand(e.type);
             return;
         }
@@ -851,7 +934,9 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genWideNegate(wordCountOf(e.rhs->type));
                 } else {
-                    code_ << "    ldw x, ac\n    negw x\n    ldw ac, x\n";
+                    emit("ldw", "x, ac");
+                    emit("negw", "x");
+                    emit("ldw", "ac, x");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
@@ -859,10 +944,10 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
                 // Loads at e.type's width/signedness - see DerefAssign above.
                 genExpr(*e.rhs);  // ac = pointer value
                 if (isWide(e.type)) {
-                    code_ << "    ldw ptr, ac\n";
+                    emit("ldw", "ptr, ac");
                     pushWideFromAddress("ptr", wordCountOf(e.type));
                 } else {
-                    code_ << "    ldw x, ac\n";
+                    emit("ldw", "x, ac");
                     loadOperand(e.type);
                 }
             } else if (e.op == "~") {
@@ -872,11 +957,15 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
                     popWideInto("a", words);
                     for (int i = 0; i < words; i++) {
                         std::string cell = wideScratch("a", i);
-                        code_ << "    ldw x, " << cell << "\n    cplw x\n    ldw " << cell << ", x\n";
+                        emit("ldw", "x, " + cell);
+                        emit("cplw", "x");
+                        emit("ldw", cell + ", x");
                     }
                     pushWideFrom("a", words);
                 } else {
-                    code_ << "    ldw x, ac\n    cplw x\n    ldw ac, x\n";
+                    emit("ldw", "x, ac");
+                    emit("cplw", "x");
+                    emit("ldw", "ac, x");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -895,14 +984,15 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.args[i]->type)) {
                     int words = wordCountOf(e.args[i]->type);
                     for (int w = 0; w < words; w++) {
-                        code_ << "    pop x\n    ldw ac, x\n";
+                        emit("pop", "x");
+                        emit("ldw", "ac, x");
                         pushFrameWord("ac");
                     }
                 } else {
                     pushFrameWord("ac");
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
+            emit("call", label(e.func));
             if (isWide(e.type)) {
                 // Callee left its wide return value in the "wa" scratch
                 // cells; push it back as this expression's result.
@@ -918,7 +1008,7 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
             std::string T = allocTemp();
             declareTemp(T);
             copy16(T, "ac");
-            code_ << "    callind " << T << "\n";
+            emit("callind", T);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -927,7 +1017,7 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // Real STM8 interrupt enable/disable (RIM/SIM).
-            code_ << "    " << (e.op == "ion" ? "rim" : "sim") << "\n";
+            emit(e.op == "ion" ? "rim" : "sim");
             return;
         }
         case ir::ExprKind::Convert: {
@@ -944,19 +1034,23 @@ void STM8Codegen::genExpr(const ir::Expr &e) {
 // general recursive genExpr() call.
 void STM8Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // ac = index
-    code_ << "    ldw x, ac\n";
-    for (int i = 0; i < elemShift(slot->type); i++) code_ << "    slaw x\n";  // x *= widthOf(slot->type)
-    code_ << "    ldw ptr, x\n";
+    emit("ldw", "x, ac");
+    for (int i = 0; i < elemShift(slot->type); i++) emit("slaw", "x");  // x *= widthOf(slot->type)
+    emit("ldw", "ptr, x");
     genSlotAddress(slot);  // x = slot's own storage address (Global/Local/Param alike)
     if (slot->arraySize > 0) {
-        code_ << "    ldw y, ptr\n    addw x, y\n    ldw ptr, x\n";  // ptr = base + index*2
+        emit("ldw", "y, ptr");  // ptr = base + index*2
+        emit("addw", "x, y");
+        emit("ldw", "ptr, x");
         return;
     }
     // Ordinary pointer arithmetic: base-plus-scaled-index regardless of
     // where the pointer variable itself lives.
     loadIndirect("bc");
-    code_ << "    ldw y, bc\n";
-    code_ << "    ldw x, ptr\n    addw x, y\n    ldw ptr, x\n";
+    emit("ldw", "y, bc");
+    emit("ldw", "x, ptr");
+    emit("addw", "x, y");
+    emit("ldw", "ptr, x");
 }
 
 // Every array element reads only one native word regardless of its real
@@ -965,14 +1059,14 @@ void STM8Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
 // words are never read/written). Scalars of every width work fully.
 void STM8Codegen::genIndex(const ir::Expr &e) {
     genIndexAddr(e.slot, *e.lhs);
-    code_ << "    ldw x, ptr\n";
+    emit("ldw", "x, ptr");
     loadOperand(e.slot->type);
 }
 
 void STM8Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         genSlotAddress(operand.slot);
-        code_ << "    ldw ac, x\n";
+        emit("ldw", "ac, x");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
@@ -981,7 +1075,8 @@ void STM8Codegen::genAddrOf(const ir::Expr &operand) {
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    ldwi x, " << label(operand.func) << "\n    ldw ac, x\n";
+        emit("ldwi", "x, " + label(operand.func));
+        emit("ldw", "ac, x");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -1004,14 +1099,17 @@ void STM8Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    ldw x, ac\n    push x\n";
-        genExpr(*e.rhs);                        // ac = rhs
-        code_ << "    ldw y, ac\n    pop x\n";   // y = rhs, x = lhs (popped only now)
+        emit("ldw", "x, ac");
+        emit("push", "x");
+        genExpr(*e.rhs);  // ac = rhs
+        emit("ldw", "y, ac");
+        emit("pop", "x");  // y = rhs, x = lhs (popped only now)
         if (op == "+") {
-            code_ << "    addw x, y\n    ldw ac, x\n";
+            emit("addw", "x, y");
         } else {
-            code_ << "    subw x, y\n    ldw ac, x\n";
+            emit("subw", "x, y");
         }
+        emit("ldw", "ac, x");
         return;
     }
     if (op == "*") {
@@ -1067,12 +1165,18 @@ void STM8Codegen::genBinary(const ir::Expr &e) {
 // stack rather than in `bc` directly, since a nested `&`/`|`/`^` also reuses `bc`.
 void STM8Codegen::genBitwise(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    ldw x, ac\n    push x\n";
+    emit("ldw", "x, ac");
+    emit("push", "x");
     genExpr(rhs);  // ac = rhs
-    code_ << "    pop x\n    ldw bc, x\n";  // bc = lhs
+    emit("pop", "x");
+    emit("ldw", "bc, x");  // bc = lhs
     const char *insn = (op == "&") ? "and" : (op == "|") ? "or" : "xor";
-    code_ << "    ld a, bc\n    " << insn << " a, ac\n    ld ac, a\n";
-    code_ << "    ld a, bc+1\n    " << insn << " a, ac+1\n    ld ac+1, a\n";
+    emit("ld", "a, bc");
+    emit(insn, "a, ac");
+    emit("ld", "ac, a");
+    emit("ld", "a, bc+1");
+    emit(insn, "a, ac+1");
+    emit("ld", "ac+1, a");
 }
 
 // No variable-count shift instruction - loop `rhs` times instead, one bit
@@ -1080,26 +1184,34 @@ void STM8Codegen::genBitwise(const std::string &op, const ir::Expr &lhs, const i
 // memory byte, not `a`): STM8 has no dec/tnz on an arbitrary memory byte
 // directly, so `a` is still needed as scratch to move it in and out.
 void STM8Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
-    genExpr(lhs);                          // ac = value to shift
-    code_ << "    ldw x, ac\n    push x\n";
-    genExpr(rhs);                           // ac = shift count
-    code_ << "    ld a, ac+1\n    ld lc, a\n";  // lc = shift count (low byte is enough)
-    code_ << "    pop x\n    ldw bc, x\n";       // bc = value
+    genExpr(lhs);  // ac = value to shift
+    emit("ldw", "x, ac");
+    emit("push", "x");
+    genExpr(rhs);  // ac = shift count
+    emit("ld", "a, ac+1");
+    emit("ld", "lc, a");  // lc = shift count (low byte is enough)
+    emit("pop", "x");
+    emit("ldw", "bc, x");  // bc = value
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ld a, lc\n    tnza\n";
-    code_ << "    jreq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("ld", "a, lc");
+    emit("tnza");
+    emit("jreq", Ldone);
     if (isLeft) {
         shiftOneBit("bc", /*isLeft=*/true);
     } else if (isUnsigned) {
         shiftOneBit("bc", /*isLeft=*/false);
     } else {
         // SRAW: arithmetic (sign-preserving) counterpart to shiftOneBit()'s logical SRLW.
-        code_ << "    ldw x, bc\n    sraw x\n    ldw bc, x\n";
+        emit("ldw", "x, bc");
+        emit("sraw", "x");
+        emit("ldw", "bc, x");
     }
-    code_ << "    ld a, lc\n    deca\n    ld lc, a\n";
-    code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("ld", "a, lc");
+    emit("deca");
+    emit("ld", "lc, a");
+    emit("jp", Lloop);
+    emitLabel(Ldone);
     copy16("ac", "bc");
 }
 
@@ -1109,10 +1221,12 @@ void STM8Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft
 // copy16("bc", ...), since `rhs` may itself be or contain a call that reuses `bc`.
 void STM8Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    ldw x, ac\n    push x\n";
+    emit("ldw", "x, ac");
+    emit("push", "x");
     genExpr(rhs);
     copy16("dx", "ac");  // dx = multiplier
-    code_ << "    pop x\n    ldw bc, x\n";  // bc = multiplicand
+    emit("pop", "x");
+    emit("ldw", "bc, x");  // bc = multiplicand
     genNarrowMul();
 }
 
@@ -1130,13 +1244,28 @@ void STM8Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // add's carry-out is itself bit 16 and is discarded) and added into the
 // low*low product's high byte (again discarding any carry past bit 15).
 void STM8Codegen::genNarrowMul() {
-    code_ << "    ldw x, bc\n    ld a, dx+1\n    mul x, a\n";  // x = bcL * dxL
-    code_ << "    ldw ac, x\n";
-    code_ << "    ld a, bc\n    ld mc+1, a\n    ldw x, mc\n    ld a, dx+1\n    mul x, a\n";  // x = bcH * dxL
-    code_ << "    ldw mc, x\n    ld a, mc+1\n    ld lc, a\n";
-    code_ << "    ldw x, bc\n    ld a, dx\n    mul x, a\n";  // x = bcL * dxH
-    code_ << "    ldw mc, x\n    ld a, mc+1\n    add a, lc\n    ld lc, a\n";
-    code_ << "    ld a, ac\n    add a, lc\n    ld ac, a\n";
+    emit("ldw", "x, bc");  // x = bcL * dxL
+    emit("ld", "a, dx+1");
+    emit("mul", "x, a");
+    emit("ldw", "ac, x");
+    emit("ld", "a, bc");  // x = bcH * dxL
+    emit("ld", "mc+1, a");
+    emit("ldw", "x, mc");
+    emit("ld", "a, dx+1");
+    emit("mul", "x, a");
+    emit("ldw", "mc, x");
+    emit("ld", "a, mc+1");
+    emit("ld", "lc, a");
+    emit("ldw", "x, bc");  // x = bcL * dxH
+    emit("ld", "a, dx");
+    emit("mul", "x, a");
+    emit("ldw", "mc, x");
+    emit("ld", "a, mc+1");
+    emit("add", "a, lc");
+    emit("ld", "lc, a");
+    emit("ld", "a, ac");
+    emit("add", "a, lc");
+    emit("ld", "ac, a");
 }
 
 // Repeated subtraction (no hardware 16/16 divide): `dx` is the running
@@ -1149,49 +1278,80 @@ void STM8Codegen::genNarrowMul() {
 // sign (always the dividend's, matching C's truncating-toward-zero convention).
 void STM8Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    ldw x, ac\n    push x\n";
+    emit("ldw", "x, ac");
+    emit("push", "x");
     genExpr(rhs);
     copy16("bc", "ac");  // bc = divisor
-    code_ << "    pop x\n    ldw dx, x\n";  // dx = dividend
+    emit("pop", "x");
+    emit("ldw", "dx, x");  // dx = dividend
     std::string divisorNeg = allocTemp();
     declareTemp(divisorNeg);
     if (!isUnsigned) {
         std::string Ld = newLabel(), Lr = newLabel();
-        code_ << "    ldi a, 0\n    ld lc, a\n";  // lc = dividend-negative flag
-        code_ << "    ld a, dx\n    andi a, 0x80\n    tnza\n    jreq " << Ld << "\n";
-        code_ << "    ldw x, dx\n    negw x\n    ldw dx, x\n";
-        code_ << "    ldi a, 1\n    ld lc, a\n";
-        code_ << Ld << ":\n";
-        code_ << "    ldi a, 0\n    ld " << divisorNeg << "+1, a\n";
-        code_ << "    ld a, bc\n    andi a, 0x80\n    tnza\n    jreq " << Lr << "\n";
-        code_ << "    ldw x, bc\n    negw x\n    ldw bc, x\n";
-        code_ << "    ldi a, 1\n    ld " << divisorNeg << "+1, a\n";
-        code_ << Lr << ":\n";
+        emit("ldi", "a, 0");
+        emit("ld", "lc, a");  // lc = dividend-negative flag
+        emit("ld", "a, dx");
+        emit("andi", "a, 0x80");
+        emit("tnza");
+        emit("jreq", Ld);
+        emit("ldw", "x, dx");
+        emit("negw", "x");
+        emit("ldw", "dx, x");
+        emit("ldi", "a, 1");
+        emit("ld", "lc, a");
+        emitLabel(Ld);
+        emit("ldi", "a, 0");
+        emit("ld", divisorNeg + "+1, a");
+        emit("ld", "a, bc");
+        emit("andi", "a, 0x80");
+        emit("tnza");
+        emit("jreq", Lr);
+        emit("ldw", "x, bc");
+        emit("negw", "x");
+        emit("ldw", "bc, x");
+        emit("ldi", "a, 1");
+        emit("ld", divisorNeg + "+1, a");
+        emitLabel(Lr);
     }
-    code_ << "    ldwi x, 0\n    ldw ac, x\n";  // ac = quotient = 0
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");  // ac = quotient = 0
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ldw x, dx\n    ldw y, bc\n    cpw x, y\n";
-    code_ << "    jrult " << Ldone << "\n";  // dx < bc: stop
-    code_ << "    subw x, y\n    ldw dx, x\n";
-    code_ << "    ldw x, ac\n    incw x\n    ldw ac, x\n";
-    code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lloop);
+    emit("ldw", "x, dx");
+    emit("ldw", "y, bc");
+    emit("cpw", "x, y");
+    emit("jrult", Ldone);  // dx < bc: stop
+    emit("subw", "x, y");
+    emit("ldw", "dx, x");
+    emit("ldw", "x, ac");
+    emit("incw", "x");
+    emit("ldw", "ac, x");
+    emit("jp", Lloop);
+    emitLabel(Ldone);
     if (wantRemainder) {
         copy16("ac", "dx");
         if (!isUnsigned) {
             std::string Lskip = newLabel();
-            code_ << "    ld a, lc\n    tnza\n    jreq " << Lskip << "\n";
-            code_ << "    ldw x, ac\n    negw x\n    ldw ac, x\n";
-            code_ << Lskip << ":\n";
+            emit("ld", "a, lc");
+            emit("tnza");
+            emit("jreq", Lskip);
+            emit("ldw", "x, ac");
+            emit("negw", "x");
+            emit("ldw", "ac, x");
+            emitLabel(Lskip);
         }
         return;
     }
     if (!isUnsigned) {
         std::string Lskip = newLabel();
-        code_ << "    ld a, lc\n    xor a, " << divisorNeg << "+1\n    tnza\n    jreq " << Lskip << "\n";
-        code_ << "    ldw x, ac\n    negw x\n    ldw ac, x\n";
-        code_ << Lskip << ":\n";
+        emit("ld", "a, lc");
+        emit("xor", "a, " + divisorNeg + "+1");
+        emit("tnza");
+        emit("jreq", Lskip);
+        emit("ldw", "x, ac");
+        emit("negw", "x");
+        emit("ldw", "ac, x");
+        emitLabel(Lskip);
     }
 }
 
@@ -1201,8 +1361,10 @@ void STM8Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantR
 void STM8Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
     if (op == "+" || op == "-") {
-        code_ << "    ldw x, bc\n    ldw y, ac\n";
-        code_ << "    " << (op == "+" ? "addw" : "subw") << " x, y\n    ldw ac, x\n";
+        emit("ldw", "x, bc");
+        emit("ldw", "y, ac");
+        emit(op == "+" ? "addw" : "subw", "x, y");
+        emit("ldw", "ac, x");
         return;
     }
     if (op == "*") {
@@ -1211,72 +1373,112 @@ void STM8Codegen::genCompoundOp(const std::string &op, Type type) {
         return;
     }
     if (op == "/" || op == "%") {
-        code_ << "    ldw x, bc\n    ldw dx, x\n";  // dx = dividend (old)
-        copy16("bc", "ac");                           // bc = divisor (rhs)
+        emit("ldw", "x, bc");
+        emit("ldw", "dx, x");  // dx = dividend (old)
+        copy16("bc", "ac");    // bc = divisor (rhs)
         std::string divisorNeg = allocTemp();
         declareTemp(divisorNeg);
         if (!isUnsigned) {
             std::string Ld = newLabel(), Lr = newLabel();
-            code_ << "    ldi a, 0\n    ld lc, a\n";  // lc = dividend-negative flag
-            code_ << "    ld a, dx\n    andi a, 0x80\n    tnza\n    jreq " << Ld << "\n";
-            code_ << "    ldw x, dx\n    negw x\n    ldw dx, x\n";
-            code_ << "    ldi a, 1\n    ld lc, a\n";
-            code_ << Ld << ":\n";
-            code_ << "    ldi a, 0\n    ld " << divisorNeg << "+1, a\n";
-            code_ << "    ld a, bc\n    andi a, 0x80\n    tnza\n    jreq " << Lr << "\n";
-            code_ << "    ldw x, bc\n    negw x\n    ldw bc, x\n";
-            code_ << "    ldi a, 1\n    ld " << divisorNeg << "+1, a\n";
-            code_ << Lr << ":\n";
+            emit("ldi", "a, 0");
+            emit("ld", "lc, a");  // lc = dividend-negative flag
+            emit("ld", "a, dx");
+            emit("andi", "a, 0x80");
+            emit("tnza");
+            emit("jreq", Ld);
+            emit("ldw", "x, dx");
+            emit("negw", "x");
+            emit("ldw", "dx, x");
+            emit("ldi", "a, 1");
+            emit("ld", "lc, a");
+            emitLabel(Ld);
+            emit("ldi", "a, 0");
+            emit("ld", divisorNeg + "+1, a");
+            emit("ld", "a, bc");
+            emit("andi", "a, 0x80");
+            emit("tnza");
+            emit("jreq", Lr);
+            emit("ldw", "x, bc");
+            emit("negw", "x");
+            emit("ldw", "bc, x");
+            emit("ldi", "a, 1");
+            emit("ld", divisorNeg + "+1, a");
+            emitLabel(Lr);
         }
-        code_ << "    ldwi x, 0\n    ldw ac, x\n";  // ac = quotient = 0
+        emit("ldwi", "x, 0");
+        emit("ldw", "ac, x");  // ac = quotient = 0
         std::string Lloop = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    ldw x, dx\n    ldw y, bc\n    cpw x, y\n";
-        code_ << "    jrult " << Ldone << "\n";
-        code_ << "    subw x, y\n    ldw dx, x\n";
-        code_ << "    ldw x, ac\n    incw x\n    ldw ac, x\n";
-        code_ << "    jp " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lloop);
+        emit("ldw", "x, dx");
+        emit("ldw", "y, bc");
+        emit("cpw", "x, y");
+        emit("jrult", Ldone);
+        emit("subw", "x, y");
+        emit("ldw", "dx, x");
+        emit("ldw", "x, ac");
+        emit("incw", "x");
+        emit("ldw", "ac, x");
+        emit("jp", Lloop);
+        emitLabel(Ldone);
         if (op == "%") {
             copy16("ac", "dx");
             if (!isUnsigned) {
                 std::string Lskip = newLabel();
-                code_ << "    ld a, lc\n    tnza\n    jreq " << Lskip << "\n";
-                code_ << "    ldw x, ac\n    negw x\n    ldw ac, x\n";
-                code_ << Lskip << ":\n";
+                emit("ld", "a, lc");
+                emit("tnza");
+                emit("jreq", Lskip);
+                emit("ldw", "x, ac");
+                emit("negw", "x");
+                emit("ldw", "ac, x");
+                emitLabel(Lskip);
             }
             return;
         }
         if (!isUnsigned) {
             std::string Lskip = newLabel();
-            code_ << "    ld a, lc\n    xor a, " << divisorNeg << "+1\n    tnza\n    jreq " << Lskip << "\n";
-            code_ << "    ldw x, ac\n    negw x\n    ldw ac, x\n";
-            code_ << Lskip << ":\n";
+            emit("ld", "a, lc");
+            emit("xor", "a, " + divisorNeg + "+1");
+            emit("tnza");
+            emit("jreq", Lskip);
+            emit("ldw", "x, ac");
+            emit("negw", "x");
+            emit("ldw", "ac, x");
+            emitLabel(Lskip);
         }
         return;
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "or" : "xor";
-        code_ << "    ld a, bc\n    " << insn << " a, ac\n    ld ac, a\n";
-        code_ << "    ld a, bc+1\n    " << insn << " a, ac+1\n    ld ac+1, a\n";
+        emit("ld", "a, bc");
+        emit(insn, "a, ac");
+        emit("ld", "ac, a");
+        emit("ld", "a, bc+1");
+        emit(insn, "a, ac+1");
+        emit("ld", "ac+1, a");
         return;
     }
     // "<<" or ">>"
-    code_ << "    ld a, ac+1\n    ld lc, a\n";  // lc = shift count; bc already holds the value to shift (old)
+    emit("ld", "a, ac+1");
+    emit("ld", "lc, a");  // lc = shift count; bc already holds the value to shift (old)
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ld a, lc\n    tnza\n";
-    code_ << "    jreq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("ld", "a, lc");
+    emit("tnza");
+    emit("jreq", Ldone);
     if (op == "<<") {
         shiftOneBit("bc", /*isLeft=*/true);
     } else if (isUnsigned) {
         shiftOneBit("bc", /*isLeft=*/false);
     } else {
-        code_ << "    ldw x, bc\n    sraw x\n    ldw bc, x\n";
+        emit("ldw", "x, bc");
+        emit("sraw", "x");
+        emit("ldw", "bc, x");
     }
-    code_ << "    ld a, lc\n    deca\n    ld lc, a\n";
-    code_ << "    jp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("ld", "a, lc");
+    emit("deca");
+    emit("ld", "lc, a");
+    emit("jp", Lloop);
+    emitLabel(Ldone);
     copy16("ac", "bc");
 }
 
@@ -1284,18 +1486,20 @@ void STM8Codegen::genCompoundOp(const std::string &op, Type type) {
 // while `rhs` is evaluated, since `rhs` may itself be or contain an
 // arbitrarily deep expression free to reuse every named cell here.
 void STM8Codegen::genCompoundThroughPtr(const ir::Expr &e) {
-    code_ << "    ldw x, ptr\n    push x\n";  // stash address
-    genExpr(*e.rhs);                           // ac = rhs
+    emit("ldw", "x, ptr");
+    emit("push", "x");  // stash address
+    genExpr(*e.rhs);    // ac = rhs
     copy16("dx", "ac");
-    code_ << "    pop x\n    ldw ptr, x\n";       // ptr = address, restored
-    code_ << "    ldw x, ptr\n";
+    emit("pop", "x");
+    emit("ldw", "ptr, x");  // ptr = address, restored
+    emit("ldw", "x, ptr");
     loadOperand(e.type);  // ac = old
     copy16("bc", "ac");    // bc = old, ac = rhs - genCompoundOp()'s preconditions
     copy16("ac", "dx");
     if (e.yieldOld) copy16("cx", "bc");  // cx = old, held for the final result
     genCompoundOp(e.op, e.type);
     narrowAcTo(e.type);
-    code_ << "    ldw x, ptr\n";
+    emit("ldw", "x, ptr");
     storeOperand(e.type);
     if (e.yieldOld) copy16("ac", "cx");  // ac = old (final result)
 }
@@ -1303,11 +1507,12 @@ void STM8Codegen::genCompoundThroughPtr(const ir::Expr &e) {
 void STM8Codegen::narrowAcTo(Type to) {
     if (widthOfType(to) != 1) return;
     if (to.isUnsigned) {
-        code_ << "    ldi a, 0\n    ld ac, a\n";
+        emit("ldi", "a, 0");
+        emit("ld", "ac, a");
     } else {
-        code_ << "    ld a, ac+1\n";
+        emit("ld", "a, ac+1");
         genSignFillByte();
-        code_ << "    ld ac, a\n";
+        emit("ld", "ac, a");
     }
 }
 
@@ -1327,15 +1532,21 @@ void STM8Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const i
 // `rhs` may itself be or contain a call that reuses `bc`.
 void STM8Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs, bool wantEqual) {
     genExpr(lhs);
-    code_ << "    ldw x, ac\n    push x\n";
+    emit("ldw", "x, ac");
+    emit("push", "x");
     genExpr(rhs);  // ac = rhs
-    code_ << "    ldw y, ac\n    pop x\n";
-    code_ << "    cpw x, y\n";
+    emit("ldw", "y, ac");
+    emit("pop", "x");
+    emit("cpw", "x, y");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << (wantEqual ? "jreq" : "jrne") << " " << Ltrue << "\n";
-    code_ << "    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit(wantEqual ? "jreq" : "jrne", Ltrue);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 // Signed 16-bit "a < b" via the sign-bit bias trick: flipping just the top
@@ -1345,19 +1556,31 @@ void STM8Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs, 
 // copy16("bc", ...), since `b` may itself be or contain a call that reuses `bc`.
 void STM8Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool invert, bool isUnsigned) {
     genExpr(a);
-    code_ << "    ldw x, ac\n    push x\n";
+    emit("ldw", "x, ac");
+    emit("push", "x");
     genExpr(b);  // ac = b
-    code_ << "    pop x\n    ldw bc, x\n";  // bc = a
+    emit("pop", "x");
+    emit("ldw", "bc, x");  // bc = a
     if (!isUnsigned) {
-        code_ << "    ld a, bc\n    xori a, 0x80\n    ld bc, a\n";
-        code_ << "    ld a, ac\n    xori a, 0x80\n    ld ac, a\n";
+        emit("ld", "a, bc");
+        emit("xori", "a, 0x80");
+        emit("ld", "bc, a");
+        emit("ld", "a, ac");
+        emit("xori", "a, 0x80");
+        emit("ld", "ac, a");
     }
-    code_ << "    ldw x, bc\n    ldw y, ac\n    cpw x, y\n";
+    emit("ldw", "x, bc");
+    emit("ldw", "y, ac");
+    emit("cpw", "x, y");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << (invert ? "jruge" : "jrult") << " " << Ltrue << "\n";
-    code_ << "    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit(invert ? "jruge" : "jrult", Ltrue);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 // A wide value (words on the hardware stack, LSW on top) is ORed together
@@ -1365,51 +1588,72 @@ void STM8Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool inv
 // is just tnzw-tested directly, leaving the zero/nonzero result in the flags.
 void STM8Codegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    ldw x, ac\n    tnzw x\n";
+        emit("ldw", "x, ac");
+        emit("tnzw", "x");
         return;
     }
     int words = wordCountOf(e.type);
     popWideInto("a", words);
     auto bytes = wideByteLabelsLsbFirst("a", words);
-    code_ << "    ldi a, 0\n    ld lc, a\n";
-    for (const auto &b : bytes) code_ << "    ld a, " << b << "\n    or a, lc\n    ld lc, a\n";
-    code_ << "    ld a, lc\n    tnza\n";
+    emit("ldi", "a, 0");
+    emit("ld", "lc, a");
+    for (const auto &b : bytes) {
+        emit("ld", "a, " + b);
+        emit("or", "a, lc");
+        emit("ld", "lc, a");
+    }
+    emit("ld", "a, lc");
+    emit("tnza");
 }
 
 void STM8Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jreq " << Lfalse << "\n";
+    emit("jreq", Lfalse);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jreq " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    ldwi x, 0\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit("jreq", Lfalse);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Lfalse);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 void STM8Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jrne " << Ltrue << "\n";
+    emit("jrne", Ltrue);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jrne " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit("jrne", Ltrue);
+    emitLabel(Lfalse);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 void STM8Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    jreq " << Ltrue << "\n";
-    code_ << "    ldwi x, 0\n    ldw ac, x\n    jp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ldwi x, 1\n    ldw ac, x\n";
-    code_ << Ldone << ":\n";
+    emit("jreq", Ltrue);
+    emit("ldwi", "x, 0");
+    emit("ldw", "ac, x");
+    emit("jp", Ldone);
+    emitLabel(Ltrue);
+    emit("ldwi", "x, 1");
+    emit("ldw", "ac, x");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> STM8Codegen::assembleInProcess(const std::string &asmText,

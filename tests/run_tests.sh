@@ -3078,6 +3078,8 @@ is_known_unsupported() {
         stm32:multidecl_scalar.c) return 0 ;;
         i386:multidecl_array.c) return 0 ;;
         i386:multidecl_scalar.c) return 0 ;;
+        cortex-m3:multidecl_array.c) return 0 ;;
+        cortex-m3:multidecl_scalar.c) return 0 ;;
         # vex has no 'long long' support at all (no carry/overflow flag to build a 64-bit
         # carry chain on - see src/codegen/vex/VexCodegen.h's own class comment); plain
         # 'long' is fully supported (same width as 'int' there).

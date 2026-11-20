@@ -47,7 +47,7 @@ namespace rcc {
 //
 // Every jump/conditional jump encodes a full 32-bit absolute address, so
 // there's no branch-range limit to work around.
-class R32cCodegen : public Backend {
+class R32cCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "r32c"; }
@@ -160,7 +160,6 @@ class R32cCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

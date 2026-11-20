@@ -57,40 +57,55 @@ void I8080Codegen::declareArray(const std::string &lbl, const std::vector<ir::Ar
 }
 
 void I8080Codegen::copy16(const std::string &dst, const std::string &src) {
-    code_ << "    lhld " << src << "\n    shld " << dst << "\n";
+    emit("lhld", src);
+    emit("shld", dst);
 }
 
 void I8080Codegen::loadPair(const std::string &pairReg, const std::string &src) {
-    code_ << "    lhld " << src << "\n    push h\n    pop " << pairReg << "\n";
+    emit("lhld", src);
+    emit("push", "h");
+    emit("pop", pairReg);
 }
 
 void I8080Codegen::storePair(const std::string &dst, const std::string &pairReg) {
-    code_ << "    push " << pairReg << "\n    pop h\n    shld " << dst << "\n";
+    emit("push", pairReg);
+    emit("pop", "h");
+    emit("shld", dst);
 }
 
 void I8080Codegen::storeAcIndirect() {
     // `lda`/`sta` address `ac` directly by name, never touching HL, so the caller's address in
     // HL survives across both byte stores.
-    code_ << "    lda ac\n    mov m,a\n";
-    code_ << "    inx h\n";
-    code_ << "    lda ac+1\n    mov m,a\n";
+    emit("lda", "ac");
+    emit("mov", "m,a");
+    emit("inx", "h");
+    emit("lda", "ac+1");
+    emit("mov", "m,a");
 }
 
 // One in-place 1-bit rotate of the 16-bit memory cell `lbl`. `ana a` clears carry without
 // disturbing A (the 8080 has no explicit clear-carry instruction), giving a known 0 carry-in to
 // shift into the vacated bit.
 void I8080Codegen::shiftOneBit(const std::string &lbl, bool isLeft) {
-    code_ << "    lhld " << lbl << "\n";
-    code_ << "    ana a\n";
+    emit("lhld", lbl);
+    emit("ana", "a");
     if (isLeft) {
-        code_ << "    mov a,l\n    ral\n    mov l,a\n";
-        code_ << "    mov a,h\n    ral\n    mov h,a\n";
+        emit("mov", "a,l");
+        emit("ral");
+        emit("mov", "l,a");
+        emit("mov", "a,h");
+        emit("ral");
+        emit("mov", "h,a");
     } else {
         // Logical (unsigned) shift.
-        code_ << "    mov a,h\n    rar\n    mov h,a\n";
-        code_ << "    mov a,l\n    rar\n    mov l,a\n";
+        emit("mov", "a,h");
+        emit("rar");
+        emit("mov", "h,a");
+        emit("mov", "a,l");
+        emit("rar");
+        emit("mov", "l,a");
     }
-    code_ << "    shld " << lbl << "\n";
+    emit("shld", lbl);
 }
 
 int I8080Codegen::widthOfType(Type t) const { return widthOf(t, typeWidths()); }
@@ -102,22 +117,28 @@ int I8080Codegen::wordCountOf(Type t) const { return widthOfType(t) / 2; }
 // with no branch. An unsigned `char` just zero-fills H instead.
 void I8080Codegen::loadOperand(Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    mov a,m\n    mov l,a\n";
+        emit("mov", "a,m");
+        emit("mov", "l,a");
         if (type.isUnsigned) {
-            code_ << "    mvi h, 0\n";
+            emit("mvi", "h, 0");
         } else {
-            code_ << "    ral\n    sbb a\n    mov h,a\n";
+            emit("ral");
+            emit("sbb", "a");
+            emit("mov", "h,a");
         }
-        code_ << "    shld ac\n";
+        emit("shld", "ac");
         return;
     }
-    code_ << "    mov e,m\n    inx h\n    mov d,m\n";
+    emit("mov", "e,m");
+    emit("inx", "h");
+    emit("mov", "d,m");
     storePair("ac", "d");
 }
 
 void I8080Codegen::storeOperand(Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    lda ac\n    mov m,a\n";
+        emit("lda", "ac");
+        emit("mov", "m,a");
         return;
     }
     storeAcIndirect();
@@ -125,25 +146,29 @@ void I8080Codegen::storeOperand(Type type) {
 
 void I8080Codegen::popWideInto(const char *role, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pop h\n    shld " << wideScratch(role, i) << "\n";
+        emit("pop", "h");
+        emit("shld", wideScratch(role, i));
     }
 }
 
 void I8080Codegen::pushWideFrom(const char *role, int words) {
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    lhld " << wideScratch(role, i) << "\n    push h\n";
+        emit("lhld", wideScratch(role, i));
+        emit("push", "h");
     }
 }
 
 void I8080Codegen::genWideLoad(const ir::Slot *slot, int words) {
     for (int i = words - 1; i >= 0; i--) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    lxi h, " << label(slot) << (i ? ("+" + std::to_string(2 * i)) : "") << "\n";
+            emit("lxi", "h, " + label(slot) + (i ? ("+" + std::to_string(2 * i)) : ""));
         } else {
             genFrameAddr(slot, 2 * i);
         }
-        code_ << "    mov e,m\n    inx h\n    mov d,m\n";
-        code_ << "    push d\n";
+        emit("mov", "e,m");
+        emit("inx", "h");
+        emit("mov", "d,m");
+        emit("push", "d");
     }
 }
 
@@ -151,7 +176,8 @@ void I8080Codegen::genWideLoadLiteral(long value, int words) {
     auto uv = static_cast<unsigned long>(value);
     for (int i = words - 1; i >= 0; i--) {
         uint16_t w = static_cast<uint16_t>((uv >> (16 * i)) & 0xFFFF);
-        code_ << "    lxi h, " << w << "\n    push h\n";
+        emit("lxi", "h, " + std::to_string(w));
+        emit("push", "h");
     }
 }
 
@@ -159,13 +185,15 @@ void I8080Codegen::genWideStore(const ir::Slot *slot, int words) {
     for (int i = 0; i < words; i++) {
         // Popped into BC, not DE - genFrameAddr() below uses DE as scratch for a Local/Param's
         // offset, which would clobber a value popped into DE before it's stored.
-        code_ << "    pop b\n";
+        emit("pop", "b");
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    lxi h, " << label(slot) << (i ? ("+" + std::to_string(2 * i)) : "") << "\n";
+            emit("lxi", "h, " + label(slot) + (i ? ("+" + std::to_string(2 * i)) : ""));
         } else {
             genFrameAddr(slot, 2 * i);
         }
-        code_ << "    mov m,c\n    inx h\n    mov m,b\n";
+        emit("mov", "m,c");
+        emit("inx", "h");
+        emit("mov", "m,b");
     }
 }
 
@@ -193,14 +221,15 @@ void I8080Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    lda " << bBytes[k] << "\n    mov b,a\n";
-        code_ << "    lda " << aBytes[k] << "\n";
+        emit("lda", bBytes[k]);
+        emit("mov", "b,a");
+        emit("lda", aBytes[k]);
         if (isAdd) {
-            code_ << "    " << (k == 0 ? "add b\n" : "adc b\n");
+            emit(k == 0 ? "add" : "adc", "b");
         } else {
-            code_ << "    " << (k == 0 ? "sub b\n" : "sbb b\n");
+            emit(k == 0 ? "sub" : "sbb", "b");
         }
-        code_ << "    sta " << aBytes[k] << "\n";
+        emit("sta", aBytes[k]);
     }
     pushWideFrom("a", words);
 }
@@ -209,12 +238,14 @@ void I8080Codegen::genWideNegate(int words) {
     popWideInto("a", words);
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     for (const auto &b : aBytes) {
-        code_ << "    lda " << b << "\n    cma\n    sta " << b << "\n";
+        emit("lda", b);
+        emit("cma");
+        emit("sta", b);
     }
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    lda " << aBytes[k] << "\n";
-        code_ << "    " << (k == 0 ? "adi 1\n" : "aci 0\n");
-        code_ << "    sta " << aBytes[k] << "\n";
+        emit("lda", aBytes[k]);
+        emit(k == 0 ? "adi" : "aci", k == 0 ? 1 : 0);
+        emit("sta", aBytes[k]);
     }
     pushWideFrom("a", words);
 }
@@ -228,9 +259,11 @@ void I8080Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, cons
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    lda " << bBytes[k] << "\n    mov b,a\n";
-        code_ << "    lda " << aBytes[k] << "\n    " << insn << " b\n";
-        code_ << "    sta " << aBytes[k] << "\n";
+        emit("lda", bBytes[k]);
+        emit("mov", "b,a");
+        emit("lda", aBytes[k]);
+        emit(insn, "b");
+        emit("sta", aBytes[k]);
     }
     pushWideFrom("a", words);
 }
@@ -242,18 +275,26 @@ void I8080Codegen::genWideEqualityCompare(const ir::Expr &lhs, const ir::Expr &r
     popWideInto("a", words);
     auto aBytes = wideByteLabelsLsbFirst("a", words);
     auto bBytes = wideByteLabelsLsbFirst("b", words);
-    code_ << "    mvi c, 0\n";
+    emit("mvi", "c, 0");
     for (size_t k = 0; k < aBytes.size(); k++) {
-        code_ << "    lda " << bBytes[k] << "\n    mov d,a\n";
-        code_ << "    lda " << aBytes[k] << "\n    xra d\n";
-        code_ << "    ora c\n    mov c,a\n";
+        emit("lda", bBytes[k]);
+        emit("mov", "d,a");
+        emit("lda", aBytes[k]);
+        emit("xra", "d");
+        emit("ora", "c");
+        emit("mov", "c,a");
     }
-    code_ << "    mov a,c\n    ora a\n";
+    emit("mov", "a,c");
+    emit("ora", "a");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    j" << (wantEqual ? "z" : "nz") << " " << Ltrue << "\n";
-    code_ << "    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit(wantEqual ? "jz" : "jnz", Ltrue);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 // Compares most-significant byte first - only that byte needs the signed/unsigned bias (see
@@ -269,27 +310,33 @@ void I8080Codegen::genWideLessCompare(const ir::Expr &a, const ir::Expr &b, bool
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     for (size_t idx = aBytes.size(); idx-- > 0;) {
         bool top = idx == aBytes.size() - 1;
-        code_ << "    lda " << aBytes[idx] << "\n";
-        if (top && !isUnsigned) code_ << "    xri 0x80\n";
-        code_ << "    mov d,a\n";
-        code_ << "    lda " << bBytes[idx] << "\n";
-        if (top && !isUnsigned) code_ << "    xri 0x80\n";
-        code_ << "    mov e,a\n";
-        code_ << "    mov a,d\n    sub e\n";
+        emit("lda", aBytes[idx]);
+        if (top && !isUnsigned) emit("xri", "0x80");
+        emit("mov", "d,a");
+        emit("lda", bBytes[idx]);
+        if (top && !isUnsigned) emit("xri", "0x80");
+        emit("mov", "e,a");
+        emit("mov", "a,d");
+        emit("sub", "e");
         if (idx == 0) {
-            code_ << "    jc " << (invert ? Lfalse : Ltrue) << "\n";
-            code_ << "    jmp " << (invert ? Ltrue : Lfalse) << "\n";
+            emit("jc", invert ? Lfalse : Ltrue);
+            emit("jmp", invert ? Ltrue : Lfalse);
         } else {
             std::string Lcontinue = newLabel();
-            code_ << "    jz " << Lcontinue << "\n";
-            code_ << "    jc " << (invert ? Lfalse : Ltrue) << "\n";
-            code_ << "    jmp " << (invert ? Ltrue : Lfalse) << "\n";
-            code_ << Lcontinue << ":\n";
+            emit("jz", Lcontinue);
+            emit("jc", invert ? Lfalse : Ltrue);
+            emit("jmp", invert ? Ltrue : Lfalse);
+            emitLabel(Lcontinue);
         }
     }
-    code_ << Lfalse << ":\n    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lfalse);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 void I8080Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned,
@@ -312,33 +359,41 @@ void I8080Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool i
     genExpr(lhs);
     popWideInto("a", words);
     genExpr(rhs);
-    code_ << "    lhld ac\n    mov c,l\n";
+    emit("lhld", "ac");
+    emit("mov", "c,l");
     auto bytesMsbFirst = wideByteLabelsLsbFirst("a", words);
     std::reverse(bytesMsbFirst.begin(), bytesMsbFirst.end());
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov a,c\n    ora a\n";
-    code_ << "    jz " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("mov", "a,c");
+    emit("ora", "a");
+    emit("jz", Ldone);
     if (isLeft) {
-        code_ << "    ana a\n";  // clear carry - '<<' always shifts in a 0 bit
+        emit("ana", "a");  // clear carry - '<<' always shifts in a 0 bit
         for (size_t idx = bytesMsbFirst.size(); idx-- > 0;) {
-            code_ << "    lda " << bytesMsbFirst[idx] << "\n    ral\n    sta " << bytesMsbFirst[idx] << "\n";
+            emit("lda", bytesMsbFirst[idx]);
+            emit("ral");
+            emit("sta", bytesMsbFirst[idx]);
         }
     } else {
         for (size_t idx = 0; idx < bytesMsbFirst.size(); idx++) {
             if (idx == 0 && !isUnsigned) {
-                code_ << "    lda " << bytesMsbFirst[idx] << "\n    mov b,a\n";
-                code_ << "    ral\n    mov a,b\n    rar\n";
+                emit("lda", bytesMsbFirst[idx]);
+                emit("mov", "b,a");
+                emit("ral");
+                emit("mov", "a,b");
+                emit("rar");
             } else {
-                if (idx == 0) code_ << "    ana a\n";  // unsigned top byte: logical, zero-fill, clear carry first
-                code_ << "    lda " << bytesMsbFirst[idx] << "\n    rar\n";
+                if (idx == 0) emit("ana", "a");  // unsigned top byte: logical, zero-fill, clear carry first
+                emit("lda", bytesMsbFirst[idx]);
+                emit("rar");
             }
-            code_ << "    sta " << bytesMsbFirst[idx] << "\n";
+            emit("sta", bytesMsbFirst[idx]);
         }
     }
-    code_ << "    dcr c\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("dcr", "c");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     pushWideFrom("a", words);
 }
 
@@ -366,13 +421,16 @@ void I8080Codegen::genConvert(const ir::Expr &e) {
     if (!fromWide && !toWide) {
         genExpr(*e.lhs);
         if (widthOfType(to) == 1) {
-            code_ << "    lhld ac\n";
+            emit("lhld", "ac");
             if (to.isUnsigned) {
-                code_ << "    mvi h, 0\n";
+                emit("mvi", "h, 0");
             } else {
-                code_ << "    mov a,l\n    ral\n    sbb a\n    mov h,a\n";
+                emit("mov", "a,l");
+                emit("ral");
+                emit("sbb", "a");
+                emit("mov", "h,a");
             }
-            code_ << "    shld ac\n";
+            emit("shld", "ac");
         }
         return;
     }
@@ -380,15 +438,19 @@ void I8080Codegen::genConvert(const ir::Expr &e) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
         popWideInto("a", words);
-        code_ << "    lhld " << wideScratch("a", 0) << "\n    shld ac\n";
+        emit("lhld", wideScratch("a", 0));
+        emit("shld", "ac");
         if (widthOfType(to) == 1) {
-            code_ << "    lhld ac\n";
+            emit("lhld", "ac");
             if (to.isUnsigned) {
-                code_ << "    mvi h, 0\n";
+                emit("mvi", "h, 0");
             } else {
-                code_ << "    mov a,l\n    ral\n    sbb a\n    mov h,a\n";
+                emit("mov", "a,l");
+                emit("ral");
+                emit("sbb", "a");
+                emit("mov", "h,a");
             }
-            code_ << "    shld ac\n";
+            emit("shld", "ac");
         }
         return;
     }
@@ -398,14 +460,19 @@ void I8080Codegen::genConvert(const ir::Expr &e) {
         // would leave an extension word on top instead of the least significant one.
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);  // ac already holds the native-width value, sign/zero-extended to 16 bits
-        code_ << "    lhld ac\n    shld " << wideScratch("a", 0) << "\n";
+        emit("lhld", "ac");
+        emit("shld", wideScratch("a", 0));
         for (int i = 1; i < toWords; i++) {
             if (from.isUnsigned) {
-                code_ << "    lxi h, 0\n";
+                emit("lxi", "h, 0");
             } else {
-                code_ << "    mov a,h\n    ral\n    sbb a\n    mov h,a\n    mov l,a\n";
+                emit("mov", "a,h");
+                emit("ral");
+                emit("sbb", "a");
+                emit("mov", "h,a");
+                emit("mov", "l,a");
             }
-            code_ << "    shld " << wideScratch("a", i) << "\n";
+            emit("shld", wideScratch("a", i));
         }
         pushWideFrom("a", toWords);
         return;
@@ -416,13 +483,17 @@ void I8080Codegen::genConvert(const ir::Expr &e) {
     genExpr(*e.lhs);
     popWideInto("a", fromWords);
     if (toWords > fromWords) {
-        code_ << "    lhld " << wideScratch("a", fromWords - 1) << "\n";
+        emit("lhld", wideScratch("a", fromWords - 1));
         if (from.isUnsigned) {
-            code_ << "    lxi h, 0\n";
+            emit("lxi", "h, 0");
         } else {
-            code_ << "    mov a,h\n    ral\n    sbb a\n    mov h,a\n    mov l,a\n";
+            emit("mov", "a,h");
+            emit("ral");
+            emit("sbb", "a");
+            emit("mov", "h,a");
+            emit("mov", "l,a");
         }
-        for (int i = fromWords; i < toWords; i++) code_ << "    shld " << wideScratch("a", i) << "\n";
+        for (int i = fromWords; i < toWords; i++) emit("shld", wideScratch("a", i));
     }
     pushWideFrom("a", toWords);
 }
@@ -436,15 +507,18 @@ std::string I8080Codegen::generate(const ir::Program &prog, bool objectMode) {
     // no object file emits this entry sequence itself; I8080LinkerFactory.cpp synthesizes
     // exactly one once every object is merged and `main`'s linked address is resolvable. An
     // object file's base is `org 0` - placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    lxi sp, " << kStackTop << "\n";
-        code_ << "    call " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("lxi", "sp, " + std::to_string(kStackTop));
+        emit("call", label(mainFn));
         // The program's final result sits in `ac` once execution reaches `halt` below; this
         // extra `lhld` also leaves it in HL for a quick look via register dump.
-        code_ << "    lhld ac\n";
-        code_ << "halt:\n    jmp halt\n\n";
+        emit("lhld", "ac");
+        emitLabel("halt");
+        emit("jmp", "halt");
+        emitRaw("");
     }
 
     // The fixed memory pseudo-registers. Every genExpr() call in the whole linked program
@@ -525,35 +599,42 @@ std::map<std::string, std::string> I8080Codegen::perFileAsm() const { return per
 // moves SP down below them in one step, reserving that memory before anything later in this
 // function can land on top of it.
 void I8080Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    lhld fp\n    push h\n";
-    code_ << "    lxi h, 0\n    dad sp\n    shld fp\n";
+    emitLabel(label(fn.func));
+    emit("lhld", "fp");
+    emit("push", "h");
+    emit("lxi", "h, 0");
+    emit("dad", "sp");
+    emit("shld", "fp");
     // `fn.func->frameSize` alone can fall up to `intUnits-1` bytes short of the deepest byte a
     // Local slot needs below `fp`; padding by that much covers the worst case.
     long reserveBytes = static_cast<long>(fn.func->frameSize) + (typeWidths().intUnits - 1);
     if (reserveBytes > 0) {
-        code_ << "    lxi d, " << (-reserveBytes) << "\n    dad d\n    sphl\n";
+        emit("lxi", "d, " + std::to_string(-reserveBytes));
+        emit("dad", "d");
+        emit("sphl");
     }
     genStmt(*fn.body);
     emitEpilogue();
-    code_ << "\n";
+    emitRaw("");
 }
 
 // Undoes genFunction()'s prologue: `lhld fp`/`sphl` snaps SP back to this call's frame base,
 // dropping the locals' reserved region; `pop h`/`shld fp` restores the caller's `fp`; `ret`
 // returns.
 void I8080Codegen::emitEpilogue() {
-    code_ << "    lhld fp\n    sphl\n";
-    code_ << "    pop h\n    shld fp\n";
-    code_ << "    ret\n";
+    emit("lhld", "fp");
+    emit("sphl");
+    emit("pop", "h");
+    emit("shld", "fp");
+    emit("ret");
 }
 
 // A Local/Param slot's effective address, computed fresh every time rather than cached - this
 // target has no addressing mode that could do it as part of a single instruction.
 void I8080Codegen::genFrameAddr(const ir::Slot *slot, long extraBytes) {
-    code_ << "    lhld fp\n";
-    code_ << "    lxi d, " << frameByteOffset(slot, extraBytes) << "\n";
-    code_ << "    dad d\n";
+    emit("lhld", "fp");
+    emit("lxi", "d, " + std::to_string(frameByteOffset(slot, extraBytes)));
+    emit("dad", "d");
 }
 
 void I8080Codegen::genStmt(const ir::Stmt &s) {
@@ -567,40 +648,40 @@ void I8080Codegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    jz " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("jz", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    jz " << Lend << "\n";
+            emit("jz", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -613,7 +694,8 @@ void I8080Codegen::genStmt(const ir::Stmt &s) {
                 if (isWide(s.initOrReturnOrExpr->type)) {
                     int words = wordCountOf(s.initOrReturnOrExpr->type);
                     for (int i = 0; i < words; i++) {
-                        code_ << "    pop h\n    shld " << wideScratch("ret", i) << "\n";
+                        emit("pop", "h");
+                        emit("shld", wideScratch("ret", i));
                     }
                 }
             }
@@ -647,16 +729,15 @@ void I8080Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -672,7 +753,8 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                 return;
             }
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
-            code_ << "    lxi h, " << v16 << "\n    shld ac\n";
+            emit("lxi", "h, " + std::to_string(v16));
+            emit("shld", "ac");
             return;
         }
         case ir::ExprKind::Var: {
@@ -681,7 +763,7 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                 return;
             }
             if (e.slot->kind == ir::SlotKind::Global) {
-                code_ << "    lxi h, " << label(e.slot) << "\n";
+                emit("lxi", "h, " + label(e.slot));
             } else {
                 genFrameAddr(e.slot);
             }
@@ -701,16 +783,19 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                     // index another array and clobber it, so the element address is saved on
                     // the real stack first; rhs's pushed words land on top of it and are popped
                     // into "wb" before the address underneath is restored.
-                    code_ << "    lhld ptr\n    push h\n";
+                    emit("lhld", "ptr");
+                    emit("push", "h");
                     genExpr(*e.rhs);
                     popWideInto("b", words);
-                    code_ << "    pop h\n    shld ptr\n";
+                    emit("pop", "h");
+                    emit("shld", "ptr");
                     genWideStoreAtPtr("b", words);
                     return;
                 }
-                code_ << "    lhld ptr\n    push h\n";
+                emit("lhld", "ptr");
+                emit("push", "h");
                 genExpr(*e.rhs);
-                code_ << "    pop h\n";
+                emit("pop", "h");
                 storeOperand(e.slot->type);
                 return;
             }
@@ -721,7 +806,7 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
             }
             genExpr(*e.rhs);
             if (e.slot->kind == ir::SlotKind::Global) {
-                code_ << "    lxi h, " << label(e.slot) << "\n";
+                emit("lxi", "h, " + label(e.slot));
             } else {
                 genFrameAddr(e.slot);
             }
@@ -748,12 +833,12 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jz " << Lelse << "\n";
+            emit("jz", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
@@ -765,16 +850,19 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
             copy16("ptr", "ac");
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
-                code_ << "    lhld ptr\n    push h\n";
+                emit("lhld", "ptr");
+                emit("push", "h");
                 genExpr(*e.rhs);
                 popWideInto("b", words);
-                code_ << "    pop h\n    shld ptr\n";
+                emit("pop", "h");
+                emit("shld", "ptr");
                 genWideStoreAtPtr("b", words);
                 return;
             }
-            code_ << "    lhld ptr\n    push h\n";
+            emit("lhld", "ptr");
+            emit("push", "h");
             genExpr(*e.rhs);
-            code_ << "    pop h\n";
+            emit("pop", "h");
             storeOperand(e.type);
             return;
         }
@@ -786,10 +874,14 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                     genWideNegate(wordCountOf(e.rhs->type));
                     return;
                 }
-                code_ << "    lhld ac\n";
-                code_ << "    xra a\n    sub l\n    mov l,a\n";
-                code_ << "    mvi a, 0\n    sbb h\n    mov h,a\n";
-                code_ << "    shld ac\n";
+                emit("lhld", "ac");
+                emit("xra", "a");
+                emit("sub", "l");
+                emit("mov", "l,a");
+                emit("mvi", "a, 0");
+                emit("sbb", "h");
+                emit("mov", "h,a");
+                emit("shld", "ac");
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
@@ -800,7 +892,7 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                     genWideLoadAtPtr(wordCountOf(e.type));
                     return;
                 }
-                code_ << "    lhld ptr\n";
+                emit("lhld", "ptr");
                 loadOperand(e.type);
             } else if (e.op == "~") {
                 if (wide) {
@@ -808,19 +900,27 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                     int words = wordCountOf(e.rhs->type);
                     popWideInto("a", words);
                     for (int i = 0; i < words; i++) {
-                        code_ << "    lhld " << wideScratch("a", i) << "\n";
-                        code_ << "    mov a,l\n    cma\n    mov l,a\n";
-                        code_ << "    mov a,h\n    cma\n    mov h,a\n";
-                        code_ << "    shld " << wideScratch("a", i) << "\n";
+                        emit("lhld", wideScratch("a", i));
+                        emit("mov", "a,l");
+                        emit("cma");
+                        emit("mov", "l,a");
+                        emit("mov", "a,h");
+                        emit("cma");
+                        emit("mov", "h,a");
+                        emit("shld", wideScratch("a", i));
                     }
                     pushWideFrom("a", words);
                     return;
                 }
                 genExpr(*e.rhs);
-                code_ << "    lhld ac\n";
-                code_ << "    mov a,l\n    cma\n    mov l,a\n";
-                code_ << "    mov a,h\n    cma\n    mov h,a\n";
-                code_ << "    shld ac\n";
+                emit("lhld", "ac");
+                emit("mov", "a,l");
+                emit("cma");
+                emit("mov", "l,a");
+                emit("mov", "a,h");
+                emit("cma");
+                emit("mov", "h,a");
+                emit("shld", "ac");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -837,15 +937,18 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.args[i]->type)) {
                     totalWords += wordCountOf(e.args[i]->type);
                 } else {
-                    code_ << "    lhld ac\n    push h\n";
+                    emit("lhld", "ac");
+                    emit("push", "h");
                     totalWords += 1;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
+            emit("call", label(e.func));
             // The caller cleans its own pushed arguments off afterward (cdecl convention),
             // needing no cooperation from the callee.
             if (totalWords > 0) {
-                code_ << "    lxi h, " << (totalWords * 2) << "\n    dad sp\n    sphl\n";
+                emit("lxi", "h, " + std::to_string(totalWords * 2));
+                emit("dad", "sp");
+                emit("sphl");
             }
             if (isWide(e.type)) {
                 // The callee left its wide return value in the "wret" scratch cells; push it
@@ -853,7 +956,8 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
                 // significant ends up on top.
                 int words = wordCountOf(e.type);
                 for (int i = words - 1; i >= 0; i--) {
-                    code_ << "    lhld " << wideScratch("ret", i) << "\n    push h\n";
+                    emit("lhld", wideScratch("ret", i));
+                    emit("push", "h");
                 }
             }
             return;
@@ -864,11 +968,11 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
             // callee's `ret` pops that address back into PC, landing right after `pchl` below.
             genExpr(*e.lhs);  // ac = the callee's own entry address
             std::string Lret = newLabel();
-            code_ << "    lhld ac\n";  // HL = callee's address - pchl's implicit target
-            code_ << "    lxi d, " << Lret << "\n";
-            code_ << "    push d\n";
-            code_ << "    pchl\n";
-            code_ << Lret << ":\n";
+            emit("lhld", "ac");  // HL = callee's address - pchl's implicit target
+            emit("lxi", "d, " + Lret);
+            emit("push", "d");
+            emit("pchl");
+            emitLabel(Lret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -877,7 +981,7 @@ void I8080Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // Real 8080 interrupt enable/disable: EI/DI.
-            code_ << "    " << (e.op == "ion" ? "ei" : "di") << "\n";
+            emit(e.op == "ion" ? "ei" : "di");
             return;
         }
         case ir::ExprKind::Convert: {
@@ -909,35 +1013,49 @@ void I8080Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     // idea on that backend, including why this replaced a plain doubling count derived from
     // log2(width) that was only ever correct for a width of exactly 1/2/4/8 bytes. Stashed in
     // `ptr` immediately since loading the base below goes through HL too.
-    code_ << "    lhld ac\n    shld bc\n";  // bc = index (current doubling value)
-    code_ << "    lxi h, 0\n    shld ac\n";  // ac = running product, starts at 0
+    emit("lhld", "ac");
+    emit("shld", "bc");  // bc = index (current doubling value)
+    emit("lxi", "h, 0");
+    emit("shld", "ac");  // ac = running product, starts at 0
     for (int w = widthOfType(slot->type); w > 0; w >>= 1) {
         if (w & 1) {
-            code_ << "    lhld bc\n    xchg\n    lhld ac\n    dad d\n    shld ac\n";
+            emit("lhld", "bc");
+            emit("xchg");
+            emit("lhld", "ac");
+            emit("dad", "d");
+            emit("shld", "ac");
         }
         if (w >> 1) {
-            code_ << "    lhld bc\n    dad h\n    shld bc\n";
+            emit("lhld", "bc");
+            emit("dad", "h");
+            emit("shld", "bc");
         }
     }
-    code_ << "    lhld ac\n    shld ptr\n";
+    emit("lhld", "ac");
+    emit("shld", "ptr");
     const bool isGlobal = slot->kind == ir::SlotKind::Global;
     if (isGlobal) {
         if (slot->arraySize > 0) {
-            code_ << "    lxi d, " << label(slot) << "\n";
+            emit("lxi", "d, " + label(slot));
         } else {
             loadPair("d", label(slot));
         }
     } else {
         genFrameAddr(slot);  // HL = slot's own frame address
         if (slot->arraySize > 0) {
-            code_ << "    push h\n    pop d\n";  // DE = that address (the array's own base)
+            emit("push", "h");
+            emit("pop", "d");  // DE = that address (the array's own base)
         } else {
             // slot is a pointer variable living in this frame - DE needs its stored runtime
             // value, not its own address.
-            code_ << "    mov e,m\n    inx h\n    mov d,m\n";
+            emit("mov", "e,m");
+            emit("inx", "h");
+            emit("mov", "d,m");
         }
     }
-    code_ << "    lhld ptr\n    dad d\n    shld ptr\n";  // ptr = index*2 + base
+    emit("lhld", "ptr");
+    emit("dad", "d");
+    emit("shld", "ptr");  // ptr = index*2 + base
 }
 
 // `ptr` already holds the element's address (genIndexAddr()). Reads its `words` 16-bit words,
@@ -945,10 +1063,15 @@ void I8080Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
 // `ptr+2*i` fresh for each word via BC.
 void I8080Codegen::genWideLoadAtPtr(int words) {
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    lhld ptr\n";
-        if (i > 0) code_ << "    lxi b, " << (2 * i) << "\n    dad b\n";
-        code_ << "    mov e,m\n    inx h\n    mov d,m\n";
-        code_ << "    push d\n";
+        emit("lhld", "ptr");
+        if (i > 0) {
+            emit("lxi", "b, " + std::to_string(2 * i));
+            emit("dad", "b");
+        }
+        emit("mov", "e,m");
+        emit("inx", "h");
+        emit("mov", "d,m");
+        emit("push", "d");
     }
 }
 
@@ -957,11 +1080,16 @@ void I8080Codegen::genWideLoadAtPtr(int words) {
 // `ptr+2*i`'s address computation is also using.
 void I8080Codegen::genWideStoreAtPtr(const char *role, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    lhld ptr\n";
-        if (i > 0) code_ << "    lxi b, " << (2 * i) << "\n    dad b\n";
-        code_ << "    lda " << wideScratch(role, i) << "\n    mov m,a\n";
-        code_ << "    inx h\n";
-        code_ << "    lda " << wideScratch(role, i) << "+1\n    mov m,a\n";
+        emit("lhld", "ptr");
+        if (i > 0) {
+            emit("lxi", "b, " + std::to_string(2 * i));
+            emit("dad", "b");
+        }
+        emit("lda", wideScratch(role, i));
+        emit("mov", "m,a");
+        emit("inx", "h");
+        emit("lda", wideScratch(role, i) + "+1");
+        emit("mov", "m,a");
     }
 }
 
@@ -971,7 +1099,7 @@ void I8080Codegen::genIndex(const ir::Expr &e) {
         genWideLoadAtPtr(wordCountOf(e.slot->type));
         return;
     }
-    code_ << "    lhld ptr\n";
+    emit("lhld", "ptr");
     loadOperand(e.slot->type);
 }
 
@@ -981,78 +1109,110 @@ void I8080Codegen::genIndex(const ir::Expr &e) {
 // genDivMod()'s/genShift()'s loop bodies unchanged.
 void I8080Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    dad d\n    shld ac\n"; return; }
+    if (op == "+") {
+        emit("dad", "d");
+        emit("shld", "ac");
+        return;
+    }
     if (op == "-") {
-        code_ << "    mov a,l\n    sub e\n    mov l,a\n";
-        code_ << "    mov a,h\n    sbb d\n    mov h,a\n";
-        code_ << "    shld ac\n";
+        emit("mov", "a,l");
+        emit("sub", "e");
+        emit("mov", "l,a");
+        emit("mov", "a,h");
+        emit("sbb", "d");
+        emit("mov", "h,a");
+        emit("shld", "ac");
         return;
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "ana" : (op == "|") ? "ora" : "xra";
-        code_ << "    mov a,l\n    " << insn << " e\n    mov l,a\n";
-        code_ << "    mov a,h\n    " << insn << " d\n    mov h,a\n";
-        code_ << "    shld ac\n";
+        emit("mov", "a,l");
+        emit(insn, "e");
+        emit("mov", "l,a");
+        emit("mov", "a,h");
+        emit(insn, "d");
+        emit("mov", "h,a");
+        emit("shld", "ac");
         return;
     }
     if (op == "*") {
-        code_ << "    shld bc\n";  // bc = old (multiplicand) - HL already holds it
+        emit("shld", "bc");  // bc = old (multiplicand) - HL already holds it
         storePair("dx", "d");       // dx = rhs (multiplier)
-        code_ << "    lxi h, 0\n    shld ac\n";
-        code_ << "    mvi c, 16\n";
+        emit("lxi", "h, 0");
+        emit("shld", "ac");
+        emit("mvi", "c, 16");
         std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    mov a,c\n    ora a\n";
-        code_ << "    jz " << Ldone << "\n";
-        code_ << "    lda dx\n    ani 1\n";
-        code_ << "    jz " << Lskipadd << "\n";
+        emitLabel(Lloop);
+        emit("mov", "a,c");
+        emit("ora", "a");
+        emit("jz", Ldone);
+        emit("lda", "dx");
+        emit("ani", 1);
+        emit("jz", Lskipadd);
         loadPair("d", "bc");
-        code_ << "    lhld ac\n    dad d\n    shld ac\n";
-        code_ << Lskipadd << ":\n";
+        emit("lhld", "ac");
+        emit("dad", "d");
+        emit("shld", "ac");
+        emitLabel(Lskipadd);
         shiftOneBit("bc", /*isLeft=*/true);
         shiftOneBit("dx", /*isLeft=*/false);
-        code_ << "    dcr c\n";
-        code_ << "    jmp " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("dcr", "c");
+        emit("jmp", Lloop);
+        emitLabel(Ldone);
         return;
     }
     if (op == "<<" || op == ">>") {
-        code_ << "    shld bc\n";  // bc = old (value) - HL already holds it
-        code_ << "    mov c, e\n";  // c = shift count (low byte of rhs)
+        emit("shld", "bc");  // bc = old (value) - HL already holds it
+        emit("mov", "c, e");  // c = shift count (low byte of rhs)
         std::string Lloop = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    mov a,c\n    ora a\n";
-        code_ << "    jz " << Ldone << "\n";
+        emitLabel(Lloop);
+        emit("mov", "a,c");
+        emit("ora", "a");
+        emit("jz", Ldone);
         if (op == "<<" || isUnsigned) {
             shiftOneBit("bc", /*isLeft=*/op == "<<");
         } else {
-            code_ << "    lhld bc\n";
-            code_ << "    mov a,h\n    mov b,a\n    ral\n    mov a,b\n    rar\n    mov h,a\n";
-            code_ << "    mov a,l\n    rar\n    mov l,a\n";
-            code_ << "    shld bc\n";
+            emit("lhld", "bc");
+            emit("mov", "a,h");
+            emit("mov", "b,a");
+            emit("ral");
+            emit("mov", "a,b");
+            emit("rar");
+            emit("mov", "h,a");
+            emit("mov", "a,l");
+            emit("rar");
+            emit("mov", "l,a");
+            emit("shld", "bc");
         }
-        code_ << "    dcr c\n";
-        code_ << "    jmp " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("dcr", "c");
+        emit("jmp", Lloop);
+        emitLabel(Ldone);
         copy16("ac", "bc");
         return;
     }
     // "/" or "%"
-    code_ << "    shld dx\n";  // dx = old (dividend) - HL already holds it
+    emit("shld", "dx");  // dx = old (dividend) - HL already holds it
     storePair("bc", "d");       // bc = rhs (divisor)
-    code_ << "    lxi h, 0\n    shld ac\n";
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
+    emitLabel(Lloop);
     loadPair("d", "dx");
-    code_ << "    lhld bc\n";
-    code_ << "    mov a,e\n    sub l\n    mov c,a\n";
-    code_ << "    mov a,d\n    sbb h\n";
-    code_ << "    jc " << Ldone << "\n";
-    code_ << "    mov d,a\n    mov e,c\n";
+    emit("lhld", "bc");
+    emit("mov", "a,e");
+    emit("sub", "l");
+    emit("mov", "c,a");
+    emit("mov", "a,d");
+    emit("sbb", "h");
+    emit("jc", Ldone);
+    emit("mov", "d,a");
+    emit("mov", "e,c");
     storePair("dx", "d");
-    code_ << "    lhld ac\n    inx h\n    shld ac\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("lhld", "ac");
+    emit("inx", "h");
+    emit("shld", "ac");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     if (op == "%") copy16("ac", "dx");
 }
 
@@ -1062,30 +1222,32 @@ void I8080Codegen::genCompoundOp(const std::string &op, Type type) {
 void I8080Codegen::genCompoundScalar(const ir::Expr &e) {
     auto genAddr = [&] {
         if (e.slot->kind == ir::SlotKind::Global) {
-            code_ << "    lxi h, " << label(e.slot) << "\n";
+            emit("lxi", "h, " + label(e.slot));
         } else {
             genFrameAddr(e.slot);
         }
     };
     genAddr();
     loadOperand(e.type);  // ac = old
-    code_ << "    lhld ac\n";
-    code_ << "    push h\n";  // stash old across rhs's own evaluation
+    emit("lhld", "ac");
+    emit("push", "h");  // stash old across rhs's own evaluation
     genExpr(*e.rhs);            // ac = rhs
     loadPair("d", "ac");          // de = rhs
-    code_ << "    pop h\n";        // hl = old
-    if (e.yieldOld) code_ << "    push h\n";  // re-stash old for the final result
+    emit("pop", "h");        // hl = old
+    if (e.yieldOld) {
+        emit("push", "h");  // re-stash old for the final result
+    }
     genCompoundOp(e.op, e.type);                // ac = new (raw)
     narrowAcTo(e.type);
     if (e.yieldOld) {
-        code_ << "    pop h\n";  // hl = old
-        code_ << "    shld cx\n";
+        emit("pop", "h");  // hl = old
+        emit("shld", "cx");
     }
     genAddr();
     storeOperand(e.type);  // stores ac(=new); ac already = new if !yieldOld
     if (e.yieldOld) {
-        code_ << "    lhld cx\n";
-        code_ << "    shld ac\n";  // ac = old (final result)
+        emit("lhld", "cx");
+        emit("shld", "ac");  // ac = old (final result)
     }
 }
 
@@ -1094,27 +1256,29 @@ void I8080Codegen::genCompoundScalar(const ir::Expr &e) {
 // `ptr` (e.g. a nested compound assignment). After `rhs` is evaluated nothing here recurses
 // further, so `cx` is safe as a transient `yieldOld` stash.
 void I8080Codegen::genCompoundThroughPtr(const ir::Expr &e) {
-    code_ << "    lhld ptr\n";
+    emit("lhld", "ptr");
     loadOperand(e.type);  // ac = old
-    code_ << "    lhld ptr\n";
-    code_ << "    push h\n";  // stash address
-    code_ << "    lhld ac\n";
-    code_ << "    push h\n";  // stash old (ac is about to be overwritten by rhs)
+    emit("lhld", "ptr");
+    emit("push", "h");  // stash address
+    emit("lhld", "ac");
+    emit("push", "h");  // stash old (ac is about to be overwritten by rhs)
     genExpr(*e.rhs);            // ac = rhs
     loadPair("d", "ac");          // de = rhs
-    code_ << "    pop h\n";        // hl = old
-    if (e.yieldOld) code_ << "    push h\n";  // re-stash old for the final result
+    emit("pop", "h");        // hl = old
+    if (e.yieldOld) {
+        emit("push", "h");  // re-stash old for the final result
+    }
     genCompoundOp(e.op, e.type);                // ac = new (raw)
     narrowAcTo(e.type);
     if (e.yieldOld) {
-        code_ << "    pop h\n";  // hl = old
-        code_ << "    shld cx\n";
-        code_ << "    pop h\n";   // hl = address
+        emit("pop", "h");  // hl = old
+        emit("shld", "cx");
+        emit("pop", "h");   // hl = address
         storeOperand(e.type);      // stores ac(=new) through hl
-        code_ << "    lhld cx\n";
-        code_ << "    shld ac\n";    // ac = old (final result)
+        emit("lhld", "cx");
+        emit("shld", "ac");    // ac = old (final result)
     } else {
-        code_ << "    pop h\n";  // hl = address
+        emit("pop", "h");  // hl = address
         storeOperand(e.type);      // ac already = new
     }
 }
@@ -1122,22 +1286,26 @@ void I8080Codegen::genCompoundThroughPtr(const ir::Expr &e) {
 // A no-op unless `to` is a `char`.
 void I8080Codegen::narrowAcTo(Type to) {
     if (widthOfType(to) != 1) return;
-    code_ << "    lhld ac\n";
+    emit("lhld", "ac");
     if (to.isUnsigned) {
-        code_ << "    mvi h, 0\n";
+        emit("mvi", "h, 0");
     } else {
-        code_ << "    mov a,l\n    ral\n    sbb a\n    mov h,a\n";
+        emit("mov", "a,l");
+        emit("ral");
+        emit("sbb", "a");
+        emit("mov", "h,a");
     }
-    code_ << "    shld ac\n";
+    emit("shld", "ac");
 }
 
 void I8080Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    lxi h, " << label(operand.slot) << "\n    shld ac\n";
+            emit("lxi", "h, " + label(operand.slot));
+            emit("shld", "ac");
         } else {
             genFrameAddr(operand.slot);
-            code_ << "    shld ac\n";
+            emit("shld", "ac");
         }
         return;
     }
@@ -1147,7 +1315,8 @@ void I8080Codegen::genAddrOf(const ir::Expr &operand) {
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    lxi h, " << label(operand.func) << "\n    shld ac\n";
+        emit("lxi", "h, " + label(operand.func));
+        emit("shld", "ac");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -1164,11 +1333,13 @@ void I8080Codegen::genLocalArrayInit(const ir::Slot *slot) {
         long base = static_cast<long>(i) * w;
         if (w == 1 && !elem.isSymbol) {
             genFrameAddr(slot, base);
-            code_ << "    mvi a, " << static_cast<int>(static_cast<uint8_t>(elem.value)) << "\n    mov m,a\n";
+            emit("mvi", "a, " + std::to_string(static_cast<int>(static_cast<uint8_t>(elem.value))));
+            emit("mov", "m,a");
             continue;
         }
         if (elem.isSymbol || w <= 2) {
-            code_ << "    lxi h, " << arrayElemText(elem) << "\n    shld ac\n";
+            emit("lxi", "h, " + arrayElemText(elem));
+            emit("shld", "ac");
             genFrameAddr(slot, base);
             storeAcIndirect();
             continue;
@@ -1178,7 +1349,8 @@ void I8080Codegen::genLocalArrayInit(const ir::Slot *slot) {
         int words = w / 2;
         for (int j = 0; j < words; j++) {
             uint16_t wv = static_cast<uint16_t>((uv >> (16 * j)) & 0xFFFF);
-            code_ << "    lxi h, " << wv << "\n    shld ac\n";
+            emit("lxi", "h, " + std::to_string(wv));
+            emit("shld", "ac");
             genFrameAddr(slot, base + 2 * j);
             storeAcIndirect();
         }
@@ -1203,15 +1375,22 @@ void I8080Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    lhld ac\n    push h\n";  // save lhs on the real stack across evaluating rhs
+        emit("lhld", "ac");
+        emit("push", "h");  // save lhs on the real stack across evaluating rhs
         genExpr(*e.rhs);                        // ac = rhs
-        code_ << "    pop d\n";                  // DE = lhs (popped only now, after rhs is fully evaluated)
+        emit("pop", "d");                  // DE = lhs (popped only now, after rhs is fully evaluated)
         if (op == "+") {
-            code_ << "    lhld ac\n    dad d\n    shld ac\n";
+            emit("lhld", "ac");
+            emit("dad", "d");
+            emit("shld", "ac");
         } else {
-            code_ << "    lhld ac\n";  // HL = rhs
-            code_ << "    mov a,e\n    sub l\n    mov e,a\n";
-            code_ << "    mov a,d\n    sbb h\n    mov d,a\n";
+            emit("lhld", "ac");  // HL = rhs
+            emit("mov", "a,e");
+            emit("sub", "l");
+            emit("mov", "e,a");
+            emit("mov", "a,d");
+            emit("sbb", "h");
+            emit("mov", "d,a");
             storePair("ac", "d");
         }
         return;
@@ -1238,14 +1417,19 @@ void I8080Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    lhld ac\n    push h\n";
+        emit("lhld", "ac");
+        emit("push", "h");
         genExpr(*e.rhs);
-        code_ << "    pop d\n";    // DE = lhs
-        code_ << "    lhld ac\n";  // HL = rhs
+        emit("pop", "d");    // DE = lhs
+        emit("lhld", "ac");  // HL = rhs
         const char *insn = (op == "&") ? "ana" : (op == "|") ? "ora" : "xra";
-        code_ << "    mov a,l\n    " << insn << " e\n    mov l,a\n";
-        code_ << "    mov a,h\n    " << insn << " d\n    mov h,a\n";
-        code_ << "    shld ac\n";
+        emit("mov", "a,l");
+        emit(insn, "e");
+        emit("mov", "l,a");
+        emit("mov", "a,h");
+        emit(insn, "d");
+        emit("mov", "h,a");
+        emit("shld", "ac");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -1276,25 +1460,36 @@ void I8080Codegen::genBinary(const ir::Expr &e) {
 // SRA idiom for the top byte as genWideShift().
 void I8080Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);                          // ac = value to shift
-    code_ << "    lhld ac\n    push h\n";  // saved on the real stack across evaluating the count
+    emit("lhld", "ac");
+    emit("push", "h");  // saved on the real stack across evaluating the count
     genExpr(rhs);                           // ac = shift count
-    code_ << "    lhld ac\n    mov c,l\n";  // c = shift count (always small; low byte is enough)
-    code_ << "    pop h\n    shld bc\n";     // bc = value (restored only now, after the count is safely in c)
+    emit("lhld", "ac");
+    emit("mov", "c,l");  // c = shift count (always small; low byte is enough)
+    emit("pop", "h");
+    emit("shld", "bc");     // bc = value (restored only now, after the count is safely in c)
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov a,c\n    ora a\n";
-    code_ << "    jz " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("mov", "a,c");
+    emit("ora", "a");
+    emit("jz", Ldone);
     if (isLeft || isUnsigned) {
         shiftOneBit("bc", isLeft);
     } else {
-        code_ << "    lhld bc\n";
-        code_ << "    mov a,h\n    mov b,a\n    ral\n    mov a,b\n    rar\n    mov h,a\n";
-        code_ << "    mov a,l\n    rar\n    mov l,a\n";
-        code_ << "    shld bc\n";
+        emit("lhld", "bc");
+        emit("mov", "a,h");
+        emit("mov", "b,a");
+        emit("ral");
+        emit("mov", "a,b");
+        emit("rar");
+        emit("mov", "h,a");
+        emit("mov", "a,l");
+        emit("rar");
+        emit("mov", "l,a");
+        emit("shld", "bc");
     }
-    code_ << "    dcr c\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("dcr", "c");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     copy16("ac", "bc");
 }
 
@@ -1303,26 +1498,33 @@ void I8080Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLef
 // Only verified against non-negative operands.
 void I8080Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);                          // ac = multiplicand
-    code_ << "    lhld ac\n    push h\n";  // saved on the real stack across evaluating the multiplier
+    emit("lhld", "ac");
+    emit("push", "h");  // saved on the real stack across evaluating the multiplier
     genExpr(rhs);
-    code_ << "    pop h\n    shld bc\n";  // bc = multiplicand (restored only now)
+    emit("pop", "h");
+    emit("shld", "bc");  // bc = multiplicand (restored only now)
     copy16("dx", "ac");                     // dx = multiplier
-    code_ << "    lxi h, 0\n    shld ac\n";  // ac = product = 0
-    code_ << "    mvi c, 16\n";               // loop counter, in the real register C
+    emit("lxi", "h, 0");
+    emit("shld", "ac");  // ac = product = 0
+    emit("mvi", "c, 16");               // loop counter, in the real register C
     std::string Lloop = newLabel(), Ldone = newLabel(), Lskipadd = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov a,c\n    ora a\n";
-    code_ << "    jz " << Ldone << "\n";
-    code_ << "    lda dx\n    ani 1\n";
-    code_ << "    jz " << Lskipadd << "\n";
+    emitLabel(Lloop);
+    emit("mov", "a,c");
+    emit("ora", "a");
+    emit("jz", Ldone);
+    emit("lda", "dx");
+    emit("ani", 1);
+    emit("jz", Lskipadd);
     loadPair("d", "bc");
-    code_ << "    lhld ac\n    dad d\n    shld ac\n";
-    code_ << Lskipadd << ":\n";
+    emit("lhld", "ac");
+    emit("dad", "d");
+    emit("shld", "ac");
+    emitLabel(Lskipadd);
     shiftOneBit("bc", /*isLeft=*/true);
     shiftOneBit("dx", /*isLeft=*/false);
-    code_ << "    dcr c\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("dcr", "c");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
 }
 
 // Repeated subtraction (no hardware divide): `dx` is the running remainder (starts as the
@@ -1333,31 +1535,42 @@ void I8080Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // (1 iff the two signs differed) and the remainder's sign (the dividend's) are restored after.
 void I8080Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);                          // ac = dividend
-    code_ << "    lhld ac\n    push h\n";  // saved on the real stack across evaluating the divisor
+    emit("lhld", "ac");
+    emit("push", "h");  // saved on the real stack across evaluating the divisor
     genExpr(rhs);
-    code_ << "    pop h\n    shld dx\n";  // dx = dividend (restored only now)
+    emit("pop", "h");
+    emit("shld", "dx");  // dx = dividend (restored only now)
     copy16("bc", "ac");                     // bc = divisor
     auto isNeg = [&](const char *cell, const char *dst) {
-        code_ << "    lda " << cell << "+1\n    ani 128\n";
+        emit("lda", std::string(cell) + "+1");
+        emit("ani", 128);
         std::string Lnonneg = newLabel(), Ldone = newLabel();
-        code_ << "    jz " << Lnonneg << "\n";
-        code_ << "    mvi a, 1\n    sta " << dst << "\n    jmp " << Ldone << "\n";
-        code_ << Lnonneg << ":\n    mvi a, 0\n    sta " << dst << "\n";
-        code_ << Ldone << ":\n";
+        emit("jz", Lnonneg);
+        emit("mvi", "a, 1");
+        emit("sta", dst);
+        emit("jmp", Ldone);
+        emitLabel(Lnonneg);
+        emit("mvi", "a, 0");
+        emit("sta", dst);
+        emitLabel(Ldone);
     };
     auto negate16 = [&](const char *cell) {
-        code_ << "    lhld " << cell << "\n";
-        code_ << "    xra a\n    sub l\n    mov l,a\n";
-        code_ << "    mvi a, 0\n    sbb h\n    mov h,a\n";
-        code_ << "    shld " << cell << "\n";
+        emit("lhld", cell);
+        emit("xra", "a");
+        emit("sub", "l");
+        emit("mov", "l,a");
+        emit("mvi", "a, 0");
+        emit("sbb", "h");
+        emit("mov", "h,a");
+        emit("shld", cell);
     };
     auto negateIf = [&](const char *flagCell, const char *cell) {
-        code_ << "    lda " << flagCell << "\n";
-        code_ << "    ora a\n";  // LDA alone leaves flags unaffected on the 8080 - this sets Z from A's own value
+        emit("lda", flagCell);
+        emit("ora", "a");  // LDA alone leaves flags unaffected on the 8080 - this sets Z from A's own value
         std::string Lskip = newLabel();
-        code_ << "    jz " << Lskip << "\n";
+        emit("jz", Lskip);
         negate16(cell);
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
     };
     if (!isUnsigned) {
         isNeg("dx", "ptr");
@@ -1376,30 +1589,41 @@ void I8080Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
     // register-pair move) - division by a large dividend needs one iteration per unit of
     // quotient, so that difference is what used to run a real test past the test harness's own
     // step-count ceiling (see docs/known-bugs.md).
-    code_ << "    lhld bc\n    mov d,h\n    mov e,l\n";  // de = divisor (fixed for the loop)
-    code_ << "    lhld dx\n";                            // hl = running remainder
-    code_ << "    lxi b, 0\n";                           // bc = quotient = 0
+    emit("lhld", "bc");
+    emit("mov", "d,h");
+    emit("mov", "e,l");  // de = divisor (fixed for the loop)
+    emit("lhld", "dx");                            // hl = running remainder
+    emit("lxi", "b, 0");                           // bc = quotient = 0
     std::string Lloop = newLabel(), Lcontinue = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov a,l\n    sub e\n    mov l,a\n";
-    code_ << "    mov a,h\n    sbb d\n    mov h,a\n";
-    code_ << "    jnc " << Lcontinue << "\n";
-    code_ << "    dad d\n";  // undo: hl was about to go negative, add the divisor back
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Lcontinue << ":\n";
-    code_ << "    inx b\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    code_ << "    shld dx\n";                            // dx = remainder
-    code_ << "    push b\n    pop h\n    shld ac\n";     // ac = quotient
+    emitLabel(Lloop);
+    emit("mov", "a,l");
+    emit("sub", "e");
+    emit("mov", "l,a");
+    emit("mov", "a,h");
+    emit("sbb", "d");
+    emit("mov", "h,a");
+    emit("jnc", Lcontinue);
+    emit("dad", "d");  // undo: hl was about to go negative, add the divisor back
+    emit("jmp", Ldone);
+    emitLabel(Lcontinue);
+    emit("inx", "b");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
+    emit("shld", "dx");                            // dx = remainder
+    emit("push", "b");
+    emit("pop", "h");
+    emit("shld", "ac");     // ac = quotient
     if (!isUnsigned) {
         // Quotient is negative iff the two original signs differed; the remainder always takes
         // the dividend's original sign.
-        code_ << "    lda ptr\n    mov b,a\n    lda ptr+1\n    xra b\n";
+        emit("lda", "ptr");
+        emit("mov", "b,a");
+        emit("lda", "ptr+1");
+        emit("xra", "b");
         std::string Lskip = newLabel();
-        code_ << "    jz " << Lskip << "\n";
+        emit("jz", Lskip);
         negate16("ac");
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
         negateIf("ptr", "dx");
     }
     if (wantRemainder) copy16("ac", "dx");
@@ -1419,18 +1643,26 @@ void I8080Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 // iff a==b.
 void I8080Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs, bool wantEqual) {
     genExpr(lhs);
-    code_ << "    lhld ac\n    push h\n";  // saved on the real stack across evaluating rhs
+    emit("lhld", "ac");
+    emit("push", "h");  // saved on the real stack across evaluating rhs
     genExpr(rhs);
-    code_ << "    pop d\n";    // DE = lhs
-    code_ << "    lhld ac\n";  // HL = rhs
-    code_ << "    mov a,e\n    sub l\n    mov c,a\n";
-    code_ << "    mov a,d\n    sbb h\n";
-    code_ << "    ora c\n";
+    emit("pop", "d");    // DE = lhs
+    emit("lhld", "ac");  // HL = rhs
+    emit("mov", "a,e");
+    emit("sub", "l");
+    emit("mov", "c,a");
+    emit("mov", "a,d");
+    emit("sbb", "h");
+    emit("ora", "c");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    j" << (wantEqual ? "z" : "nz") << " " << Ltrue << "\n";
-    code_ << "    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit(wantEqual ? "jz" : "jnz", Ltrue);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 // Signed 16-bit "a < b" via the bias trick: flipping the top bit of each operand's high byte
@@ -1438,57 +1670,82 @@ void I8080Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs,
 // compare (the final borrow) to do.
 void I8080Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool invert, bool isUnsigned) {
     genExpr(a);
-    code_ << "    lhld ac\n    push h\n";  // saved on the real stack across evaluating b
+    emit("lhld", "ac");
+    emit("push", "h");  // saved on the real stack across evaluating b
     genExpr(b);
-    code_ << "    pop d\n";    // DE = a
-    code_ << "    lhld ac\n";  // HL = b
+    emit("pop", "d");    // DE = a
+    emit("lhld", "ac");  // HL = b
     if (!isUnsigned) {
-        code_ << "    mov a,d\n    xri 0x80\n    mov d,a\n";  // D = a's high byte, sign flipped
-        code_ << "    mov a,h\n    xri 0x80\n    mov h,a\n";  // H = b's high byte, sign flipped
+        emit("mov", "a,d");
+        emit("xri", "0x80");
+        emit("mov", "d,a");  // D = a's high byte, sign flipped
+        emit("mov", "a,h");
+        emit("xri", "0x80");
+        emit("mov", "h,a");  // H = b's high byte, sign flipped
     }
-    code_ << "    mov a,e\n    sub l\n";                  // a'_lo - b'_lo, CY = borrow
-    code_ << "    mov a,d\n    sbb h\n";                  // a'_hi - b'_hi - borrow; CY now = (a < b) unbiased
+    emit("mov", "a,e");
+    emit("sub", "l");                  // a'_lo - b'_lo, CY = borrow
+    emit("mov", "a,d");
+    emit("sbb", "h");                  // a'_hi - b'_hi - borrow; CY now = (a < b) unbiased
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    j" << (invert ? "nc" : "c") << " " << Ltrue << "\n";
-    code_ << "    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit(invert ? "jnc" : "jc", Ltrue);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 void I8080Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jz " << Lfalse << "\n";
+    emit("jz", Lfalse);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jz " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    lxi h, 0\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit("jz", Lfalse);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 void I8080Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jnz " << Ltrue << "\n";
+    emit("jnz", Ltrue);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jnz " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit("jnz", Ltrue);
+    emitLabel(Lfalse);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 void I8080Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    jz " << Ltrue << "\n";
-    code_ << "    lxi h, 0\n    shld ac\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lxi h, 1\n    shld ac\n";
-    code_ << Ldone << ":\n";
+    emit("jz", Ltrue);
+    emit("lxi", "h, 0");
+    emit("shld", "ac");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("lxi", "h, 1");
+    emit("shld", "ac");
+    emitLabel(Ldone);
 }
 
 // After genExpr(e) leaves `e`'s value - `ac` if narrow, or `wordCountOf(e.type)` words on the
@@ -1496,17 +1753,22 @@ void I8080Codegen::genLogicalNot(const ir::Expr &rhs) {
 // stack space released, ready for an immediate `jz`/`jnz`.
 void I8080Codegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    lhld ac\n    mov a,l\n    ora h\n";
+        emit("lhld", "ac");
+        emit("mov", "a,l");
+        emit("ora", "h");
         return;
     }
     int words = wordCountOf(e.type);
     popWideInto("a", words);
     auto bytes = wideByteLabelsLsbFirst("a", words);
-    code_ << "    mvi c, 0\n";
+    emit("mvi", "c, 0");
     for (const auto &b : bytes) {
-        code_ << "    lda " << b << "\n    ora c\n    mov c,a\n";
+        emit("lda", b);
+        emit("ora", "c");
+        emit("mov", "c,a");
     }
-    code_ << "    mov a,c\n    ora a\n";
+    emit("mov", "a,c");
+    emit("ora", "a");
 }
 
 std::optional<std::string> I8080Codegen::assembleInProcess(const std::string &asmText,

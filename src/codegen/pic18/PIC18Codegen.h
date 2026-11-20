@@ -108,7 +108,7 @@ namespace rcc {
 // assembler symbol, so separately-compiled files' distinct globals get
 // distinct, non-colliding linked data-space addresses once merged by
 // GenericLinker's Harvard-data-space layout pass.
-class PIC18Codegen : public Backend {
+class PIC18Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pic18"; }
@@ -265,7 +265,8 @@ class PIC18Codegen : public Backend {
 
     void declareRam(const std::string &lbl, int count, bool zeroAtStart = true);
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat() and
+    // `code_` itself come from TextCodegenBase (see Codegen.h).
     std::vector<std::string> ramDecls_;
     std::vector<std::pair<std::string, int>> zeroAtStart_;
     std::map<std::string, std::string> perFileAsm_;

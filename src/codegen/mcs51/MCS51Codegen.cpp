@@ -24,7 +24,7 @@ constexpr int kFrameStackBytes = 2048;
 void MCS51Codegen::allocXdata(const std::string &lbl, int count) {
     // `lbl` and the `xdata` statement must share one physical line
     // (the grammar only attaches a label to a statement on that line).
-    code_ << lbl << ": xdata " << count << "\n";
+    emitRaw(cat(lbl, ": xdata ", count));
 }
 
 void MCS51Codegen::declareGlobalTemp(const std::string &lbl, long initValue) {
@@ -89,78 +89,108 @@ void MCS51Codegen::declareGlobalArray(const std::string &lbl, int arraySize, int
 }
 
 void MCS51Codegen::copy16(const std::string &dst, const std::string &src) {
-    code_ << "    movdd " << dst << ", " << src << "\n";
-    code_ << "    movdd " << dst << "+1, " << src << "+1\n";
+    emit("movdd", cat(dst, ", ", src));
+    emit("movdd", cat(dst, "+1, ", src, "+1"));
 }
 
 void MCS51Codegen::loadXdata(const std::string &dstReg, const std::string &xdataExpr) {
-    code_ << "    movdptr " << xdataExpr << "\n";
-    code_ << "    movxr\n    movd " << dstReg << "\n";
-    code_ << "    incdptr\n";
-    code_ << "    movxr\n    movd " << dstReg << "+1\n";
+    emit("movdptr", xdataExpr);
+    emit("movxr");
+    emit("movd", dstReg);
+    emit("incdptr");
+    emit("movxr");
+    emit("movd", cat(dstReg, "+1"));
 }
 
 void MCS51Codegen::storeXdata(const std::string &xdataExpr, const std::string &srcReg) {
-    code_ << "    movdptr " << xdataExpr << "\n";
-    code_ << "    mova " << srcReg << "\n    movxw\n";
-    code_ << "    incdptr\n";
-    code_ << "    mova " << srcReg << "+1\n    movxw\n";
+    emit("movdptr", xdataExpr);
+    emit("mova", srcReg);
+    emit("movxw");
+    emit("incdptr");
+    emit("mova", cat(srcReg, "+1"));
+    emit("movxw");
 }
 
 void MCS51Codegen::loadXdataAddress(const std::string &dstReg, const std::string &xdataExpr) {
-    code_ << "    movdptr " << xdataExpr << "\n";
-    code_ << "    mova dpl\n    movd " << dstReg << "\n";
-    code_ << "    mova dph\n    movd " << dstReg << "+1\n";
+    emit("movdptr", xdataExpr);
+    emit("mova", "dpl");
+    emit("movd", dstReg);
+    emit("mova", "dph");
+    emit("movd", cat(dstReg, "+1"));
 }
 
 void MCS51Codegen::loadCodeAddress(const std::string &dstReg, const std::string &codeExpr) {
-    code_ << "    movdptrc " << codeExpr << "\n";
-    code_ << "    mova dpl\n    movd " << dstReg << "\n";
-    code_ << "    mova dph\n    movd " << dstReg << "+1\n";
+    emit("movdptrc", codeExpr);
+    emit("mova", "dpl");
+    emit("movd", dstReg);
+    emit("mova", "dph");
+    emit("movd", cat(dstReg, "+1"));
 }
 
 // Loads DPTR from `ptr` and writes `srcReg`'s low `width` bytes there
 // one MOVX at a time, without disturbing `ptr`.
 void MCS51Codegen::storeIndirect(const std::string &srcReg, int width) {
-    code_ << "    movdpl ptr\n    movdph ptr+1\n";
-    code_ << "    mova " << srcReg << "\n    movxw\n";
+    emit("movdpl", "ptr");
+    emit("movdph", "ptr+1");
+    emit("mova", srcReg);
+    emit("movxw");
     if (width == 1) return;
-    code_ << "    incdptr\n";
-    code_ << "    mova " << srcReg << "+1\n    movxw\n";
+    emit("incdptr");
+    emit("mova", cat(srcReg, "+1"));
+    emit("movxw");
 }
 
 void MCS51Codegen::loadIndirect(const std::string &dstReg, int width, bool isUnsigned) {
-    code_ << "    movdpl ptr\n    movdph ptr+1\n";
-    code_ << "    movxr\n    movd " << dstReg << "\n";
+    emit("movdpl", "ptr");
+    emit("movdph", "ptr+1");
+    emit("movxr");
+    emit("movd", dstReg);
     if (width == 1) {
         if (isUnsigned) {
-            code_ << "    movai 0\n    movd " << dstReg << "+1\n";
+            emit("movai", 0);
+            emit("movd", cat(dstReg, "+1"));
         } else {
             // The `anli`/Z-flag branch must come immediately after
             // `mova`, since any instruction between them could clobber PSW.Z.
-            code_ << "    mova " << dstReg << "\n    anli 128\n";
+            emit("mova", dstReg);
+            emit("anli", 128);
             std::string Lneg = newLabel(), Lnonneg = newLabel(), Ldone = newLabel();
             safeBranch("jz", Lnonneg, Lneg);
-            code_ << Lneg << ":\n    movai 255\n    movd " << dstReg << "+1\n    ljmp " << Ldone << "\n";
-            code_ << Lnonneg << ":\n    movai 0\n    movd " << dstReg << "+1\n";
-            code_ << Ldone << ":\n";
+            emitLabel(Lneg);
+            emit("movai", 255);
+            emit("movd", cat(dstReg, "+1"));
+            emit("ljmp", Ldone);
+            emitLabel(Lnonneg);
+            emit("movai", 0);
+            emit("movd", cat(dstReg, "+1"));
+            emitLabel(Ldone);
         }
         return;
     }
-    code_ << "    incdptr\n";
-    code_ << "    movxr\n    movd " << dstReg << "+1\n";
+    emit("incdptr");
+    emit("movxr");
+    emit("movd", cat(dstReg, "+1"));
 }
 
 void MCS51Codegen::addImm16(const std::string &reg, int value) {
     uint16_t v16 = static_cast<uint16_t>(value);
-    code_ << "    mova " << reg << "\n    addi " << (v16 & 0xFF) << "\n    movd " << reg << "\n";
-    code_ << "    mova " << reg << "+1\n    addci " << ((v16 >> 8) & 0xFF) << "\n    movd " << reg << "+1\n";
+    emit("mova", reg);
+    emit("addi", v16 & 0xFF);
+    emit("movd", reg);
+    emit("mova", cat(reg, "+1"));
+    emit("addci", (v16 >> 8) & 0xFF);
+    emit("movd", cat(reg, "+1"));
 }
 
 void MCS51Codegen::subImm16(const std::string &reg, int value) {
     uint16_t v16 = static_cast<uint16_t>(value);
-    code_ << "    mova " << reg << "\n    clrc\n    subbi " << (v16 & 0xFF) << "\n    movd " << reg << "\n";
-    code_ << "    mova " << reg << "+1\n    subbi " << ((v16 >> 8) & 0xFF) << "\n    movd " << reg << "+1\n";
+    emit("mova", reg);
+    emit("clrc");
+    emit("subbi", v16 & 0xFF);
+    emit("movd", reg);
+    emit("mova", cat(reg, "+1"));
+    emit("subbi", (v16 >> 8) & 0xFF);
+    emit("movd", cat(reg, "+1"));
 }
 
 void MCS51Codegen::loadFrameAddress(const std::string &dstReg, const ir::Slot *slot) {
@@ -174,15 +204,19 @@ void MCS51Codegen::loadFrameAddress(const std::string &dstReg, const ir::Slot *s
 }
 
 void MCS51Codegen::pushFrameWord(const std::string &srcReg) {
-    code_ << "    movdpl ssp\n    movdph ssp+1\n";
-    code_ << "    mova " << srcReg << "\n    movxw\n";
-    code_ << "    incdptr\n";
-    code_ << "    mova " << srcReg << "+1\n    movxw\n";
+    emit("movdpl", "ssp");
+    emit("movdph", "ssp+1");
+    emit("mova", srcReg);
+    emit("movxw");
+    emit("incdptr");
+    emit("mova", cat(srcReg, "+1"));
+    emit("movxw");
     addImm16("ssp", 2);
 }
 
 void MCS51Codegen::genPrologue(const ir::Function *fn) {
-    code_ << "    push fp\n    push fp+1\n";
+    emit("push", "fp");
+    emit("push", "fp+1");
     copy16("fp", "ssp");
     int nparams = static_cast<int>(fn->params.size());
     if (nparams > 0) subImm16("fp", nparams * 2);
@@ -192,7 +226,8 @@ void MCS51Codegen::genPrologue(const ir::Function *fn) {
 
 void MCS51Codegen::genEpilogue() {
     copy16("ssp", "fp");
-    code_ << "    pop fp+1\n    pop fp\n";
+    emit("pop", "fp+1");
+    emit("pop", "fp");
 }
 
 void MCS51Codegen::loadArrayElemValue(const ir::ArrayInitElem &e) {
@@ -205,8 +240,10 @@ void MCS51Codegen::loadArrayElemValue(const ir::ArrayInitElem &e) {
         return;
     }
     uint16_t v16 = static_cast<uint16_t>(e.value);
-    code_ << "    movai " << (v16 & 0xFF) << "\n    movd ac\n";
-    code_ << "    movai " << ((v16 >> 8) & 0xFF) << "\n    movd ac+1\n";
+    emit("movai", v16 & 0xFF);
+    emit("movd", "ac");
+    emit("movai", (v16 >> 8) & 0xFF);
+    emit("movd", "ac+1");
 }
 
 void MCS51Codegen::genLocalArrayInit(const ir::Slot *slot) {
@@ -223,19 +260,19 @@ void MCS51Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void MCS51Codegen::safeBranch(const std::string &branchMnemonic, const std::string &targetIfTaken,
                                const std::string &targetIfNot) {
     std::string Lnear = newLabel();
-    code_ << "    " << branchMnemonic << " " << Lnear << "\n";
-    code_ << "    ljmp " << targetIfNot << "\n";
-    code_ << Lnear << ":\n";
-    code_ << "    ljmp " << targetIfTaken << "\n";
+    emit(branchMnemonic, Lnear);
+    emit("ljmp", targetIfNot);
+    emitLabel(Lnear);
+    emit("ljmp", targetIfTaken);
 }
 
 void MCS51Codegen::safeDjnz(const std::string &counterReg, const std::string &targetIfNonzero,
                              const std::string &targetIfZero) {
     std::string Lnear = newLabel();
-    code_ << "    djnz " << counterReg << ", " << Lnear << "\n";
-    code_ << "    ljmp " << targetIfZero << "\n";
-    code_ << Lnear << ":\n";
-    code_ << "    ljmp " << targetIfNonzero << "\n";
+    emit("djnz", cat(counterReg, ", ", Lnear));
+    emit("ljmp", targetIfZero);
+    emitLabel(Lnear);
+    emit("ljmp", targetIfNonzero);
 }
 
 std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
@@ -267,27 +304,40 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
     }
     allocXdata(kFrameStackLabel, kFrameStackBytes);
 
-    code_ << "org " << kMCS51BaseAddress << "\n";
+    emitRaw(cat("org ", kMCS51BaseAddress));
     // Pseudo-register addresses: 0x30 sits above the 4 register banks
     // (0x00-0x1F) and the bit-addressable area (0x20-0x2F), below the
     // 128-byte floor every 8031/8032/8051/8052 guarantees. `dpl`/`dph`
     // are the real DPL/DPH SFRs (0x82/0x83), not invented cells.
-    code_ << "ac = 0x30\nbc = 0x32\ncx = 0x34\ndx = 0x36\nptr = 0x38\nfp = 0x3A\nssp = 0x3C\n";
-    code_ << "dpl = 0x82\ndph = 0x83\nb = 0xF0\n\n";
+    // Hex text preserved verbatim (emitEquate() would format these as
+    // decimal, changing the generated text).
+    emitRaw("ac = 0x30");
+    emitRaw("bc = 0x32");
+    emitRaw("cx = 0x34");
+    emitRaw("dx = 0x36");
+    emitRaw("ptr = 0x38");
+    emitRaw("fp = 0x3A");
+    emitRaw("ssp = 0x3C");
+    emitRaw("dpl = 0x82");
+    emitRaw("dph = 0x83");
+    emitRaw("b = 0xF0");
+    emitRaw("");
 
     // No object file emits the entry sequence itself in object mode;
     // MCS51LinkerFactory.cpp synthesizes one once every object is
     // merged and `main`'s linked address is resolvable.
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         // `ssp` must be valid before `main`'s genPrologue() reads it.
         loadXdataAddress("ssp", kFrameStackLabel);
         code_ << initCode_.str();
-        code_ << "    lcall " << label(mainFn) << "\n";
+        emit("lcall", label(mainFn));
         // The program's result sits in `ac`; this `mova` also leaves
         // the low byte in the real accumulator for a quick register-dump look.
-        code_ << "    mova ac\n";
-        code_ << "halt:\n    ljmp halt\n\n";
+        emit("mova", "ac");
+        emitLabel("halt");
+        emit("ljmp", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) {
@@ -297,13 +347,14 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
             // seeing any user object, so `fn_main`'s prologue - the
             // one point this file's code is guaranteed to run first -
             // takes over that role, `ssp` init included.
-            code_ << label(fb.func) << ":\n";
+            emitLabel(label(fb.func));
             loadXdataAddress("ssp", kFrameStackLabel);
             genPrologue(fb.func);
             code_ << initCode_.str();
             genStmt(*fb.body);
             genEpilogue();
-            code_ << "    ret\n\n";
+            emit("ret");
+            emitRaw("");
         } else {
             genFunction(fb);
         }
@@ -315,11 +366,12 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> MCS51Codegen::perFileAsm() const { return perFileAsm_; }
 
 void MCS51Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     genPrologue(fn.func);
     genStmt(*fn.body);
     genEpilogue();
-    code_ << "    ret\n\n";
+    emit("ret");
+    emitRaw("");
 }
 
 void MCS51Codegen::genStmt(const ir::Stmt &s) {
@@ -330,46 +382,48 @@ void MCS51Codegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            code_ << "    mova ac\n    orl ac+1\n";
+            emit("mova", "ac");
+            emit("orl", "ac+1");
             std::string Lthen = newLabel();
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
             safeBranch("jz", s.elseStmt ? Lelse : Ldone, Lthen);
-            code_ << Lthen << ":\n";
+            emitLabel(Lthen);
             genStmt(*s.thenStmt);
-            code_ << "    ljmp " << Ldone << "\n";
+            emit("ljmp", Ldone);
             if (s.elseStmt) {
-                code_ << Lelse << ":\n";
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lbody = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            code_ << "    mova ac\n    orl ac+1\n";
+            emit("mova", "ac");
+            emit("orl", "ac+1");
             safeBranch("jz", Lend, Lbody);
-            code_ << Lbody << ":\n";
+            emitLabel(Lbody);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    ljmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("ljmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    ljmp " << loopLabels_.back().second << "\n";
+            emit("ljmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    ljmp " << loopLabels_.back().first << "\n";
+            emit("ljmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -377,7 +431,7 @@ void MCS51Codegen::genStmt(const ir::Stmt &s) {
             // Early exit: genFunction()'s fall-through epilogue never
             // runs for this path, so the teardown is inlined here.
             genEpilogue();
-            code_ << "    ret\n";
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -401,16 +455,15 @@ void MCS51Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    ljmp " << irLabel(s.labelId) << "\n";
+            emit("ljmp", irLabel(s.labelId));
             return;
         }
     }
@@ -429,8 +482,10 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
-            code_ << "    movai " << (v16 & 0xFF) << "\n    movd ac\n";
-            code_ << "    movai " << ((v16 >> 8) & 0xFF) << "\n    movd ac+1\n";
+            emit("movai", v16 & 0xFF);
+            emit("movd", "ac");
+            emit("movai", (v16 >> 8) & 0xFF);
+            emit("movd", "ac+1");
             return;
         }
         case ir::ExprKind::Var: {
@@ -453,9 +508,11 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
                 genIndexAddr(e.slot, *e.lhs);  // ptr = target XDATA address
                 // Save `ptr` across evaluating rhs (which might itself
                 // reuse `ptr`) via real PUSH/POP direct.
-                code_ << "    push ptr\n    push ptr+1\n";
+                emit("push", "ptr");
+                emit("push", "ptr+1");
                 genExpr(*e.rhs);
-                code_ << "    pop ptr+1\n    pop ptr\n";
+                emit("pop", "ptr+1");
+                emit("pop", "ptr");
                 storeIndirect("ac", widthOfType(e.slot->type));
                 return;
             }
@@ -465,18 +522,22 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
                 return;
             }
             loadFrameAddress("ptr", e.slot);
-            code_ << "    push ptr\n    push ptr+1\n";
+            emit("push", "ptr");
+            emit("push", "ptr+1");
             genExpr(*e.rhs);
-            code_ << "    pop ptr+1\n    pop ptr\n";
+            emit("pop", "ptr+1");
+            emit("pop", "ptr");
             storeIndirect("ac", widthOfType(e.slot->type));
             return;
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // ac = pointer value
             copy16("ptr", "ac");
-            code_ << "    push ptr\n    push ptr+1\n";
+            emit("push", "ptr");
+            emit("push", "ptr+1");
             genExpr(*e.rhs);
-            code_ << "    pop ptr+1\n    pop ptr\n";
+            emit("pop", "ptr+1");
+            emit("pop", "ptr");
             storeIndirect("ac", widthOfType(e.type));
             return;
         }
@@ -487,16 +548,22 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
                 return;
             }
             if (e.slot->kind == ir::SlotKind::Global) {
-                genExpr(*e.rhs);    // ac = rhs
-                copy16("dx", "ac");   // dx = rhs, held (nothing else evaluates a genExpr() before it's consumed)
+                genExpr(*e.rhs);     // ac = rhs
+                copy16("dx", "ac");  // dx = rhs, held (nothing else evaluates a genExpr() before it's consumed)
                 loadXdata("ac", label(e.slot));  // ac = old
-                copy16("bc", "ac");                 // bc = old - genCompoundOp()'s own precondition
-                if (e.yieldOld) code_ << "    push ac\n    push ac+1\n";
+                copy16("bc", "ac");               // bc = old - genCompoundOp()'s own precondition
+                if (e.yieldOld) {
+                    emit("push", "ac");
+                    emit("push", "ac+1");
+                }
                 copy16("ac", "dx");  // ac = rhs - genCompoundOp()'s own other precondition
                 genCompoundOp(e.op, e.type);
                 narrowAcTo(e.type);
                 storeXdata(label(e.slot), "ac");
-                if (e.yieldOld) code_ << "    pop ac+1\n    pop ac\n";
+                if (e.yieldOld) {
+                    emit("pop", "ac+1");
+                    emit("pop", "ac");
+                }
                 return;
             }
             loadFrameAddress("ptr", e.slot);
@@ -511,24 +578,30 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
-            code_ << "    mova ac\n    orl ac+1\n";
+            emit("mova", "ac");
+            emit("orl", "ac+1");
             std::string Lthen = newLabel();
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             safeBranch("jz", Lelse, Lthen);
-            code_ << Lthen << ":\n";
+            emitLabel(Lthen);
             genExpr(*e.rhs);
-            code_ << "    ljmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("ljmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    movai 0\n    clrc\n    subb ac\n    movd ac\n";
-                code_ << "    movai 0\n    subb ac+1\n    movd ac+1\n";
+                emit("movai", 0);
+                emit("clrc");
+                emit("subb", "ac");
+                emit("movd", "ac");
+                emit("movai", 0);
+                emit("subb", "ac+1");
+                emit("movd", "ac+1");
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
@@ -537,8 +610,12 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
                 loadIndirect("ac", widthOfType(e.type), e.type.isUnsigned);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    mova ac\n    xrli 255\n    movd ac\n";
-                code_ << "    mova ac+1\n    xrli 255\n    movd ac+1\n";
+                emit("mova", "ac");
+                emit("xrli", 255);
+                emit("movd", "ac");
+                emit("mova", "ac+1");
+                emit("xrli", 255);
+                emit("movd", "ac+1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -552,7 +629,7 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
                 genExpr(*e.args[i]);
                 pushFrameWord("ac");
             }
-            code_ << "    lcall " << label(e.func) << "\n";
+            emit("lcall", label(e.func));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -564,11 +641,13 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);  // ac = the callee's own entry address
             std::string ret = newLabel();
             loadCodeAddress("bc", ret);  // bc = this call's own return address
-            code_ << "    push bc\n    push bc+1\n";
-            code_ << "    movdpl ac\n    movdph ac+1\n";  // dptr = callee address
-            code_ << "    clra\n";                        // a = 0, so @A+DPTR == DPTR exactly
-            code_ << "    jmpadptr\n";
-            code_ << ret << ":\n";
+            emit("push", "bc");
+            emit("push", "bc+1");
+            emit("movdpl", "ac");
+            emit("movdph", "ac+1");  // dptr = callee address
+            emit("clra");            // a = 0, so @A+DPTR == DPTR exactly
+            emit("jmpadptr");
+            emitLabel(ret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -581,7 +660,7 @@ void MCS51Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // `SETB EA` (IE.7) enables all interrupts, `CLR EA` disables them.
-            code_ << "    " << (e.op == "ion" ? "setea" : "clrea") << "\n";
+            emit(e.op == "ion" ? "setea" : "clrea");
             return;
         }
         case ir::ExprKind::Func:
@@ -606,30 +685,56 @@ void MCS51Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     int shift = elemWidth == 1 ? 0 : elemWidth == 2 ? 1 : elemWidth == 4 ? 2 : elemWidth == 8 ? 3 : -1;
     if (shift > 0) {
         for (int i = 0; i < shift; i++) {
-            code_ << "    clrc\n    mova ac\n    rlca\n    movd ac\n";
-            code_ << "    mova ac+1\n    rlca\n    movd ac+1\n";
+            emit("clrc");
+            emit("mova", "ac");
+            emit("rlca");
+            emit("movd", "ac");
+            emit("mova", "ac+1");
+            emit("rlca");
+            emit("movd", "ac+1");
         }
     } else if (shift < 0) {
         copy16("bc", "ac");  // bc = multiplicand (the index)
         uint16_t w16 = static_cast<uint16_t>(elemWidth);
-        code_ << "    movai " << (w16 & 0xFF) << "\n    movd dx\n";
-        code_ << "    movai " << ((w16 >> 8) & 0xFF) << "\n    movd dx+1\n";  // dx = multiplier (the width)
-        code_ << "    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";    // ac = product = 0
-        code_ << "    movai 16\n    movd cx\n";
+        emit("movai", w16 & 0xFF);
+        emit("movd", "dx");
+        emit("movai", (w16 >> 8) & 0xFF);
+        emit("movd", "dx+1");  // dx = multiplier (the width)
+        emit("movai", 0);
+        emit("movd", "ac");
+        emit("movai", 0);
+        emit("movd", "ac+1");  // ac = product = 0
+        emit("movai", 16);
+        emit("movd", "cx");
         std::string Lloop = newLabel(), Ladd = newLabel(), Lskipadd = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    mova dx\n    anli 1\n";
+        emitLabel(Lloop);
+        emit("mova", "dx");
+        emit("anli", 1);
         safeBranch("jnz", Ladd, Lskipadd);
-        code_ << Ladd << ":\n";
-        code_ << "    mova bc\n    add ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    addc ac+1\n    movd ac+1\n";
-        code_ << Lskipadd << ":\n";
-        code_ << "    clrc\n    mova bc\n    rlca\n    movd bc\n";
-        code_ << "    mova bc+1\n    rlca\n    movd bc+1\n";
-        code_ << "    clrc\n    mova dx+1\n    rrca\n    movd dx+1\n";
-        code_ << "    mova dx\n    rrca\n    movd dx\n";
+        emitLabel(Ladd);
+        emit("mova", "bc");
+        emit("add", "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit("addc", "ac+1");
+        emit("movd", "ac+1");
+        emitLabel(Lskipadd);
+        emit("clrc");
+        emit("mova", "bc");
+        emit("rlca");
+        emit("movd", "bc");
+        emit("mova", "bc+1");
+        emit("rlca");
+        emit("movd", "bc+1");
+        emit("clrc");
+        emit("mova", "dx+1");
+        emit("rrca");
+        emit("movd", "dx+1");
+        emit("mova", "dx");
+        emit("rrca");
+        emit("movd", "dx");
         safeDjnz("cx", Lloop, Ldone);
-        code_ << Ldone << ":\n";
+        emitLabel(Ldone);
     }
     bool isGlobal = slot->kind == ir::SlotKind::Global;
     if (slot->arraySize > 0) {
@@ -644,8 +749,13 @@ void MCS51Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
         loadFrameAddress("ptr", slot);
         loadIndirect("bc", 2, /*isUnsigned=*/true);
     }
-    code_ << "    clrc\n    mova bc\n    add ac\n    movd ptr\n";
-    code_ << "    mova bc+1\n    addc ac+1\n    movd ptr+1\n";
+    emit("clrc");
+    emit("mova", "bc");
+    emit("add", "ac");
+    emit("movd", "ptr");
+    emit("mova", "bc+1");
+    emit("addc", "ac+1");
+    emit("movd", "ptr+1");
 }
 
 void MCS51Codegen::genIndex(const ir::Expr &e) {
@@ -678,15 +788,26 @@ void MCS51Codegen::genBinary(const ir::Expr &e) {
     const std::string &op = e.op;
     if (op == "+" || op == "-") {
         genExpr(*e.lhs);
-        code_ << "    push ac\n    push ac+1\n";
+        emit("push", "ac");
+        emit("push", "ac+1");
         genExpr(*e.rhs);
-        code_ << "    pop bc+1\n    pop bc\n";  // bc = lhs
+        emit("pop", "bc+1");
+        emit("pop", "bc");  // bc = lhs
         if (op == "+") {
-            code_ << "    mova bc\n    add ac\n    movd ac\n";
-            code_ << "    mova bc+1\n    addc ac+1\n    movd ac+1\n";
+            emit("mova", "bc");
+            emit("add", "ac");
+            emit("movd", "ac");
+            emit("mova", "bc+1");
+            emit("addc", "ac+1");
+            emit("movd", "ac+1");
         } else {
-            code_ << "    mova bc\n    clrc\n    subb ac\n    movd ac\n";
-            code_ << "    mova bc+1\n    subb ac+1\n    movd ac+1\n";
+            emit("mova", "bc");
+            emit("clrc");
+            emit("subb", "ac");
+            emit("movd", "ac");
+            emit("mova", "bc+1");
+            emit("subb", "ac+1");
+            emit("movd", "ac+1");
         }
         return;
     }
@@ -704,12 +825,18 @@ void MCS51Codegen::genBinary(const ir::Expr &e) {
     }
     if (op == "&" || op == "|" || op == "^") {
         genExpr(*e.lhs);
-        code_ << "    push ac\n    push ac+1\n";
+        emit("push", "ac");
+        emit("push", "ac+1");
         genExpr(*e.rhs);
-        code_ << "    pop bc+1\n    pop bc\n";
+        emit("pop", "bc+1");
+        emit("pop", "bc");
         const char *insn = (op == "&") ? "anl" : (op == "|") ? "orl" : "xrl";
-        code_ << "    mova bc\n    " << insn << " ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    " << insn << " ac+1\n    movd ac+1\n";
+        emit("mova", "bc");
+        emit(insn, "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit(insn, "ac+1");
+        emit("movd", "ac+1");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -732,32 +859,51 @@ void MCS51Codegen::genBinary(const ir::Expr &e) {
 // entering the loop body, not after.
 void MCS51Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push ac\n    push ac+1\n";
+    emit("push", "ac");
+    emit("push", "ac+1");
     genExpr(rhs);
-    code_ << "    mova ac\n    movd cx\n";  // cx = shift count (always small; low byte is enough)
-    code_ << "    pop bc+1\n    pop bc\n";
+    emit("mova", "ac");
+    emit("movd", "cx");  // cx = shift count (always small; low byte is enough)
+    emit("pop", "bc+1");
+    emit("pop", "bc");
     copy16("ac", "bc");  // ac = value to shift
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    mova cx\n";
+    emitLabel(Lloop);
+    emit("mova", "cx");
     safeBranch("jz", Ldone, Lbody);
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     if (isLeft) {
-        code_ << "    clrc\n    mova ac\n    rlca\n    movd ac\n";
-        code_ << "    mova ac+1\n    rlca\n    movd ac+1\n";
+        emit("clrc");
+        emit("mova", "ac");
+        emit("rlca");
+        emit("movd", "ac");
+        emit("mova", "ac+1");
+        emit("rlca");
+        emit("movd", "ac+1");
     } else if (isUnsigned) {
         // Carry is cleared first, so RRC's top-bit fill is always 0.
-        code_ << "    clrc\n    mova ac+1\n    rrca\n    movd ac+1\n";
-        code_ << "    mova ac\n    rrca\n    movd ac\n";
+        emit("clrc");
+        emit("mova", "ac+1");
+        emit("rrca");
+        emit("movd", "ac+1");
+        emit("mova", "ac");
+        emit("rrca");
+        emit("movd", "ac");
     } else {
         // The sign bit is carried into the carry flag first (via a
         // left rotate), so the RRC that follows fills the vacated top
         // bit with the operand's sign instead of 0.
-        code_ << "    mova ac+1\n    rlca\n";
-        code_ << "    mova ac+1\n    rrca\n    movd ac+1\n";
-        code_ << "    mova ac\n    rrca\n    movd ac\n";
+        emit("mova", "ac+1");
+        emit("rlca");
+        emit("mova", "ac+1");
+        emit("rrca");
+        emit("movd", "ac+1");
+        emit("mova", "ac");
+        emit("rrca");
+        emit("movd", "ac");
     }
     safeDjnz("cx", Lloop, Ldone);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 // `ac` is always a plain 16-bit word, so a same-width conversion is a
@@ -769,15 +915,22 @@ void MCS51Codegen::genConvert(const ir::Expr &e) {
     genExpr(*e.lhs);
     if (widthOfType(e.type) != 1) return;
     if (e.type.isUnsigned) {
-        code_ << "    movai 0\n    movd ac+1\n";
+        emit("movai", 0);
+        emit("movd", "ac+1");
     } else {
         // The branch on `anli`'s Z flag must come immediately after it.
-        code_ << "    mova ac\n    anli 128\n";
+        emit("mova", "ac");
+        emit("anli", 128);
         std::string Lneg = newLabel(), Lnonneg = newLabel(), Ldone = newLabel();
         safeBranch("jz", Lnonneg, Lneg);
-        code_ << Lneg << ":\n    movai 255\n    movd ac+1\n    ljmp " << Ldone << "\n";
-        code_ << Lnonneg << ":\n    movai 0\n    movd ac+1\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("movai", 255);
+        emit("movd", "ac+1");
+        emit("ljmp", Ldone);
+        emitLabel(Lnonneg);
+        emit("movai", 0);
+        emit("movd", "ac+1");
+        emitLabel(Ldone);
     }
 }
 
@@ -796,13 +949,16 @@ const ir::Expr &MCS51Codegen::stripWideningConvert(const ir::Expr &e) const {
 // operands are unsigned.
 void MCS51Codegen::genNarrowMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    push ac\n";
+    emit("push", "ac");
     genExpr(rhs);
-    code_ << "    mova ac\n    movd b\n";  // b = rhs
-    code_ << "    pop ac\n";
-    code_ << "    mova ac\n    mul\n";  // a = lhs; after mul: a = low byte, b = high byte of product
-    code_ << "    movd ac\n";
-    code_ << "    mova b\n    movd ac+1\n";
+    emit("mova", "ac");
+    emit("movd", "b");  // b = rhs
+    emit("pop", "ac");
+    emit("mova", "ac");
+    emit("mul");  // a = lhs; after mul: a = low byte, b = high byte of product
+    emit("movd", "ac");
+    emit("mova", "b");
+    emit("movd", "ac+1");
 }
 
 // Shift-and-add multiply (real `MUL AB` is only 8x8->16, too narrow
@@ -817,26 +973,47 @@ void MCS51Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
         return;
     }
     genExpr(lhs);
-    code_ << "    push ac\n    push ac+1\n";
+    emit("push", "ac");
+    emit("push", "ac+1");
     genExpr(rhs);
     copy16("dx", "ac");  // dx = multiplier
-    code_ << "    pop bc+1\n    pop bc\n";                  // bc = multiplicand
-    code_ << "    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";  // ac = product = 0
-    code_ << "    movai 16\n    movd cx\n";
+    emit("pop", "bc+1");
+    emit("pop", "bc");  // bc = multiplicand
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");  // ac = product = 0
+    emit("movai", 16);
+    emit("movd", "cx");
     std::string Lloop = newLabel(), Ladd = newLabel(), Lskipadd = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mova dx\n    anli 1\n";
+    emitLabel(Lloop);
+    emit("mova", "dx");
+    emit("anli", 1);
     safeBranch("jnz", Ladd, Lskipadd);
-    code_ << Ladd << ":\n";
-    code_ << "    mova bc\n    add ac\n    movd ac\n";
-    code_ << "    mova bc+1\n    addc ac+1\n    movd ac+1\n";
-    code_ << Lskipadd << ":\n";
-    code_ << "    clrc\n    mova bc\n    rlca\n    movd bc\n";
-    code_ << "    mova bc+1\n    rlca\n    movd bc+1\n";
-    code_ << "    clrc\n    mova dx+1\n    rrca\n    movd dx+1\n";
-    code_ << "    mova dx\n    rrca\n    movd dx\n";
+    emitLabel(Ladd);
+    emit("mova", "bc");
+    emit("add", "ac");
+    emit("movd", "ac");
+    emit("mova", "bc+1");
+    emit("addc", "ac+1");
+    emit("movd", "ac+1");
+    emitLabel(Lskipadd);
+    emit("clrc");
+    emit("mova", "bc");
+    emit("rlca");
+    emit("movd", "bc");
+    emit("mova", "bc+1");
+    emit("rlca");
+    emit("movd", "bc+1");
+    emit("clrc");
+    emit("mova", "dx+1");
+    emit("rrca");
+    emit("movd", "dx+1");
+    emit("mova", "dx");
+    emit("rrca");
+    emit("movd", "dx");
     safeDjnz("cx", Lloop, Ldone);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 // Repeated subtraction (real `DIV AB` is only 8/8->8r8, same width
@@ -848,29 +1025,42 @@ void MCS51Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // dividend's) can be restored afterward.
 void MCS51Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push ac\n    push ac+1\n";
+    emit("push", "ac");
+    emit("push", "ac+1");
     genExpr(rhs);
     copy16("bc", "ac");  // bc = divisor
-    code_ << "    pop dx+1\n    pop dx\n";                  // dx = dividend (running remainder)
+    emit("pop", "dx+1");
+    emit("pop", "dx");  // dx = dividend (running remainder)
     auto isNeg = [&](const char *cell, const char *dst) {
-        code_ << "    mova " << cell << "+1\n    anli 128\n";
+        emit("mova", cat(cell, "+1"));
+        emit("anli", 128);
         std::string Lneg = newLabel(), Lnonneg = newLabel(), Ldone = newLabel();
         safeBranch("jz", Lnonneg, Lneg);
-        code_ << Lneg << ":\n    movai 1\n    movd " << dst << "\n    ljmp " << Ldone << "\n";
-        code_ << Lnonneg << ":\n    movai 0\n    movd " << dst << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("movai", 1);
+        emit("movd", dst);
+        emit("ljmp", Ldone);
+        emitLabel(Lnonneg);
+        emit("movai", 0);
+        emit("movd", dst);
+        emitLabel(Ldone);
     };
     auto negate16 = [&](const char *cell) {
-        code_ << "    movai 0\n    clrc\n    subb " << cell << "\n    movd " << cell << "\n";
-        code_ << "    movai 0\n    subb " << cell << "+1\n    movd " << cell << "+1\n";
+        emit("movai", 0);
+        emit("clrc");
+        emit("subb", cell);
+        emit("movd", cell);
+        emit("movai", 0);
+        emit("subb", cat(cell, "+1"));
+        emit("movd", cat(cell, "+1"));
     };
     auto negateIf = [&](const char *flagCell, const char *cell) {
-        code_ << "    mova " << flagCell << "\n";
+        emit("mova", flagCell);
         std::string Lskip = newLabel(), Ldo = newLabel();
         safeBranch("jz", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negate16(cell);
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
     };
     if (!isUnsigned) {
         isNeg("dx", "ptr");
@@ -878,28 +1068,41 @@ void MCS51Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
         negateIf("ptr", "dx");
         negateIf("ptr+1", "bc");
     }
-    code_ << "    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";  // ac = quotient = 0
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");  // ac = quotient = 0
     std::string Lloop = newLabel(), Lcommit = newLabel(), Llt = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    clrc\n    mova dx\n    subb bc\n    movd cx\n";
-    code_ << "    mova dx+1\n    subb bc+1\n";
+    emitLabel(Lloop);
+    emit("clrc");
+    emit("mova", "dx");
+    emit("subb", "bc");
+    emit("movd", "cx");
+    emit("mova", "dx+1");
+    emit("subb", "bc+1");
     safeBranch("jc", Llt, Lcommit);
-    code_ << Lcommit << ":\n";
-    code_ << "    movd dx+1\n    movdd dx, cx\n";
-    code_ << "    mova ac\n    addi 1\n    movd ac\n";
-    code_ << "    mova ac+1\n    addci 0\n    movd ac+1\n";
-    code_ << "    ljmp " << Lloop << "\n";
-    code_ << Llt << ":\n";
-    code_ << "    ljmp " << Ldone << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lcommit);
+    emit("movd", "dx+1");
+    emit("movdd", "dx, cx");
+    emit("mova", "ac");
+    emit("addi", 1);
+    emit("movd", "ac");
+    emit("mova", "ac+1");
+    emit("addci", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Lloop);
+    emitLabel(Llt);
+    emit("ljmp", Ldone);
+    emitLabel(Ldone);
     if (!isUnsigned) {
         // Quotient is negative iff the two original signs differed.
-        code_ << "    mova ptr\n    xrl ptr+1\n";
+        emit("mova", "ptr");
+        emit("xrl", "ptr+1");
         std::string Lskip = newLabel(), Ldo = newLabel();
         safeBranch("jz", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negate16("ac");
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
         negateIf("ptr", "dx");
     }
     if (wantRemainder) copy16("ac", "dx");
@@ -909,83 +1112,144 @@ void MCS51Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
 // value in `ac`.
 void MCS51Codegen::genCompoundOp(const std::string &op, Type type) {
     if (op == "+") {
-        code_ << "    mova bc\n    add ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    addc ac+1\n    movd ac+1\n";
+        emit("mova", "bc");
+        emit("add", "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit("addc", "ac+1");
+        emit("movd", "ac+1");
         return;
     }
     if (op == "-") {
-        code_ << "    mova bc\n    clrc\n    subb ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    subb ac+1\n    movd ac+1\n";
+        emit("mova", "bc");
+        emit("clrc");
+        emit("subb", "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit("subb", "ac+1");
+        emit("movd", "ac+1");
         return;
     }
     if (op == "*") {
         copy16("dx", "ac");  // dx = multiplier (rhs) - bc already holds the multiplicand (old)
-        code_ << "    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";  // ac = product = 0
-        code_ << "    movai 16\n    movd cx\n";
+        emit("movai", 0);
+        emit("movd", "ac");
+        emit("movai", 0);
+        emit("movd", "ac+1");  // ac = product = 0
+        emit("movai", 16);
+        emit("movd", "cx");
         std::string Lloop = newLabel(), Ladd = newLabel(), Lskipadd = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    mova dx\n    anli 1\n";
+        emitLabel(Lloop);
+        emit("mova", "dx");
+        emit("anli", 1);
         safeBranch("jnz", Ladd, Lskipadd);
-        code_ << Ladd << ":\n";
-        code_ << "    mova bc\n    add ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    addc ac+1\n    movd ac+1\n";
-        code_ << Lskipadd << ":\n";
-        code_ << "    clrc\n    mova bc\n    rlca\n    movd bc\n";
-        code_ << "    mova bc+1\n    rlca\n    movd bc+1\n";
-        code_ << "    clrc\n    mova dx+1\n    rrca\n    movd dx+1\n";
-        code_ << "    mova dx\n    rrca\n    movd dx\n";
+        emitLabel(Ladd);
+        emit("mova", "bc");
+        emit("add", "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit("addc", "ac+1");
+        emit("movd", "ac+1");
+        emitLabel(Lskipadd);
+        emit("clrc");
+        emit("mova", "bc");
+        emit("rlca");
+        emit("movd", "bc");
+        emit("mova", "bc+1");
+        emit("rlca");
+        emit("movd", "bc+1");
+        emit("clrc");
+        emit("mova", "dx+1");
+        emit("rrca");
+        emit("movd", "dx+1");
+        emit("mova", "dx");
+        emit("rrca");
+        emit("movd", "dx");
         safeDjnz("cx", Lloop, Ldone);
-        code_ << Ldone << ":\n";
+        emitLabel(Ldone);
         return;
     }
     if (op == "/" || op == "%") {
         copy16("dx", "bc");  // dx = dividend (old) - copied before bc is overwritten below
-        copy16("bc", "ac");   // bc = divisor (rhs)
-        code_ << "    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";  // ac = quotient = 0
+        copy16("bc", "ac");  // bc = divisor (rhs)
+        emit("movai", 0);
+        emit("movd", "ac");
+        emit("movai", 0);
+        emit("movd", "ac+1");  // ac = quotient = 0
         std::string Lloop = newLabel(), Lcommit = newLabel(), Llt = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n";
-        code_ << "    clrc\n    mova dx\n    subb bc\n    movd cx\n";
-        code_ << "    mova dx+1\n    subb bc+1\n";
+        emitLabel(Lloop);
+        emit("clrc");
+        emit("mova", "dx");
+        emit("subb", "bc");
+        emit("movd", "cx");
+        emit("mova", "dx+1");
+        emit("subb", "bc+1");
         safeBranch("jc", Llt, Lcommit);
-        code_ << Lcommit << ":\n";
-        code_ << "    movd dx+1\n    movdd dx, cx\n";
-        code_ << "    mova ac\n    addi 1\n    movd ac\n";
-        code_ << "    mova ac+1\n    addci 0\n    movd ac+1\n";
-        code_ << "    ljmp " << Lloop << "\n";
-        code_ << Llt << ":\n";
-        code_ << "    ljmp " << Ldone << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lcommit);
+        emit("movd", "dx+1");
+        emit("movdd", "dx, cx");
+        emit("mova", "ac");
+        emit("addi", 1);
+        emit("movd", "ac");
+        emit("mova", "ac+1");
+        emit("addci", 0);
+        emit("movd", "ac+1");
+        emit("ljmp", Lloop);
+        emitLabel(Llt);
+        emit("ljmp", Ldone);
+        emitLabel(Ldone);
         if (op == "%") copy16("ac", "dx");
         return;
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "anl" : (op == "|") ? "orl" : "xrl";
-        code_ << "    mova bc\n    " << insn << " ac\n    movd ac\n";
-        code_ << "    mova bc+1\n    " << insn << " ac+1\n    movd ac+1\n";
+        emit("mova", "bc");
+        emit(insn, "ac");
+        emit("movd", "ac");
+        emit("mova", "bc+1");
+        emit(insn, "ac+1");
+        emit("movd", "ac+1");
         return;
     }
     // "<<" or ">>"
-    code_ << "    mova ac\n    movd cx\n";  // cx = shift count (rhs's own low byte) - ac about to be overwritten
-    copy16("ac", "bc");                       // ac = value to shift (old)
+    emit("mova", "ac");
+    emit("movd", "cx");  // cx = shift count (rhs's own low byte) - ac about to be overwritten
+    copy16("ac", "bc");  // ac = value to shift (old)
     bool isLeft = op == "<<";
     bool isUnsigned = type.isUnsigned;
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    mova cx\n";
+    emitLabel(Lloop);
+    emit("mova", "cx");
     safeBranch("jz", Ldone, Lbody);
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     if (isLeft) {
-        code_ << "    clrc\n    mova ac\n    rlca\n    movd ac\n";
-        code_ << "    mova ac+1\n    rlca\n    movd ac+1\n";
+        emit("clrc");
+        emit("mova", "ac");
+        emit("rlca");
+        emit("movd", "ac");
+        emit("mova", "ac+1");
+        emit("rlca");
+        emit("movd", "ac+1");
     } else if (isUnsigned) {
-        code_ << "    clrc\n    mova ac+1\n    rrca\n    movd ac+1\n";
-        code_ << "    mova ac\n    rrca\n    movd ac\n";
+        emit("clrc");
+        emit("mova", "ac+1");
+        emit("rrca");
+        emit("movd", "ac+1");
+        emit("mova", "ac");
+        emit("rrca");
+        emit("movd", "ac");
     } else {
-        code_ << "    mova ac+1\n    rlca\n";
-        code_ << "    mova ac+1\n    rrca\n    movd ac+1\n";
-        code_ << "    mova ac\n    rrca\n    movd ac\n";
+        emit("mova", "ac+1");
+        emit("rlca");
+        emit("mova", "ac+1");
+        emit("rrca");
+        emit("movd", "ac+1");
+        emit("mova", "ac");
+        emit("rrca");
+        emit("movd", "ac");
     }
     safeDjnz("cx", Lloop, Ldone);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 // `ptr` holds the resolved address on entry; stashed on the real
@@ -993,18 +1257,26 @@ void MCS51Codegen::genCompoundOp(const std::string &op, Type type) {
 // itself reuse `ptr`. `yieldOld`'s `old` value survives on that same
 // stack across genCompoundOp()'s own register use.
 void MCS51Codegen::genCompoundThroughPtr(const ir::Expr &e) {
-    code_ << "    push ptr\n    push ptr+1\n";  // stash address
-    genExpr(*e.rhs);                              // ac = rhs
-    copy16("dx", "ac");                             // dx = rhs, held safely until genCompoundOp() consumes it
-    code_ << "    pop ptr+1\n    pop ptr\n";          // ptr = address, restored only now
+    emit("push", "ptr");
+    emit("push", "ptr+1");  // stash address
+    genExpr(*e.rhs);        // ac = rhs
+    copy16("dx", "ac");     // dx = rhs, held safely until genCompoundOp() consumes it
+    emit("pop", "ptr+1");
+    emit("pop", "ptr");  // ptr = address, restored only now
     loadIndirect("ac", widthOfType(e.type), e.type.isUnsigned);  // ac = old
-    copy16("bc", "ac");                                            // bc = old - genCompoundOp()'s own precondition
-    if (e.yieldOld) code_ << "    push ac\n    push ac+1\n";  // old, surviving genCompoundOp()'s own register use
-    copy16("ac", "dx");                                         // ac = rhs - genCompoundOp()'s own other precondition
-    genCompoundOp(e.op, e.type);                                  // ac = new (raw)
+    copy16("bc", "ac");  // bc = old - genCompoundOp()'s own precondition
+    if (e.yieldOld) {
+        emit("push", "ac");
+        emit("push", "ac+1");  // old, surviving genCompoundOp()'s own register use
+    }
+    copy16("ac", "dx");           // ac = rhs - genCompoundOp()'s own other precondition
+    genCompoundOp(e.op, e.type);  // ac = new (raw)
     narrowAcTo(e.type);
     storeIndirect("ac", widthOfType(e.type));  // stores ac (= new) - ptr untouched since the pop above
-    if (e.yieldOld) code_ << "    pop ac+1\n    pop ac\n";  // ac = old (final result)
+    if (e.yieldOld) {
+        emit("pop", "ac+1");
+        emit("pop", "ac");  // ac = old (final result)
+    }
 }
 
 // Same truncate-then-sign/zero-extend step as genConvert()'s
@@ -1012,15 +1284,22 @@ void MCS51Codegen::genCompoundThroughPtr(const ir::Expr &e) {
 void MCS51Codegen::narrowAcTo(Type to) {
     if (widthOfType(to) != 1) return;
     if (to.isUnsigned) {
-        code_ << "    movai 0\n    movd ac+1\n";
+        emit("movai", 0);
+        emit("movd", "ac+1");
         return;
     }
-    code_ << "    mova ac\n    anli 128\n";
+    emit("mova", "ac");
+    emit("anli", 128);
     std::string Lneg = newLabel(), Lnonneg = newLabel(), Ldone = newLabel();
     safeBranch("jz", Lnonneg, Lneg);
-    code_ << Lneg << ":\n    movai 255\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lnonneg << ":\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lneg);
+    emit("movai", 255);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lnonneg);
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 void MCS51Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
@@ -1040,16 +1319,32 @@ void MCS51Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 // halves were zero (JZ/JNZ test A directly, with no separate zero flag).
 void MCS51Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs, bool wantEqual) {
     genExpr(lhs);
-    code_ << "    push ac\n    push ac+1\n";
+    emit("push", "ac");
+    emit("push", "ac+1");
     genExpr(rhs);
-    code_ << "    pop bc+1\n    pop bc\n";  // bc = lhs
-    code_ << "    mova bc\n    clrc\n    subb ac\n    movd dx\n";
-    code_ << "    mova bc+1\n    subb ac+1\n    orl dx\n";
+    emit("pop", "bc+1");
+    emit("pop", "bc");  // bc = lhs
+    emit("mova", "bc");
+    emit("clrc");
+    emit("subb", "ac");
+    emit("movd", "dx");
+    emit("mova", "bc+1");
+    emit("subb", "ac+1");
+    emit("orl", "dx");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     safeBranch(wantEqual ? "jz" : "jnz", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    movai 1\n    movd ac\n    movai 0\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ltrue);
+    emit("movai", 1);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lfalse);
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 // "a < b" via subtraction. Unsigned: the carry after the chained SUBB
@@ -1059,63 +1354,109 @@ void MCS51Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs,
 // an XRL A,#0x80 applied iff OV is set.
 void MCS51Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool isUnsigned, bool invert) {
     genExpr(a);
-    code_ << "    push ac\n    push ac+1\n";
+    emit("push", "ac");
+    emit("push", "ac+1");
     genExpr(b);
-    code_ << "    pop bc+1\n    pop bc\n";  // bc = a
-    code_ << "    mova bc\n    clrc\n    subb ac\n";
-    code_ << "    mova bc+1\n    subb ac+1\n";
+    emit("pop", "bc+1");
+    emit("pop", "bc");  // bc = a
+    emit("mova", "bc");
+    emit("clrc");
+    emit("subb", "ac");
+    emit("mova", "bc+1");
+    emit("subb", "ac+1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (isUnsigned) {
         safeBranch(invert ? "jnc" : "jc", Ltrue, Lfalse);
     } else {
         std::string Lfixskip = newLabel();
-        code_ << "    jnbov " << Lfixskip << "\n";
-        code_ << "    xrli 128\n";
-        code_ << Lfixskip << ":\n";
+        emit("jnbov", Lfixskip);
+        emit("xrli", 128);
+        emitLabel(Lfixskip);
         // ACC.7 now correctly reflects "a < b" (set) / "a >= b" (clear).
         safeBranch(invert ? "jnbacc7" : "jbacc7", Ltrue, Lfalse);
     }
-    code_ << Ltrue << ":\n    movai 1\n    movd ac\n    movai 0\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ltrue);
+    emit("movai", 1);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lfalse);
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 void MCS51Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lcont = newLabel(), Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     genExpr(lhs);
-    code_ << "    mova ac\n    orl ac+1\n";
+    emit("mova", "ac");
+    emit("orl", "ac+1");
     safeBranch("jz", Lfalse, Lcont);
-    code_ << Lcont << ":\n";
+    emitLabel(Lcont);
     genExpr(rhs);
-    code_ << "    mova ac\n    orl ac+1\n";
+    emit("mova", "ac");
+    emit("orl", "ac+1");
     safeBranch("jz", Lfalse, Ltrue);
-    code_ << Ltrue << ":\n    movai 1\n    movd ac\n    movai 0\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ltrue);
+    emit("movai", 1);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lfalse);
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 void MCS51Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lcont = newLabel(), Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     genExpr(lhs);
-    code_ << "    mova ac\n    orl ac+1\n";
+    emit("mova", "ac");
+    emit("orl", "ac+1");
     safeBranch("jnz", Ltrue, Lcont);
-    code_ << Lcont << ":\n";
+    emitLabel(Lcont);
     genExpr(rhs);
-    code_ << "    mova ac\n    orl ac+1\n";
+    emit("mova", "ac");
+    emit("orl", "ac+1");
     safeBranch("jnz", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    movai 1\n    movd ac\n    movai 0\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ltrue);
+    emit("movai", 1);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lfalse);
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 void MCS51Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    code_ << "    mova ac\n    orl ac+1\n";
+    emit("mova", "ac");
+    emit("orl", "ac+1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     safeBranch("jz", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    movai 1\n    movd ac\n    movai 0\n    movd ac+1\n    ljmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movai 0\n    movd ac\n    movai 0\n    movd ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ltrue);
+    emit("movai", 1);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emit("ljmp", Ldone);
+    emitLabel(Lfalse);
+    emit("movai", 0);
+    emit("movd", "ac");
+    emit("movai", 0);
+    emit("movd", "ac+1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> MCS51Codegen::assembleInProcess(const std::string &asmText,

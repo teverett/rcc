@@ -44,7 +44,7 @@ namespace rcc {
 // instruction) and RAM (kRamBase: every global/local/temp/array slot, reserved not
 // initialized-in-place). Since RAM starts unknown, any global with a nonzero initial value
 // needs an explicit copy, emitted as flash-resident code that runs once before `main`.
-class STM32Codegen : public Backend {
+class STM32Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "stm32"; }
@@ -191,7 +191,9 @@ class STM32Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;       // flash: vector table + _start + every function body
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::ostringstream initCode_;   // flash: global-init copies, spliced into _start before `bl main`
     std::vector<std::string> ramTrailer_;  // RAM: "label: ds N" reservation lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;

@@ -41,17 +41,17 @@ void VexCodegen::ldiNum(int rd, uint32_t v) { ldi(rd, decimal(v)); }
 
 void VexCodegen::jmpTo(const std::string &label, int rtarget) {
     ldi(rtarget, label);
-    code_ << "    jmp " << reg(rtarget) << "\n";
+    emit("jmp", reg(rtarget));
 }
 
 void VexCodegen::jcnTo(const std::string &label, int rcond, int rtarget) {
     ldi(rtarget, label);
-    code_ << "    jcn " << reg(rtarget) << ", " << reg(rcond) << "\n";
+    emit("jcn", cat(reg(rtarget), ", ", reg(rcond)));
 }
 
 void VexCodegen::calTo(const std::string &label, int rtarget) {
     ldi(rtarget, label);
-    code_ << "    cal " << reg(rtarget) << "\n";
+    emit("cal", reg(rtarget));
 }
 
 void VexCodegen::push(int rx, int rscratch) {
@@ -77,14 +77,15 @@ std::string VexCodegen::generate(const ir::Program &prog, bool objectMode) {
     }
 
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         ldiNum(5, kVexStackTop);
         calTo(label(mainFn));
         // Normal halt (this final `ret` pops the zero word below RS_TOP, never written by
         // anything - docs/SPEC.md section 3's own "Why RET halts on a popped zero") - see
         // VexCodegen.h's own class comment for why this, not an explicit DEO-to-port-0, is this
         // backend's entry convention.
-        code_ << "    ret\n\n";
+        emit("ret");
+        emitRaw("");
     }
 
     for (const auto &fn : prog.functions) {
@@ -103,7 +104,7 @@ std::string VexCodegen::generate(const ir::Program &prog, bool objectMode) {
 
     if (!objectMode) ensureRuntimeRoutines();
 
-    code_ << "\n";
+    emitRaw("");
     for (const auto &t : trailer_) code_ << t;
     std::string text = code_.str();
 
@@ -189,10 +190,10 @@ void VexCodegen::genFunction(const ir::FunctionBody &fb) {
         if (isWide(p->type)) genWideUnsupported(fb.line, "parameter '" + p->sourceName + "' of '" + fn->sourceName + "'");
     }
 
-    code_ << curFunctionLabel_ << ":\n";
+    emitLabel(curFunctionLabel_);
     emitPrologue(fn);
     genStmt(*fb.body);
-    code_ << epilogueLabel() << ":\n";
+    emitLabel(epilogueLabel());
     emitEpilogueAndReturn();
 }
 
@@ -213,7 +214,7 @@ void VexCodegen::emitEpilogueAndReturn() {
     mov(5, 4);  // SP = FP: deallocate locals.
     pop(4);      // Restore the real saved FP.
     pop(6);        // Discard the filler (R6 is safe to clobber here - see the class comment).
-    code_ << "    ret\n";
+    emit("ret");
 }
 
 // --- statements ---------------------------------------------------------
@@ -230,11 +231,11 @@ void VexCodegen::genStmt(const ir::Stmt &s) {
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
                 jmpTo(Lend);
-                code_ << Lelse << ":\n";
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
-                code_ << Lend << ":\n";
+                emitLabel(Lend);
             } else {
-                code_ << Lelse << ":\n";
+                emitLabel(Lelse);
             }
             return;
         }
@@ -243,13 +244,13 @@ void VexCodegen::genStmt(const ir::Stmt &s) {
             std::string Lcont = newLabel();
             std::string Lend = newLabel();
             loopLabels_.push_back({Lcont, Lend});
-            code_ << Ltop << ":\n";
+            emitLabel(Ltop);
             genCondBranch(*s.cond, Lend);
             genStmt(*s.loopBody);
-            code_ << Lcont << ":\n";
+            emitLabel(Lcont);
             if (s.postStmt) genStmt(*s.postStmt);
             jmpTo(Ltop);
-            code_ << Lend << ":\n";
+            emitLabel(Lend);
             loopLabels_.pop_back();
             return;
         }
@@ -317,7 +318,7 @@ void VexCodegen::genStmt(const ir::Stmt &s) {
             code_ << s.asmText << "\n";
             return;
         case ir::StmtKind::Label:
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         case ir::StmtKind::Goto:
             jmpTo(irLabel(s.labelId));
@@ -413,9 +414,9 @@ void VexCodegen::genExpr(const ir::Expr &e) {
             genCondBranch(*e.lhs, Lelse);
             genExpr(*e.rhs);
             jmpTo(Lend);
-            code_ << Lelse << ":\n";
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Lend << ":\n";
+            emitLabel(Lend);
             return;
         }
     }
@@ -643,13 +644,13 @@ void VexCodegen::genShiftOp(const std::string &op, bool isUnsigned) {
     // Non-negative: ushr(a, n) directly.
     calTo("FN___ushr");
     jmpTo(Ldone, /*rtarget=*/3);
-    code_ << Lneg << ":\n";
+    emitLabel(Lneg);
     ldiNum(2, 0xFFFFFFFF);
     alu3("xor", 1, 1, 2);  // R1 = NOT(a).
     calTo("FN___ushr");
     ldiNum(2, 0xFFFFFFFF);
     alu3("xor", 0, 0, 2);  // R0 = NOT(ushr(NOT(a), n)).
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void VexCodegen::genBinary(const ir::Expr &e) {
@@ -731,9 +732,9 @@ void VexCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genCondBranch(rhs, Lfalse);
     ldiNum(0, 1);
     jmpTo(Lend);
-    code_ << Lfalse << ":\n";
+    emitLabel(Lfalse);
     ldiNum(0, 0);
-    code_ << Lend << ":\n";
+    emitLabel(Lend);
 }
 
 void VexCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -743,14 +744,14 @@ void VexCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lend = newLabel();
     genCondBranch(lhs, Lrhs);  // lhs false -> try rhs.
     jmpTo(Ltrue);
-    code_ << Lrhs << ":\n";
+    emitLabel(Lrhs);
     genCondBranch(rhs, Lfalse);  // rhs also false -> 0.
-    code_ << Ltrue << ":\n";
+    emitLabel(Ltrue);
     ldiNum(0, 1);
     jmpTo(Lend);
-    code_ << Lfalse << ":\n";
+    emitLabel(Lfalse);
     ldiNum(0, 0);
-    code_ << Lend << ":\n";
+    emitLabel(Lend);
 }
 
 void VexCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
@@ -806,7 +807,7 @@ void VexCodegen::genCall(const ir::Expr &e) {
 void VexCodegen::genCallPtr(const ir::Expr &e) {
     genExpr(*e.lhs);  // R0 = function address.
     mov(2, 0);
-    code_ << "    cal " << reg(2) << "\n";
+    emit("cal", reg(2));
 }
 
 // --- runtime routines ---------------------------------------------------

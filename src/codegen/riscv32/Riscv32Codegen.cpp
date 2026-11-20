@@ -21,20 +21,16 @@ constexpr uint32_t kBaseAddress = 0x80000000u;
 // Initial sp, comfortably above the loaded program and its data.
 constexpr uint32_t kInitialSP = 0x80100000u;
 
-// A frame offset or `-frameSize` can exceed `addi`'s own 12-bit signed
-// range for a large local array, unlike every other (always small,
-// literal) stack adjustment in this backend - so this one spot routes
-// through `s1` (this dialect's scratch register, transiently reused the
-// same way MipsCodegen.h's `$at` is) when the plain immediate wouldn't fit.
-void addImm(std::ostringstream &code, const std::string &dst, const std::string &src, int32_t v) {
+}  // namespace
+
+void Riscv32Codegen::addImm(const std::string &dst, const std::string &src, int32_t v) {
     if (v >= -2048 && v <= 2047) {
-        code << "    addi " << dst << "," << src << "," << v << "\n";
+        emit("addi", cat(dst, ",", src, ",", v));
         return;
     }
-    code << "    li s1," << v << "\n";
-    code << "    add " << dst << "," << src << ",s1\n";
+    emit("li", cat("s1,", v));
+    emit("add", cat(dst, ",", src, ",s1"));
 }
-}  // namespace
 
 // A literal element's decimal text, or a symbol element's referenced
 // Slot's/Function's label written out bare.
@@ -69,11 +65,11 @@ void Riscv32Codegen::declareArray(const std::string &lbl, const std::vector<ir::
 }
 
 void Riscv32Codegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    lui " << reg << "," << lbl << "\n";
-    code_ << "    addi " << reg << "," << reg << "," << lbl << "\n";
+    emit("lui", cat(reg, ",", lbl));
+    emit("addi", cat(reg, ",", reg, ",", lbl));
 }
 
-void Riscv32Codegen::loadImm32(const std::string &reg, int32_t v) { code_ << "    li " << reg << "," << v << "\n"; }
+void Riscv32Codegen::loadImm32(const std::string &reg, int32_t v) { emit("li", cat(reg, ",", v)); }
 
 // A Param lives at fp+frameOffset (caller's pushed argument space); a
 // Local's address is its lowest one (see ir::localLowOffset()), its later
@@ -85,7 +81,7 @@ void Riscv32Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) 
         return;
     }
     int offset = slot->kind == ir::SlotKind::Param ? slot->frameOffset : -ir::localLowOffset(*slot, typeWidths());
-    addImm(code_, reg, "fp", offset);
+    addImm(reg, "fp", offset);
 }
 
 std::string Riscv32Codegen::generate(const ir::Program &prog, bool objectMode) {
@@ -97,13 +93,16 @@ std::string Riscv32Codegen::generate(const ir::Program &prog, bool objectMode) {
     // below is skipped since Riscv32LinkerFactory.cpp synthesizes it once
     // every object is linked. An object's base is `org 0`; the linker
     // places it.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    li sp," << static_cast<int32_t>(kInitialSP) << "\n";
-        code_ << "    call " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("li", cat("sp,", static_cast<int32_t>(kInitialSP)));
+        emit("call", label(mainFn));
         // main's result sits in t0 once execution reaches halt.
-        code_ << "halt:\n    j halt\n\n";
+        emitLabel("halt");
+        emit("j", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -167,27 +166,31 @@ std::map<std::string, std::string> Riscv32Codegen::perFileAsm() const { return p
 // (including recursive ones) its own frame; locals are then reserved by
 // lowering `sp` another frameSize bytes.
 void Riscv32Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    addi sp,sp,-4\n    sw ra,sp,0\n";
-    code_ << "    addi sp,sp,-4\n    sw fp,sp,0\n";
-    code_ << "    add fp,sp,zero\n";
-    if (fn.func->frameSize > 0) addImm(code_, "sp", "sp", -fn.func->frameSize);
+    emitLabel(label(fn.func));
+    emit("addi", "sp,sp,-4");
+    emit("sw", "ra,sp,0");
+    emit("addi", "sp,sp,-4");
+    emit("sw", "fp,sp,0");
+    emit("add", "fp,sp,zero");
+    if (fn.func->frameSize > 0) addImm("sp", "sp", -fn.func->frameSize);
 
     genStmt(*fn.body);
 
     genEpilogue();
-    code_ << "\n";
+    emitRaw("");
 }
 
 // Deallocates locals (`sp` back up to `fp`), restores the caller's
 // `fp`/`ra` from the two words `fp` points at, then returns. `s1` briefly
 // holds the saved `fp` across restoring `ra`.
 void Riscv32Codegen::genEpilogue() {
-    code_ << "    add sp,fp,zero\n";
-    code_ << "    lw s1,sp,0\n    addi sp,sp,4\n";
-    code_ << "    lw ra,sp,0\n    addi sp,sp,4\n";
-    code_ << "    add fp,s1,zero\n";
-    code_ << "    ret\n";
+    emit("add", "sp,fp,zero");
+    emit("lw", "s1,sp,0");
+    emit("addi", "sp,sp,4");
+    emit("lw", "ra,sp,0");
+    emit("addi", "sp,sp,4");
+    emit("add", "fp,s1,zero");
+    emit("ret");
 }
 
 void Riscv32Codegen::genStmt(const ir::Stmt &s) {
@@ -198,44 +201,44 @@ void Riscv32Codegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or t0,t0,t1\n";
+            if (isWide(s.cond->type)) emit("or", "t0,t0,t1");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0,zero," << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("beq", cat("t0,zero,", (s.elseStmt ? Lelse : Ldone)));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    j " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("j", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or t0,t0,t1\n";
-            code_ << "    beq t0,zero," << Lend << "\n";
+            if (isWide(s.cond->type)) emit("or", "t0,t0,t1");
+            emit("beq", cat("t0,zero,", Lend));
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    j " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("j", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    j " << loopLabels_.back().second << "\n";
+            emit("j", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    j " << loopLabels_.back().first << "\n";
+            emit("j", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -262,16 +265,16 @@ void Riscv32Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    j " << irLabel(s.labelId) << "\n";
+            emit("j", irLabel(s.labelId));
             return;
         }
     }
@@ -303,9 +306,11 @@ void Riscv32Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // t2 = target address
-                code_ << "    addi sp,sp,-4\n    sw t2,sp,0\n";
+                emit("addi", "sp,sp,-4");
+                emit("sw", "t2,sp,0");
                 genExpr(*e.rhs);
-                code_ << "    lw t2,sp,0\n    addi sp,sp,4\n";
+                emit("lw", "t2,sp,0");
+                emit("addi", "sp,sp,4");
                 storeOperand("t2", e.slot->type);
                 return;
             }
@@ -328,7 +333,7 @@ void Riscv32Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    add t2,t0,zero\n";  // t2 = address
+            emit("add", "t2,t0,zero");  // t2 = address
             genCompoundThroughT2(e);
             return;
         }
@@ -336,24 +341,26 @@ void Riscv32Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             // The condition's type can still be wide even though the
             // ternary's result type isn't, hence the OR-then-test.
-            if (isWide(e.lhs->type)) code_ << "    or t0,t0,t1\n";
+            if (isWide(e.lhs->type)) emit("or", "t0,t0,t1");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0,zero," << Lelse << "\n";
+            emit("beq", cat("t0,zero,", Lelse));
             genExpr(*e.rhs);
-            code_ << "    j " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("j", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             // Stores at e.type's width/signedness (the pointee type, or
             // native-int-width for untyped-int-as-address).
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+            emit("addi", "sp,sp,-4");
+            emit("sw", "t0,sp,0");
             genExpr(*e.rhs);  // t0, or t1:t0 if wide
-            code_ << "    lw t2,sp,0\n    addi sp,sp,4\n";
+            emit("lw", "t2,sp,0");
+            emit("addi", "sp,sp,4");
             storeOperand("t2", e.type);
             return;
         }
@@ -363,19 +370,19 @@ void Riscv32Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    sub t0,zero,t0\n";
+                    emit("sub", "t0,zero,t0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 // Loads at e.type's width/signedness.
                 genExpr(*e.rhs);  // t0 = pointer value
-                code_ << "    add t2,t0,zero\n";
+                emit("add", "t2,t0,zero");
                 loadOperand("t2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    xori t0,t0,-1\n";
-                if (isWide(e.rhs->type)) code_ << "    xori t1,t1,-1\n";
+                emit("xori", "t0,t0,-1");
+                if (isWide(e.rhs->type)) emit("xori", "t1,t1,-1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -396,23 +403,26 @@ void Riscv32Codegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+                    emit("addi", "sp,sp,-8");
+                    emit("sw", "t0,sp,0");
+                    emit("sw", "t1,sp,4");
                     totalBytes += 8;
                 } else {
-                    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+                    emit("addi", "sp,sp,-4");
+                    emit("sw", "t0,sp,0");
                     totalBytes += 4;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
-            if (totalBytes > 0) addImm(code_, "sp", "sp", totalBytes);
+            emit("call", label(e.func));
+            if (totalBytes > 0) addImm("sp", "sp", totalBytes);
             return;
         }
         case ir::ExprKind::CallPtr: {
             // `jalr ra,t2` jumps to the address in t2 and leaves the
             // return address in ra, like `call` for a runtime-known target.
             genExpr(*e.lhs);  // t0 = the callee's own entry address
-            code_ << "    add t2,t0,zero\n";
-            code_ << "    jalr ra,t2\n";
+            emit("add", "t2,t0,zero");
+            emit("jalr", "ra,t2");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -440,24 +450,24 @@ void Riscv32Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr)
     genExpr(idxExpr);  // t0 = index
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    slli t0,t0," << shift << "\n";
+        emit("slli", cat("t0,t0,", shift));
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): scale by a real multiply instead.
         loadImm32("t3", widthOfType(slot->type));
-        code_ << "    mul t0,t0,t3\n";
+        emit("mul", "t0,t0,t3");
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
             loadAddress("t2", label(slot));
-            code_ << "    add t2,t2,t0\n";
+            emit("add", "t2,t2,t0");
         } else {
             loadSlotAddr("t2", slot);
-            code_ << "    add t2,t2,t0\n";
+            emit("add", "t2,t2,t0");
         }
     } else {
         loadSlotAddr("t1", slot);
-        code_ << "    lw t1,t1,0\n";  // t1 = the pointer variable's own stored value
-        code_ << "    add t2,t1,t0\n";
+        emit("lw", "t1,t1,0");  // t1 = the pointer variable's own stored value
+        emit("add", "t2,t1,t0");
     }
 }
 
@@ -478,11 +488,11 @@ void Riscv32Codegen::genLocalArrayInit(const ir::Slot *slot) {
             // A long long element is split across both words.
             auto v = static_cast<uint64_t>(elem.value);
             loadImm32("t0", static_cast<int32_t>(static_cast<uint32_t>(v)));
-            addImm(code_, "t2", "fp", offset);
-            code_ << "    sw t0,t2,0\n";
+            addImm("t2", "fp", offset);
+            emit("sw", "t0,t2,0");
             loadImm32("t0", static_cast<int32_t>(static_cast<uint32_t>(v >> 32)));
-            addImm(code_, "t2", "fp", offset + 4);
-            code_ << "    sw t0,t2,0\n";
+            addImm("t2", "fp", offset + 4);
+            emit("sw", "t0,t2,0");
             continue;
         }
         if (elem.isSymbol) {
@@ -490,13 +500,13 @@ void Riscv32Codegen::genLocalArrayInit(const ir::Slot *slot) {
         } else {
             loadImm32("t0", static_cast<int32_t>(static_cast<uint32_t>(elem.value)));
         }
-        addImm(code_, "t2", "fp", offset);
+        addImm("t2", "fp", offset);
         if (w == 1) {
-            code_ << "    sb t0,t2,0\n";
+            emit("sb", "t0,t2,0");
         } else if (w == 2) {
-            code_ << "    sh t0,t2,0\n";
+            emit("sh", "t0,t2,0");
         } else {
-            code_ << "    sw t0,t2,0\n";
+            emit("sw", "t0,t2,0");
         }
     }
 }
@@ -504,17 +514,17 @@ void Riscv32Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void Riscv32Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr("t2", operand.slot);
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress("t2", label(operand.func));
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -523,39 +533,39 @@ void Riscv32Codegen::genAddrOf(const ir::Expr &operand) {
 void Riscv32Codegen::loadOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "lbu" : "lb") << " t0," << addrReg << ",0\n";
+        emit((type.isUnsigned ? "lbu" : "lb"), cat("t0,", addrReg, ",0"));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "lhu" : "lh") << " t0," << addrReg << ",0\n";
+        emit((type.isUnsigned ? "lhu" : "lh"), cat("t0,", addrReg, ",0"));
     } else if (w == 4) {
-        code_ << "    lw t0," << addrReg << ",0\n";
+        emit("lw", cat("t0,", addrReg, ",0"));
     } else {  // 8 - long long: t1:t0 (hi:lo), low word first
-        code_ << "    lw t0," << addrReg << ",0\n";
-        code_ << "    lw t1," << addrReg << ",4\n";
+        emit("lw", cat("t0,", addrReg, ",0"));
+        emit("lw", cat("t1,", addrReg, ",4"));
     }
 }
 
 void Riscv32Codegen::storeOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    sb t0," << addrReg << ",0\n";
+        emit("sb", cat("t0,", addrReg, ",0"));
     } else if (w == 2) {
-        code_ << "    sh t0," << addrReg << ",0\n";
+        emit("sh", cat("t0,", addrReg, ",0"));
     } else if (w == 4) {
-        code_ << "    sw t0," << addrReg << ",0\n";
+        emit("sw", cat("t0,", addrReg, ",0"));
     } else {
-        code_ << "    sw t0," << addrReg << ",0\n";
-        code_ << "    sw t1," << addrReg << ",4\n";
+        emit("sw", cat("t0,", addrReg, ",0"));
+        emit("sw", cat("t1,", addrReg, ",4"));
     }
 }
 
 void Riscv32Codegen::narrowT0To(Type to) {
     int w = widthOfType(to);
     if (w == 1) {
-        code_ << "    slli t0,t0,24\n";
-        code_ << "    " << (to.isUnsigned ? "srli" : "srai") << " t0,t0,24\n";
+        emit("slli", "t0,t0,24");
+        emit((to.isUnsigned ? "srli" : "srai"), "t0,t0,24");
     } else if (w == 2) {
-        code_ << "    slli t0,t0,16\n";
-        code_ << "    " << (to.isUnsigned ? "srli" : "srai") << " t0,t0,16\n";
+        emit("slli", "t0,t0,16");
+        emit((to.isUnsigned ? "srli" : "srai"), "t0,t0,16");
     }
     // 4 bytes (Int/Long): t0 already holds the full value.
 }
@@ -572,9 +582,9 @@ void Riscv32Codegen::genConvert(const ir::Expr &e) {
         narrowT0To(to);  // t1 is simply discarded
     } else if (!fromWide && toWide) {
         if (from.isUnsigned) {
-            code_ << "    add t1,zero,zero\n";
+            emit("add", "t1,zero,zero");
         } else {
-            code_ << "    srai t1,t0,31\n";  // sign-extend t0 into t1
+            emit("srai", "t1,t0,31");  // sign-extend t0 into t1
         }
     } else if (!fromWide && !toWide) {
         narrowT0To(to);
@@ -587,20 +597,27 @@ void Riscv32Codegen::genConvert(const ir::Expr &e) {
 // the carry out of the low-word add is recovered via sltu.
 void Riscv32Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);  // t1:t0 = lhs
-    code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t0,sp,0");
+    emit("sw", "t1,sp,4");
     genExpr(rhs);  // t1:t0 = rhs
-    code_ << "    add t3,t0,zero\n    add t4,t1,zero\n";  // t3:t4 = rhs (lo:hi)
-    code_ << "    lw t0,sp,0\n    lw t1,sp,4\n    addi sp,sp,8\n";  // t1:t0 = lhs
+    emit("add", "t3,t0,zero");
+    emit("add", "t4,t1,zero");  // t3:t4 = rhs (lo:hi)
+    emit("lw", "t0,sp,0");
+    emit("lw", "t1,sp,4");
+    emit("addi", "sp,sp,8");  // t1:t0 = lhs
     if (isAdd) {
-        code_ << "    add t5,t0,t3\n";           // t5 = lo sum
-        code_ << "    sltu t6,t5,t0\n";           // t6 = carry out
-        code_ << "    add t1,t1,t4\n    add t1,t1,t6\n";
-        code_ << "    add t0,t5,zero\n";
+        emit("add", "t5,t0,t3");           // t5 = lo sum
+        emit("sltu", "t6,t5,t0");           // t6 = carry out
+        emit("add", "t1,t1,t4");
+        emit("add", "t1,t1,t6");
+        emit("add", "t0,t5,zero");
     } else {
-        code_ << "    sltu t6,t0,t3\n";           // t6 = borrow
-        code_ << "    sub t5,t0,t3\n";
-        code_ << "    sub t1,t1,t4\n    sub t1,t1,t6\n";
-        code_ << "    add t0,t5,zero\n";
+        emit("sltu", "t6,t0,t3");           // t6 = borrow
+        emit("sub", "t5,t0,t3");
+        emit("sub", "t1,t1,t4");
+        emit("sub", "t1,t1,t6");
+        emit("add", "t0,t5,zero");
     }
 }
 
@@ -610,25 +627,37 @@ void Riscv32Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool i
 // (low 32 bits only) is all either cross term needs.
 void Riscv32Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);  // t1:t0 = lhs
-    code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t0,sp,0");
+    emit("sw", "t1,sp,4");
     genExpr(rhs);  // t1:t0 = rhs
-    code_ << "    add t5,t0,zero\n    add t6,t1,zero\n";  // t5:t6 = rhs (lo:hi)
-    code_ << "    lw t3,sp,0\n    lw t4,sp,4\n    addi sp,sp,8\n";  // t3:t4 = lhs (lo:hi)
-    code_ << "    mul t0,t3,t6\n";  // lhs_lo*rhs_hi
-    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
-    code_ << "    mul t0,t4,t5\n";  // lhs_hi*rhs_lo
-    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
-    code_ << "    mul t0,t3,t5\n    mulhu t1,t3,t5\n";  // lhs_lo*rhs_lo (final result_lo/carry)
-    code_ << "    lw t6,sp,0\n    addi sp,sp,4\n";   // crossB_lo (lhs_hi*rhs_lo)
-    code_ << "    lw t5,sp,0\n    addi sp,sp,4\n";   // crossA_lo (lhs_lo*rhs_hi)
-    code_ << "    add t1,t1,t6\n    add t1,t1,t5\n";
+    emit("add", "t5,t0,zero");
+    emit("add", "t6,t1,zero");  // t5:t6 = rhs (lo:hi)
+    emit("lw", "t3,sp,0");
+    emit("lw", "t4,sp,4");
+    emit("addi", "sp,sp,8");  // t3:t4 = lhs (lo:hi)
+    emit("mul", "t0,t3,t6");  // lhs_lo*rhs_hi
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t0,sp,0");
+    emit("mul", "t0,t4,t5");  // lhs_hi*rhs_lo
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t0,sp,0");
+    emit("mul", "t0,t3,t5");
+    emit("mulhu", "t1,t3,t5");  // lhs_lo*rhs_lo (final result_lo/carry)
+    emit("lw", "t6,sp,0");
+    emit("addi", "sp,sp,4");   // crossB_lo (lhs_hi*rhs_lo)
+    emit("lw", "t5,sp,0");
+    emit("addi", "sp,sp,4");   // crossA_lo (lhs_lo*rhs_hi)
+    emit("add", "t1,t1,t6");
+    emit("add", "t1,t1,t5");
 }
 
 void Riscv32Codegen::genNegate64() {
-    code_ << "    xori t0,t0,-1\n    xori t1,t1,-1\n";
-    code_ << "    addi t0,t0,1\n";
-    code_ << "    sltiu t3,t0,1\n";  // t3 = 1 if t0 wrapped to 0 (i.e. the +1 carried out)
-    code_ << "    add t1,t1,t3\n";
+    emit("xori", "t0,t0,-1");
+    emit("xori", "t1,t1,-1");
+    emit("addi", "t0,t0,1");
+    emit("sltiu", "t3,t0,1");  // t3 = 1 if t0 wrapped to 0 (i.e. the +1 carried out)
+    emit("add", "t1,t1,t3");
 }
 
 // Bit-serial shift/compare/subtract long division, using sp-relative
@@ -637,96 +666,169 @@ void Riscv32Codegen::genNegate64() {
 // the sign is restored on the result per C's truncating rule.
 void Riscv32Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sw t1,sp,0\n    sw t0,sp,4\n";  // [sp]=lhs_hi,[sp+4]=lhs_lo
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t1,sp,0");
+    emit("sw", "t0,sp,4");  // [sp]=lhs_hi,[sp+4]=lhs_lo
     genExpr(rhs);
-    code_ << "    addi sp,sp,-8\n    sw t1,sp,0\n    sw t0,sp,4\n";  // [sp]=rhs_hi,[sp+4]=rhs_lo
-    code_ << "    addi sp,sp,-36\n";
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t1,sp,0");
+    emit("sw", "t0,sp,4");  // [sp]=rhs_hi,[sp+4]=rhs_lo
+    emit("addi", "sp,sp,-36");
     // Scratch layout at sp+0: n_lo,n_hi,d_lo,d_hi,r_lo,r_hi,q_lo,q_hi,cnt (9 words, 36 bytes).
     // The two operands were stashed lhs-then-rhs (so rhs, pushed last, sits closest to sp):
     // rhs_hi/rhs_lo at +36/+40, lhs_hi/lhs_lo at +44/+48 - offsets 40/44 become dead space
     // once this copy-in finishes and are reused below for lhsSign/rhsSign.
-    code_ << "    lw t0,sp,48\n    sw t0,sp,0\n";   // n_lo = lhs_lo
-    code_ << "    lw t0,sp,44\n    sw t0,sp,4\n";   // n_hi = lhs_hi
-    code_ << "    lw t0,sp,40\n    sw t0,sp,8\n";   // d_lo = rhs_lo
-    code_ << "    lw t0,sp,36\n    sw t0,sp,12\n";  // d_hi = rhs_hi
-    code_ << "    sw zero,sp,16\n    sw zero,sp,20\n";  // r = 0
-    code_ << "    sw zero,sp,24\n    sw zero,sp,28\n";  // q = 0
-    code_ << "    addi t0,zero,64\n    sw t0,sp,32\n";  // cnt = 64: one 1-bit shift per bit of the 64-bit operand
+    emit("lw", "t0,sp,48");
+    emit("sw", "t0,sp,0");   // n_lo = lhs_lo
+    emit("lw", "t0,sp,44");
+    emit("sw", "t0,sp,4");   // n_hi = lhs_hi
+    emit("lw", "t0,sp,40");
+    emit("sw", "t0,sp,8");   // d_lo = rhs_lo
+    emit("lw", "t0,sp,36");
+    emit("sw", "t0,sp,12");  // d_hi = rhs_hi
+    emit("sw", "zero,sp,16");
+    emit("sw", "zero,sp,20");  // r = 0
+    emit("sw", "zero,sp,24");
+    emit("sw", "zero,sp,28");  // q = 0
+    emit("addi", "t0,zero,64");
+    emit("sw", "t0,sp,32");  // cnt = 64: one 1-bit shift per bit of the 64-bit operand
 
     if (!isUnsigned) {
-        code_ << "    lw t0,sp,4\n    srli t0,t0,31\n    sw t0,sp,40\n";    // [sp+40] = lhsSign
-        code_ << "    lw t0,sp,12\n    srli t0,t0,31\n    sw t0,sp,44\n";   // [sp+44] = rhsSign
+        emit("lw", "t0,sp,4");
+        emit("srli", "t0,t0,31");
+        emit("sw", "t0,sp,40");    // [sp+40] = lhsSign
+        emit("lw", "t0,sp,12");
+        emit("srli", "t0,t0,31");
+        emit("sw", "t0,sp,44");   // [sp+44] = rhsSign
         std::string LskipNegN = newLabel(), LskipNegD = newLabel();
-        code_ << "    lw t0,sp,40\n    beq t0,zero," << LskipNegN << "\n";
-        code_ << "    lw t0,sp,0\n    lw t1,sp,4\n";
+        emit("lw", "t0,sp,40");
+        emit("beq", cat("t0,zero,", LskipNegN));
+        emit("lw", "t0,sp,0");
+        emit("lw", "t1,sp,4");
         genNegate64();
-        code_ << "    sw t0,sp,0\n    sw t1,sp,4\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    lw t0,sp,44\n    beq t0,zero," << LskipNegD << "\n";
-        code_ << "    lw t0,sp,8\n    lw t1,sp,12\n";
+        emit("sw", "t0,sp,0");
+        emit("sw", "t1,sp,4");
+        emitLabel(LskipNegN);
+        emit("lw", "t0,sp,44");
+        emit("beq", cat("t0,zero,", LskipNegD));
+        emit("lw", "t0,sp,8");
+        emit("lw", "t1,sp,12");
         genNegate64();
-        code_ << "    sw t0,sp,8\n    sw t1,sp,12\n";
-        code_ << LskipNegD << ":\n";
+        emit("sw", "t0,sp,8");
+        emit("sw", "t1,sp,12");
+        emitLabel(LskipNegD);
     }
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), LshiftQ = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    lw t0,sp,32\n    beq t0,zero," << Ldone << "\n";
-    code_ << "    addi t0,t0,-1\n    sw t0,sp,32\n";
+    emitLabel(Lloop);
+    emit("lw", "t0,sp,32");
+    emit("beq", cat("t0,zero,", Ldone));
+    emit("addi", "t0,t0,-1");
+    emit("sw", "t0,sp,32");
 
     // n <<= 1 (0-filled), capturing its own old top bit into t3.
-    code_ << "    lw t0,sp,4\n    srli t0,t0,31\n    add t3,t0,zero\n";
-    code_ << "    lw t0,sp,0\n    srli t0,t0,31\n    add t4,t0,zero\n";
-    code_ << "    lw t0,sp,0\n    slli t0,t0,1\n    sw t0,sp,0\n";
-    code_ << "    lw t0,sp,4\n    slli t0,t0,1\n    or t0,t0,t4\n    sw t0,sp,4\n";
+    emit("lw", "t0,sp,4");
+    emit("srli", "t0,t0,31");
+    emit("add", "t3,t0,zero");
+    emit("lw", "t0,sp,0");
+    emit("srli", "t0,t0,31");
+    emit("add", "t4,t0,zero");
+    emit("lw", "t0,sp,0");
+    emit("slli", "t0,t0,1");
+    emit("sw", "t0,sp,0");
+    emit("lw", "t0,sp,4");
+    emit("slli", "t0,t0,1");
+    emit("or", "t0,t0,t4");
+    emit("sw", "t0,sp,4");
 
     // r = (r << 1) | (n's old top bit, in t3).
-    code_ << "    lw t0,sp,16\n    srli t0,t0,31\n    add t5,t0,zero\n";
-    code_ << "    lw t0,sp,16\n    slli t0,t0,1\n    or t0,t0,t3\n    sw t0,sp,16\n";
-    code_ << "    lw t0,sp,20\n    slli t0,t0,1\n    or t0,t0,t5\n    sw t0,sp,20\n";
+    emit("lw", "t0,sp,16");
+    emit("srli", "t0,t0,31");
+    emit("add", "t5,t0,zero");
+    emit("lw", "t0,sp,16");
+    emit("slli", "t0,t0,1");
+    emit("or", "t0,t0,t3");
+    emit("sw", "t0,sp,16");
+    emit("lw", "t0,sp,20");
+    emit("slli", "t0,t0,1");
+    emit("or", "t0,t0,t5");
+    emit("sw", "t0,sp,20");
 
     // if (r >= d) { r -= d; quotient bit = 1 } else { quotient bit = 0 }
-    code_ << "    lw t0,sp,20\n    lw t1,sp,12\n    bne t0,t1," << LhiDiff << "\n";
-    code_ << "    lw t0,sp,16\n    lw t1,sp,8\n    sltu t3,t0,t1\n";
-    code_ << "    beq t3,zero," << LsubYes << "\n";
-    code_ << "    j " << LsubNo << "\n";
-    code_ << LhiDiff << ":\n";
-    code_ << "    sltu t3,t0,t1\n    beq t3,zero," << LsubYes << "\n";
-    code_ << "    j " << LsubNo << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    lw t0,sp,16\n    lw t1,sp,8\n    sltu t6,t0,t1\n    sub t0,t0,t1\n    sw t0,sp,16\n";
-    code_ << "    lw t0,sp,20\n    lw t1,sp,12\n    sub t0,t0,t1\n    sub t0,t0,t6\n    sw t0,sp,20\n";
-    code_ << "    addi t3,zero,1\n    j " << LshiftQ << "\n";
-    code_ << LsubNo << ":\n    add t3,zero,zero\n";
-    code_ << LshiftQ << ":\n";
+    emit("lw", "t0,sp,20");
+    emit("lw", "t1,sp,12");
+    emit("bne", cat("t0,t1,", LhiDiff));
+    emit("lw", "t0,sp,16");
+    emit("lw", "t1,sp,8");
+    emit("sltu", "t3,t0,t1");
+    emit("beq", cat("t3,zero,", LsubYes));
+    emit("j", LsubNo);
+    emitLabel(LhiDiff);
+    emit("sltu", "t3,t0,t1");
+    emit("beq", cat("t3,zero,", LsubYes));
+    emit("j", LsubNo);
+    emitLabel(LsubYes);
+    emit("lw", "t0,sp,16");
+    emit("lw", "t1,sp,8");
+    emit("sltu", "t6,t0,t1");
+    emit("sub", "t0,t0,t1");
+    emit("sw", "t0,sp,16");
+    emit("lw", "t0,sp,20");
+    emit("lw", "t1,sp,12");
+    emit("sub", "t0,t0,t1");
+    emit("sub", "t0,t0,t6");
+    emit("sw", "t0,sp,20");
+    emit("addi", "t3,zero,1");
+    emit("j", LshiftQ);
+    emitLabel(LsubNo);
+    emit("add", "t3,zero,zero");
+    emitLabel(LshiftQ);
 
     // q = (q << 1) | quotient bit (in t3).
-    code_ << "    lw t0,sp,24\n    srli t0,t0,31\n    add t5,t0,zero\n";
-    code_ << "    lw t0,sp,24\n    slli t0,t0,1\n    or t0,t0,t3\n    sw t0,sp,24\n";
-    code_ << "    lw t0,sp,28\n    slli t0,t0,1\n    or t0,t0,t5\n    sw t0,sp,28\n";
-    code_ << "    j " << Lloop << "\n";
+    emit("lw", "t0,sp,24");
+    emit("srli", "t0,t0,31");
+    emit("add", "t5,t0,zero");
+    emit("lw", "t0,sp,24");
+    emit("slli", "t0,t0,1");
+    emit("or", "t0,t0,t3");
+    emit("sw", "t0,sp,24");
+    emit("lw", "t0,sp,28");
+    emit("slli", "t0,t0,1");
+    emit("or", "t0,t0,t5");
+    emit("sw", "t0,sp,28");
+    emit("j", Lloop);
 
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
     if (!isUnsigned) {
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    lw t3,sp,40\n    lw t0,sp,44\n    xor t3,t3,t0\n";
-        code_ << "    beq t3,zero," << LskipNegQ << "\n";
-        code_ << "    lw t0,sp,24\n    lw t1,sp,28\n";
+        emit("lw", "t3,sp,40");
+        emit("lw", "t0,sp,44");
+        emit("xor", "t3,t3,t0");
+        emit("beq", cat("t3,zero,", LskipNegQ));
+        emit("lw", "t0,sp,24");
+        emit("lw", "t1,sp,28");
         genNegate64();
-        code_ << "    sw t0,sp,24\n    sw t1,sp,28\n";
-        code_ << LskipNegQ << ":\n";
-        code_ << "    lw t3,sp,40\n    beq t3,zero," << LskipNegR << "\n";
-        code_ << "    lw t0,sp,16\n    lw t1,sp,20\n";
+        emit("sw", "t0,sp,24");
+        emit("sw", "t1,sp,28");
+        emitLabel(LskipNegQ);
+        emit("lw", "t3,sp,40");
+        emit("beq", cat("t3,zero,", LskipNegR));
+        emit("lw", "t0,sp,16");
+        emit("lw", "t1,sp,20");
         genNegate64();
-        code_ << "    sw t0,sp,16\n    sw t1,sp,20\n";
-        code_ << LskipNegR << ":\n";
+        emit("sw", "t0,sp,16");
+        emit("sw", "t1,sp,20");
+        emitLabel(LskipNegR);
     }
-    code_ << "    lw t0,sp,24\n    lw t1,sp,28\n";  // quotient
-    code_ << "    lw t4,sp,16\n    lw t5,sp,20\n";  // remainder (saved past the scratch release)
-    code_ << "    addi sp,sp,52\n";  // release the 9-word scratch + the 4 earlier stashed operand words
+    emit("lw", "t0,sp,24");
+    emit("lw", "t1,sp,28");  // quotient
+    emit("lw", "t4,sp,16");
+    emit("lw", "t5,sp,20");  // remainder (saved past the scratch release)
+    emit("addi", "sp,sp,52");  // release the 9-word scratch + the 4 earlier stashed operand words
     if (wantRemainder) {
-        code_ << "    add t0,t4,zero\n    add t1,t5,zero\n";
+        emit("add", "t0,t4,zero");
+        emit("add", "t1,t5,zero");
     }
 }
 
@@ -735,23 +837,31 @@ void Riscv32Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, boo
 // shift one 32-bit word).
 void Riscv32Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t0,sp,0");
+    emit("sw", "t1,sp,4");
     genExpr(rhs);  // t0 = shift count (already promoted to a plain int)
-    code_ << "    add t3,t0,zero\n";
-    code_ << "    lw t0,sp,0\n    lw t1,sp,4\n    addi sp,sp,8\n";  // t1:t0 restored = the value being shifted
+    emit("add", "t3,t0,zero");
+    emit("lw", "t0,sp,0");
+    emit("lw", "t1,sp,4");
+    emit("addi", "sp,sp,8");  // t1:t0 restored = the value being shifted
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    beq t3,zero," << Ldone << "\n    addi t3,t3,-1\n";
+    emitLabel(Lloop);
+    emit("beq", cat("t3,zero,", Ldone));
+    emit("addi", "t3,t3,-1");
     if (isLeft) {
-        code_ << "    srli t4,t0,31\n";       // t4 = t0's old top bit, carries into t1
-        code_ << "    slli t0,t0,1\n";
-        code_ << "    slli t1,t1,1\n    or t1,t1,t4\n";
+        emit("srli", "t4,t0,31");       // t4 = t0's old top bit, carries into t1
+        emit("slli", "t0,t0,1");
+        emit("slli", "t1,t1,1");
+        emit("or", "t1,t1,t4");
     } else {
-        code_ << "    slli t4,t1,31\n";       // t4 = (t1&1)<<31, carries into t0's top
-        code_ << "    srli t0,t0,1\n    or t0,t0,t4\n";
-        code_ << "    " << (isUnsigned ? "srli" : "srai") << " t1,t1,1\n";
+        emit("slli", "t4,t1,31");       // t4 = (t1&1)<<31, carries into t0's top
+        emit("srli", "t0,t0,1");
+        emit("or", "t0,t0,t4");
+        emit((isUnsigned ? "srli" : "srai"), "t1,t1,1");
     }
-    code_ << "    j " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("j", Lloop);
+    emitLabel(Ldone);
 }
 
 // A `long long` comparison: compare high words first (signed/unsigned
@@ -760,47 +870,62 @@ void Riscv32Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool
 void Riscv32Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs,
                                      bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+    emit("addi", "sp,sp,-8");
+    emit("sw", "t0,sp,0");
+    emit("sw", "t1,sp,4");
     genExpr(rhs);
-    code_ << "    add t5,t0,zero\n    add t6,t1,zero\n";  // t5:t6 = rhs (lo:hi)
-    code_ << "    lw t3,sp,0\n    lw t4,sp,4\n    addi sp,sp,8\n";  // t3:t4 = lhs (lo:hi)
+    emit("add", "t5,t0,zero");
+    emit("add", "t6,t1,zero");  // t5:t6 = rhs (lo:hi)
+    emit("lw", "t3,sp,0");
+    emit("lw", "t4,sp,4");
+    emit("addi", "sp,sp,8");  // t3:t4 = lhs (lo:hi)
     if (op == "==" || op == "!=") {
         std::string Lfalse = newLabel(), Ldone = newLabel();
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    bne t3,t5," << Lfalse << "\n";
-        code_ << "    bne t4,t6," << Lfalse << "\n";
-        code_ << "    addi t0,zero," << onEqual << "\n    j " << Ldone << "\n";
-        code_ << Lfalse << ":\n    addi t0,zero," << onDiffer << "\n";
-        code_ << Ldone << ":\n";
+        emit("bne", cat("t3,t5,", Lfalse));
+        emit("bne", cat("t4,t6,", Lfalse));
+        emit("addi", cat("t0,zero,", onEqual));
+        emit("j", Ldone);
+        emitLabel(Lfalse);
+        emit("addi", cat("t0,zero,", onDiffer));
+        emitLabel(Ldone);
         return;
     }
     // Once the high words are equal, the low 32 bits are an unsigned
     // magnitude regardless of the overall type's signedness.
     std::string LhiDiff = newLabel(), Ldone = newLabel();
-    code_ << "    bne t4,t6," << LhiDiff << "\n";
+    emit("bne", cat("t4,t6,", LhiDiff));
     if (op == "<") {
-        code_ << "    sltu t0,t3,t5\n";
+        emit("sltu", "t0,t3,t5");
     } else if (op == ">") {
-        code_ << "    sltu t0,t5,t3\n";
+        emit("sltu", "t0,t5,t3");
     } else if (op == "<=") {
-        code_ << "    sltu t0,t5,t3\n    addi t1,zero,1\n    xor t0,t1,t0\n";  // !(rhs<lhs)
+        emit("sltu", "t0,t5,t3");
+        emit("addi", "t1,zero,1");
+        emit("xor", "t0,t1,t0");  // !(rhs<lhs)
     } else {  // ">="
-        code_ << "    sltu t0,t3,t5\n    addi t1,zero,1\n    xor t0,t1,t0\n";  // !(lhs<rhs)
+        emit("sltu", "t0,t3,t5");
+        emit("addi", "t1,zero,1");
+        emit("xor", "t0,t1,t0");  // !(lhs<rhs)
     }
-    code_ << "    j " << Ldone << "\n";
-    code_ << LhiDiff << ":\n";
+    emit("j", Ldone);
+    emitLabel(LhiDiff);
     const char *hiInsn = isUnsigned ? "sltu" : "slt";
     if (op == "<") {
-        code_ << "    " << hiInsn << " t0,t4,t6\n";
+        emit(hiInsn, "t0,t4,t6");
     } else if (op == ">") {
-        code_ << "    " << hiInsn << " t0,t6,t4\n";
+        emit(hiInsn, "t0,t6,t4");
     } else if (op == "<=") {
-        code_ << "    " << hiInsn << " t0,t6,t4\n    addi t1,zero,1\n    xor t0,t1,t0\n";
+        emit(hiInsn, "t0,t6,t4");
+        emit("addi", "t1,zero,1");
+        emit("xor", "t0,t1,t0");
     } else {  // ">="
-        code_ << "    " << hiInsn << " t0,t4,t6\n    addi t1,zero,1\n    xor t0,t1,t0\n";
+        emit(hiInsn, "t0,t4,t6");
+        emit("addi", "t1,zero,1");
+        emit("xor", "t0,t1,t0");
     }
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 // Entry: t0 = old, t1 = rhs (both at `type`'s width/signedness). Neither
@@ -808,44 +933,50 @@ void Riscv32Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, 
 // holds there survives this call.
 void Riscv32Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add t0,t0,t1\n"; return; }
-    if (op == "-") { code_ << "    sub t0,t0,t1\n"; return; }
+    if (op == "+") { emit("add", "t0,t0,t1"); return; }
+    if (op == "-") { emit("sub", "t0,t0,t1"); return; }
     if (op == "*") {
-        code_ << "    mul t0,t0,t1\n";
+        emit("mul", "t0,t0,t1");
         return;
     }
-    if (op == "&") { code_ << "    and t0,t0,t1\n"; return; }
-    if (op == "|") { code_ << "    or t0,t0,t1\n"; return; }
-    if (op == "^") { code_ << "    xor t0,t0,t1\n"; return; }
+    if (op == "&") { emit("and", "t0,t0,t1"); return; }
+    if (op == "|") { emit("or", "t0,t0,t1"); return; }
+    if (op == "^") { emit("xor", "t0,t0,t1"); return; }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         return;
     }
     // "/" or "%"
     const char *insn = op == "%" ? (isUnsigned ? "remu" : "rem") : (isUnsigned ? "divu" : "div");
-    code_ << "    " << insn << " t0,t0,t1\n";
+    emit(insn, "t0,t0,t1");
 }
 
 // t2 must already hold the resolved address on entry; it's stashed on
 // the stack across evaluating e.rhs (which may clobber t0-t4) and never
 // recomputed, so the target's address sub-expression runs exactly once.
 void Riscv32Codegen::genCompoundThroughT2(const ir::Expr &e) {
-    code_ << "    addi sp,sp,-4\n    sw t2,sp,0\n";  // stash address
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t2,sp,0");  // stash address
     genExpr(*e.rhs);                                     // t0 = rhs
-    code_ << "    add t1,t0,zero\n";                      // t1 = rhs
-    code_ << "    lw t2,sp,0\n    addi sp,sp,4\n";         // t2 = address (restored)
+    emit("add", "t1,t0,zero");                      // t1 = rhs
+    emit("lw", "t2,sp,0");
+    emit("addi", "sp,sp,4");         // t2 = address (restored)
     loadOperand("t2", e.type);                                 // t0 = old
-    if (e.yieldOld) code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";  // stash old
+    if (e.yieldOld) {
+        emit("addi", "sp,sp,-4");
+        emit("sw", "t0,sp,0");  // stash old
+    }
     genCompoundOp(e.op, e.type);                                 // t0 = new (raw)
     narrowT0To(e.type);
     if (e.yieldOld) {
-        code_ << "    add t1,t0,zero\n";                          // t1 = new
-        code_ << "    lw t0,sp,0\n    addi sp,sp,4\n";             // t0 = old
-        code_ << "    add t3,t0,zero\n";                              // t3 = old, preserved across the store below
-        code_ << "    add t0,t1,zero\n";                                // t0 = new - storeOperand always stores from t0
+        emit("add", "t1,t0,zero");                          // t1 = new
+        emit("lw", "t0,sp,0");
+        emit("addi", "sp,sp,4");             // t0 = old
+        emit("add", "t3,t0,zero");                              // t3 = old, preserved across the store below
+        emit("add", "t0,t1,zero");                                // t0 = new - storeOperand always stores from t0
         storeOperand("t2", e.type);
-        code_ << "    add t0,t3,zero\n";                                  // t0 = old (final result)
+        emit("add", "t0,t3,zero");                                  // t0 = old (final result)
     } else {
         storeOperand("t2", e.type);  // t0 already = new
     }
@@ -865,13 +996,15 @@ void Riscv32Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+        emit("addi", "sp,sp,-4");
+        emit("sw", "t0,sp,0");
         genExpr(*e.rhs);
-        code_ << "    lw t1,sp,0\n    addi sp,sp,4\n";  // t1 = lhs, t0 = rhs
+        emit("lw", "t1,sp,0");
+        emit("addi", "sp,sp,4");  // t1 = lhs, t0 = rhs
         if (op == "+") {
-            code_ << "    add t0,t1,t0\n";
+            emit("add", "t0,t1,t0");
         } else {
-            code_ << "    sub t0,t1,t0\n";
+            emit("sub", "t0,t1,t0");
         }
         return;
     }
@@ -895,18 +1028,26 @@ void Riscv32Codegen::genBinary(const ir::Expr &e) {
         const char *insn = op == "&" ? "and" : op == "|" ? "or" : "xor";
         if (wide) {
             genExpr(*e.lhs);
-            code_ << "    addi sp,sp,-8\n    sw t0,sp,0\n    sw t1,sp,4\n";
+            emit("addi", "sp,sp,-8");
+            emit("sw", "t0,sp,0");
+            emit("sw", "t1,sp,4");
             genExpr(*e.rhs);
-            code_ << "    add t3,t0,zero\n    add t4,t1,zero\n";
-            code_ << "    lw t0,sp,0\n    lw t1,sp,4\n    addi sp,sp,8\n";
-            code_ << "    " << insn << " t0,t0,t3\n    " << insn << " t1,t1,t4\n";
+            emit("add", "t3,t0,zero");
+            emit("add", "t4,t1,zero");
+            emit("lw", "t0,sp,0");
+            emit("lw", "t1,sp,4");
+            emit("addi", "sp,sp,8");
+            emit(insn, "t0,t0,t3");
+            emit(insn, "t1,t1,t4");
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+        emit("addi", "sp,sp,-4");
+        emit("sw", "t0,sp,0");
         genExpr(*e.rhs);
-        code_ << "    lw t1,sp,0\n    addi sp,sp,4\n";
-        code_ << "    " << insn << " t0,t1,t0\n";
+        emit("lw", "t1,sp,0");
+        emit("addi", "sp,sp,4");
+        emit(insn, "t0,t1,t0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -915,12 +1056,14 @@ void Riscv32Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+        emit("addi", "sp,sp,-4");
+        emit("sw", "t0,sp,0");
         genExpr(*e.rhs);  // t0 = shift count
-        code_ << "    add t1,t0,zero\n";
-        code_ << "    lw t0,sp,0\n    addi sp,sp,4\n";  // t0 = value to shift
+        emit("add", "t1,t0,zero");
+        emit("lw", "t0,sp,0");
+        emit("addi", "sp,sp,4");  // t0 = value to shift
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         return;
     }
     if (op == "&&") {
@@ -939,21 +1082,25 @@ void Riscv32Codegen::genBinary(const ir::Expr &e) {
 // two's-complement product never depend on it.
 void Riscv32Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    lw t1,sp,0\n    addi sp,sp,4\n";  // t1 = lhs, t0 = rhs
-    code_ << "    mul t0,t1,t0\n";
+    emit("lw", "t1,sp,0");
+    emit("addi", "sp,sp,4");  // t1 = lhs, t0 = rhs
+    emit("mul", "t0,t1,t0");
 }
 
 // Real hardware divide/remainder (`div`/`divu`/`rem`/`remu`) - no
 // `mfhi`/`mflo` step, unlike MIPS.
 void Riscv32Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    lw t1,sp,0\n    addi sp,sp,4\n";  // t1 = lhs (dividend), t0 = rhs (divisor)
+    emit("lw", "t1,sp,0");
+    emit("addi", "sp,sp,4");  // t1 = lhs (dividend), t0 = rhs (divisor)
     const char *insn = wantRemainder ? (isUnsigned ? "remu" : "rem") : (isUnsigned ? "divu" : "div");
-    code_ << "    " << insn << " t0,t1,t0\n";
+    emit(insn, "t0,t1,t0");
 }
 
 // `slt`/`sltu` directly produce the 0/1 boolean needed, no branch
@@ -967,35 +1114,39 @@ void Riscv32Codegen::genCompare(const std::string &op, const ir::Expr &lhs, cons
     bool isUnsigned = lhs.type.isUnsigned;
     const char *sltInsn = isUnsigned ? "sltu" : "slt";
     genExpr(lhs);
-    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+    emit("addi", "sp,sp,-4");
+    emit("sw", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    lw t1,sp,0\n    addi sp,sp,4\n";  // t1 = lhs, t0 = rhs
+    emit("lw", "t1,sp,0");
+    emit("addi", "sp,sp,4");  // t1 = lhs, t0 = rhs
     if (op == "<") {
-        code_ << "    " << sltInsn << " t0,t1,t0\n";  // t0 = (lhs < rhs)
+        emit(sltInsn, "t0,t1,t0");  // t0 = (lhs < rhs)
         return;
     }
     if (op == ">") {
-        code_ << "    " << sltInsn << " t0,t0,t1\n";  // t0 = (rhs < lhs) = (lhs > rhs)
+        emit(sltInsn, "t0,t0,t1");  // t0 = (rhs < lhs) = (lhs > rhs)
         return;
     }
     if (op == "<=") {
-        code_ << "    " << sltInsn << " s1,t0,t1\n";           // s1 = (rhs < lhs)
-        code_ << "    addi t0,zero,1\n    xor t0,t0,s1\n";  // t0 = !(rhs<lhs) = (lhs<=rhs)
+        emit(sltInsn, "s1,t0,t1");           // s1 = (rhs < lhs)
+        emit("addi", "t0,zero,1");
+        emit("xor", "t0,t0,s1");  // t0 = !(rhs<lhs) = (lhs<=rhs)
         return;
     }
     if (op == ">=") {
-        code_ << "    " << sltInsn << " s1,t1,t0\n";   // s1 = (lhs < rhs)
-        code_ << "    addi t0,zero,1\n    xor t0,t0,s1\n";  // t0 = !(lhs<rhs) = (lhs>=rhs)
+        emit(sltInsn, "s1,t1,t0");   // s1 = (lhs < rhs)
+        emit("addi", "t0,zero,1");
+        emit("xor", "t0,t0,s1");  // t0 = !(lhs<rhs) = (lhs>=rhs)
         return;
     }
     if (op == "==") {
-        code_ << "    sub s1,t1,t0\n";    // s1 = lhs - rhs
-        code_ << "    sltiu t0,s1,1\n";    // t0 = (unsigned(s1) < 1) = (s1 == 0)
+        emit("sub", "s1,t1,t0");    // s1 = lhs - rhs
+        emit("sltiu", "t0,s1,1");    // t0 = (unsigned(s1) < 1) = (s1 == 0)
         return;
     }
     if (op == "!=") {
-        code_ << "    sub s1,t1,t0\n";    // s1 = lhs - rhs
-        code_ << "    sltu t0,zero,s1\n";  // t0 = (0 < unsigned(s1)) = (s1 != 0)
+        emit("sub", "s1,t1,t0");    // s1 = lhs - rhs
+        emit("sltu", "t0,zero,s1");  // t0 = (0 < unsigned(s1)) = (s1 != 0)
         return;
     }
     err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
@@ -1005,38 +1156,44 @@ void Riscv32Codegen::genCompare(const std::string &op, const ir::Expr &lhs, cons
 // them together before the usual zero test.
 void Riscv32Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or t0,t0,t1\n";
+    if (isWide(lhs.type)) emit("or", "t0,t0,t1");
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    beq t0,zero," << Lfalse << "\n";
+    emit("beq", cat("t0,zero,", Lfalse));
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t0,t1\n";
-    code_ << "    beq t0,zero," << Lfalse << "\n";
-    code_ << "    j " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    addi t0,zero,0\n    j " << Ldone << "\n";
-    code_ << Ltrue << ":\n    addi t0,zero,1\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("or", "t0,t0,t1");
+    emit("beq", cat("t0,zero,", Lfalse));
+    emit("j", Ltrue);
+    emitLabel(Lfalse);
+    emit("addi", "t0,zero,0");
+    emit("j", Ldone);
+    emitLabel(Ltrue);
+    emit("addi", "t0,zero,1");
+    emitLabel(Ldone);
 }
 
 void Riscv32Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or t0,t0,t1\n";
+    if (isWide(lhs.type)) emit("or", "t0,t0,t1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    bne t0,zero," << Ltrue << "\n";
+    emit("bne", cat("t0,zero,", Ltrue));
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t0,t1\n";
-    code_ << "    bne t0,zero," << Ltrue << "\n";
-    code_ << "    j " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    addi t0,zero,1\n    j " << Ldone << "\n";
-    code_ << Lfalse << ":\n    addi t0,zero,0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("or", "t0,t0,t1");
+    emit("bne", cat("t0,zero,", Ltrue));
+    emit("j", Lfalse);
+    emitLabel(Ltrue);
+    emit("addi", "t0,zero,1");
+    emit("j", Ldone);
+    emitLabel(Lfalse);
+    emit("addi", "t0,zero,0");
+    emitLabel(Ldone);
 }
 
 // `sltiu t0,t0,1` computes (unsigned(t0) < 1), i.e. logical not, in one
 // instruction.
 void Riscv32Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t0,t1\n";
-    code_ << "    sltiu t0,t0,1\n";
+    if (isWide(rhs.type)) emit("or", "t0,t0,t1");
+    emit("sltiu", "t0,t0,1");
 }
 
 std::optional<std::string> Riscv32Codegen::assembleInProcess(const std::string &asmText,

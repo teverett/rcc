@@ -31,7 +31,7 @@ namespace rcc {
 // `genExpr()` leaves its result in register `a` (this backend's accumulator-by-convention, not a
 // hardware distinction). Multiply and divide/modulo have no real Saturn hardware op, so both are
 // software routines in `saturnRuntimeAsm()`, called via `gosbvl`.
-class SaturnCodegen : public Backend {
+class SaturnCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "saturn"; }
@@ -163,7 +163,8 @@ class SaturnCodegen : public Backend {
     std::string allocTemp();
     void declareTemp(const std::string &label);
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat() and
+    // `code_` itself come from TextCodegenBase (see Codegen.h).
     std::vector<std::string> trailer_;  // "label: dw value" data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

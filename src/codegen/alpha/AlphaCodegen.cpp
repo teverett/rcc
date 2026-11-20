@@ -62,13 +62,13 @@ void AlphaCodegen::declareArray(const std::string &lbl, const std::vector<ir::Ar
 }
 
 void AlphaCodegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    ldah " << reg << ",zero," << lbl << "\n";
-    code_ << "    lda " << reg << "," << reg << "," << lbl << "\n";
+    emit("ldah", cat(reg, ",zero,", lbl));
+    emit("lda", cat(reg, ",", reg, ",", lbl));
 }
 
 void AlphaCodegen::loadImm32(const std::string &reg, int32_t v) {
     if (v >= -32768 && v <= 32767) {
-        code_ << "    lda " << reg << ",zero," << v << "\n";
+        emit("lda", cat(reg, ",zero,", v));
         return;
     }
     auto [hi, lo] = splitHiLo(v);
@@ -78,12 +78,12 @@ void AlphaCodegen::loadImm32(const std::string &reg, int32_t v) {
     // top of `ldah`'s 16-bit signed field (`32768`, not representable there at all) - split
     // that one extra `0x10000` across two `ldah`s instead, each safely in range.
     if (hi > 32767) {
-        code_ << "    ldah " << reg << ",zero,16384\n";
-        code_ << "    ldah " << reg << "," << reg << ",16384\n";
+        emit("ldah", cat(reg, ",zero,16384"));
+        emit("ldah", cat(reg, ",", reg, ",16384"));
     } else {
-        code_ << "    ldah " << reg << ",zero," << hi << "\n";
+        emit("ldah", cat(reg, ",zero,", hi));
     }
-    code_ << "    lda " << reg << "," << reg << "," << lo << "\n";
+    emit("lda", cat(reg, ",", reg, ",", lo));
 }
 
 // Builds the low 32 bits (cleaned to a genuine zero-extended quantity) and the high 32 bits
@@ -96,10 +96,11 @@ void AlphaCodegen::loadImm64(const std::string &reg, uint64_t v) {
         return;
     }
     loadImm32(reg, static_cast<int32_t>(static_cast<uint32_t>(v & 0xFFFFFFFFu)));
-    code_ << "    sll " << reg << "," << reg << ",32\n    srl " << reg << "," << reg << ",32\n";
+    emit("sll", cat(reg, ",", reg, ",32"));
+    emit("srl", cat(reg, ",", reg, ",32"));
     loadImm32("at", static_cast<int32_t>(static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu)));
-    code_ << "    sll at,at,32\n";
-    code_ << "    bis " << reg << "," << reg << ",at\n";
+    emit("sll", "at,at,32");
+    emit("bis", cat(reg, ",", reg, ",at"));
 }
 
 // A Param lives at `fp+frameOffset` (the caller's pushed argument space, see genFunction()'s
@@ -114,10 +115,10 @@ void AlphaCodegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
         return;
     }
     if (slot->kind == ir::SlotKind::Param) {
-        code_ << "    lda " << reg << ",fp," << slot->frameOffset << "\n";
+        emit("lda", cat(reg, ",fp,", slot->frameOffset));
         return;
     }
-    code_ << "    lda " << reg << ",fp,-" << ir::localLowOffset(*slot, typeWidths()) << "\n";
+    emit("lda", cat(reg, ",fp,-", ir::localLowOffset(*slot, typeWidths())));
 }
 
 std::string AlphaCodegen::generate(const ir::Program &prog, bool objectMode) {
@@ -128,17 +129,20 @@ std::string AlphaCodegen::generate(const ir::Program &prog, bool objectMode) {
     // In objectMode, `prog` may not define `main`; the entry sequence below is skipped since
     // AlphaLinkerFactory.cpp synthesizes it once every object is merged and `main` is
     // resolvable. An object's base is `org 0`; the linker places it.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
         auto [spHi, spLo] = splitHiLo(static_cast<int32_t>(kInitialSP));
-        code_ << "_start:\n";
-        code_ << "    ldah sp,zero," << spHi << "\n";
-        code_ << "    lda sp,sp," << spLo << "\n";
+        emitLabel("_start");
+        emit("ldah", cat("sp,zero,", spHi));
+        emit("lda", cat("sp,sp,", spLo));
         loadAddress("t12", label(mainFn));
-        code_ << "    jsr ra,(t12)\n";
+        emit("jsr", "ra,(t12)");
         // main's result sits in t0 once execution reaches halt; there is no way to stop the
         // processor from here (see AlphaCodegen.h's own header comment), so this spins.
-        code_ << "halt:\n    br halt\n\n";
+        emitLabel("halt");
+        emit("br", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -201,26 +205,26 @@ std::map<std::string, std::string> AlphaCodegen::perFileAsm() const { return per
 // need (see Arm64Codegen.h's own `currentParamBase_`/`kParamExtra` for what that adjustment
 // looks like when it can't be avoided this way).
 void AlphaCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    lda sp,sp,-8\n";
-    code_ << "    stindl sp,fp,0\n";
-    code_ << "    stindl sp,ra,4\n";
-    code_ << "    bis fp,sp,zero\n";
-    if (fn.func->frameSize > 0) code_ << "    lda sp,sp,-" << fn.func->frameSize << "\n";
+    emitLabel(label(fn.func));
+    emit("lda", "sp,sp,-8");
+    emit("stindl", "sp,fp,0");
+    emit("stindl", "sp,ra,4");
+    emit("bis", "fp,sp,zero");
+    if (fn.func->frameSize > 0) emit("lda", cat("sp,sp,-", fn.func->frameSize));
 
     genStmt(*fn.body);
 
     genEpilogue();
-    code_ << "\n";
+    emitRaw("");
 }
 
 void AlphaCodegen::genEpilogue() {
-    code_ << "    bis sp,fp,zero\n";
-    code_ << "    ldindl sp,at,0\n";
-    code_ << "    ldindl sp,ra,4\n";
-    code_ << "    lda sp,sp,8\n";
-    code_ << "    bis fp,at,zero\n";
-    code_ << "    ret zero,(ra)\n";
+    emit("bis", "sp,fp,zero");
+    emit("ldindl", "sp,at,0");
+    emit("ldindl", "sp,ra,4");
+    emit("lda", "sp,sp,8");
+    emit("bis", "fp,at,zero");
+    emit("ret", "zero,(ra)");
 }
 
 void AlphaCodegen::genStmt(const ir::Stmt &s) {
@@ -233,40 +237,40 @@ void AlphaCodegen::genStmt(const ir::Stmt &s) {
             genExpr(*s.cond);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0," << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("beq", cat("t0,", (s.elseStmt ? Lelse : Ldone)));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    br " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("br", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            code_ << "    beq t0," << Lend << "\n";
+            emit("beq", cat("t0,", Lend));
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    br " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("br", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    br " << loopLabels_.back().second << "\n";
+            emit("br", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    br " << loopLabels_.back().first << "\n";
+            emit("br", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -291,16 +295,15 @@ void AlphaCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    br " << irLabel(s.labelId) << "\n";
+            emit("br", irLabel(s.labelId));
             return;
         }
     }
@@ -335,9 +338,11 @@ void AlphaCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // t2 = target address
-                code_ << "    lda sp,sp,-8\n    stindq sp,t2,0\n";
+                emit("lda", "sp,sp,-8");
+                emit("stindq", "sp,t2,0");
                 genExpr(*e.rhs);
-                code_ << "    ldindq sp,t2,0\n    lda sp,sp,8\n";
+                emit("ldindq", "sp,t2,0");
+                emit("lda", "sp,sp,8");
                 storeOperand("t2", e.slot->type);
                 return;
             }
@@ -358,7 +363,7 @@ void AlphaCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    bis t2,t0,zero\n";
+            emit("bis", "t2,t0,zero");
             genCompoundThroughT2(e);
             return;
         }
@@ -366,36 +371,38 @@ void AlphaCodegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0," << Lelse << "\n";
+            emit("beq", cat("t0,", Lelse));
             genExpr(*e.rhs);
-            code_ << "    br " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("br", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+            emit("lda", "sp,sp,-8");
+            emit("stindq", "sp,t0,0");
             genExpr(*e.rhs);
-            code_ << "    ldindq sp,t2,0\n    lda sp,sp,8\n";
+            emit("ldindq", "sp,t2,0");
+            emit("lda", "sp,sp,8");
             storeOperand("t2", e.type);
             return;
         }
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    subq t0,zero,t0\n";
+                emit("subq", "t0,zero,t0");
                 narrowT0To(e.rhs->type);
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // t0 = pointer value
-                code_ << "    bis t2,t0,zero\n";
+                emit("bis", "t2,t0,zero");
                 loadOperand("t2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    ornot t0,zero,t0\n";
+                emit("ornot", "t0,zero,t0");
                 narrowT0To(e.rhs->type);
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -417,22 +424,24 @@ void AlphaCodegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+                    emit("lda", "sp,sp,-8");
+                    emit("stindq", "sp,t0,0");
                     totalBytes += 8;
                 } else {
-                    code_ << "    lda sp,sp,-4\n    stindl sp,t0,0\n";
+                    emit("lda", "sp,sp,-4");
+                    emit("stindl", "sp,t0,0");
                     totalBytes += 4;
                 }
             }
             loadAddress("t12", label(e.func));
-            code_ << "    jsr ra,(t12)\n";
-            if (totalBytes > 0) code_ << "    lda sp,sp," << totalBytes << "\n";
+            emit("jsr", "ra,(t12)");
+            if (totalBytes > 0) emit("lda", cat("sp,sp,", totalBytes));
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // t0 = the callee's own entry address
-            code_ << "    bis t12,t0,zero\n";
-            code_ << "    jsr ra,(t12)\n";
+            emit("bis", "t12,t0,zero");
+            emit("jsr", "ra,(t12)");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -456,19 +465,19 @@ void AlphaCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // t0 = index
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    sll t0,t0," << shift << "\n";
+        emit("sll", cat("t0,t0,", shift));
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): scale by a real multiply instead.
         loadImm32("t3", widthOfType(slot->type));
-        code_ << "    mulq t0,t3,t0\n";
+        emit("mulq", "t0,t3,t0");
     }
     if (slot->arraySize > 0) {
         loadSlotAddr("t2", slot);
-        code_ << "    addq t2,t2,t0\n";
+        emit("addq", "t2,t2,t0");
     } else {
         loadSlotAddr("t1", slot);
-        code_ << "    ldindl t1,t1,0\n";  // t1 = the pointer variable's own stored value
-        code_ << "    addq t2,t1,t0\n";
+        emit("ldindl", "t1,t1,0");  // t1 = the pointer variable's own stored value
+        emit("addq", "t2,t1,t0");
     }
 }
 
@@ -484,7 +493,8 @@ void AlphaCodegen::genLocalArrayInit(const ir::Slot *slot) {
         int offset = -ir::localLowOffset(*slot, typeWidths()) + w * static_cast<int>(i);
         if (elem.isSymbol) {
             loadAddress("t0", elem.slot ? label(elem.slot) : label(elem.func));
-            code_ << "    lda t2,fp," << offset << "\n    stindl t2,t0,0\n";
+            emit("lda", cat("t2,fp,", offset));
+            emit("stindl", "t2,t0,0");
             continue;
         }
         if (w == 8) {
@@ -492,15 +502,15 @@ void AlphaCodegen::genLocalArrayInit(const ir::Slot *slot) {
         } else {
             loadImm32("t0", static_cast<int32_t>(static_cast<uint32_t>(elem.value)));
         }
-        code_ << "    lda t2,fp," << offset << "\n";
+        emit("lda", cat("t2,fp,", offset));
         if (w == 1) {
-            code_ << "    stindb t2,t0,0\n";
+            emit("stindb", "t2,t0,0");
         } else if (w == 2) {
-            code_ << "    stindh t2,t0,0\n";
+            emit("stindh", "t2,t0,0");
         } else if (w == 4) {
-            code_ << "    stindl t2,t0,0\n";
+            emit("stindl", "t2,t0,0");
         } else {
-            code_ << "    stindq t2,t0,0\n";
+            emit("stindq", "t2,t0,0");
         }
     }
 }
@@ -508,17 +518,17 @@ void AlphaCodegen::genLocalArrayInit(const ir::Slot *slot) {
 void AlphaCodegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr("t2", operand.slot);
-        code_ << "    bis t0,t2,zero\n";
+        emit("bis", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    bis t0,t2,zero\n";
+        emit("bis", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress("t2", label(operand.func));
-        code_ << "    bis t0,t2,zero\n";
+        emit("bis", "t0,t2,zero");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -527,13 +537,13 @@ void AlphaCodegen::genAddrOf(const ir::Expr &operand) {
 void AlphaCodegen::loadOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    ldindbu " << addrReg << ",t0,0\n";
+        emit("ldindbu", cat(addrReg, ",t0,0"));
     } else if (w == 2) {
-        code_ << "    ldindhu " << addrReg << ",t0,0\n";
+        emit("ldindhu", cat(addrReg, ",t0,0"));
     } else if (w == 4) {
-        code_ << "    ldindl " << addrReg << ",t0,0\n";
+        emit("ldindl", cat(addrReg, ",t0,0"));
     } else {
-        code_ << "    ldindq " << addrReg << ",t0,0\n";
+        emit("ldindq", cat(addrReg, ",t0,0"));
         return;
     }
     narrowT0To(type);
@@ -542,13 +552,13 @@ void AlphaCodegen::loadOperand(const std::string &addrReg, Type type) {
 void AlphaCodegen::storeOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb " << addrReg << ",t0,0\n";
+        emit("stindb", cat(addrReg, ",t0,0"));
     } else if (w == 2) {
-        code_ << "    stindh " << addrReg << ",t0,0\n";
+        emit("stindh", cat(addrReg, ",t0,0"));
     } else if (w == 4) {
-        code_ << "    stindl " << addrReg << ",t0,0\n";
+        emit("stindl", cat(addrReg, ",t0,0"));
     } else {
-        code_ << "    stindq " << addrReg << ",t0,0\n";
+        emit("stindq", cat(addrReg, ",t0,0"));
     }
 }
 
@@ -556,8 +566,8 @@ void AlphaCodegen::narrowT0To(Type to) {
     int w = widthOfType(to);
     if (w == 8) return;
     int shiftAmt = 64 - 8 * w;
-    code_ << "    sll t0,t0," << shiftAmt << "\n";
-    code_ << "    " << (to.isUnsigned ? "srl" : "sra") << " t0,t0," << shiftAmt << "\n";
+    emit("sll", cat("t0,t0,", shiftAmt));
+    emit(to.isUnsigned ? "srl" : "sra", cat("t0,t0,", shiftAmt));
 }
 
 // Crosses the native-`int`/`long` boundary (sign/zero-extending t0's low 32 bits across the
@@ -574,8 +584,8 @@ void AlphaCodegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         narrowT0To(to);
     } else if (!fromWide && toWide) {
-        code_ << "    sll t0,t0,32\n";
-        code_ << "    " << (from.isUnsigned ? "srl" : "sra") << " t0,t0,32\n";
+        emit("sll", "t0,t0,32");
+        emit(from.isUnsigned ? "srl" : "sra", "t0,t0,32");
     } else if (!fromWide && !toWide) {
         narrowT0To(to);
     }
@@ -589,10 +599,12 @@ void AlphaCodegen::genBinary(const ir::Expr &e) {
     bool isUnsigned = operandType.isUnsigned;
     if (op == "+" || op == "-") {
         genExpr(*e.lhs);
-        code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+        emit("lda", "sp,sp,-8");
+        emit("stindq", "sp,t0,0");
         genExpr(*e.rhs);
-        code_ << "    ldindq sp,t1,0\n    lda sp,sp,8\n";  // t1 = lhs, t0 = rhs
-        code_ << "    " << (op == "+" ? "addq t0,t1,t0\n" : "subq t0,t1,t0\n");
+        emit("ldindq", "sp,t1,0");
+        emit("lda", "sp,sp,8");  // t1 = lhs, t0 = rhs
+        emit(op == "+" ? "addq" : "subq", "t0,t1,t0");
         narrowT0To(operandType);
         return;
     }
@@ -608,21 +620,25 @@ void AlphaCodegen::genBinary(const ir::Expr &e) {
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = op == "&" ? "and" : op == "|" ? "bis" : "xor";
         genExpr(*e.lhs);
-        code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+        emit("lda", "sp,sp,-8");
+        emit("stindq", "sp,t0,0");
         genExpr(*e.rhs);
-        code_ << "    ldindq sp,t1,0\n    lda sp,sp,8\n";
-        code_ << "    " << insn << " t0,t1,t0\n";
+        emit("ldindq", "sp,t1,0");
+        emit("lda", "sp,sp,8");
+        emit(insn, "t0,t1,t0");
         narrowT0To(operandType);
         return;
     }
     if (op == "<<" || op == ">>") {
         genExpr(*e.lhs);
-        code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+        emit("lda", "sp,sp,-8");
+        emit("stindq", "sp,t0,0");
         genExpr(*e.rhs);  // t0 = shift count
-        code_ << "    bis t1,t0,zero\n";
-        code_ << "    ldindq sp,t0,0\n    lda sp,sp,8\n";  // t0 = value to shift
+        emit("bis", "t1,t0,zero");
+        emit("ldindq", "sp,t0,0");
+        emit("lda", "sp,sp,8");  // t0 = value to shift
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         narrowT0To(operandType);
         return;
     }
@@ -644,19 +660,23 @@ void AlphaCodegen::genBinary(const ir::Expr &e) {
 // genBinary()) just re-trims it.
 void AlphaCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+    emit("lda", "sp,sp,-8");
+    emit("stindq", "sp,t0,0");
     genExpr(rhs);
-    code_ << "    ldindq sp,t1,0\n    lda sp,sp,8\n";  // t1 = lhs, t0 = rhs
-    code_ << "    mulq t0,t1,t0\n";
+    emit("ldindq", "sp,t1,0");
+    emit("lda", "sp,sp,8");  // t1 = lhs, t0 = rhs
+    emit("mulq", "t0,t1,t0");
 }
 
 void AlphaCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned,
                              int bits) {
     genExpr(lhs);
-    code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+    emit("lda", "sp,sp,-8");
+    emit("stindq", "sp,t0,0");
     genExpr(rhs);
-    code_ << "    bis t1,t0,zero\n";                    // t1 = divisor
-    code_ << "    ldindq sp,t0,0\n    lda sp,sp,8\n";    // t0 = dividend
+    emit("bis", "t1,t0,zero");  // t1 = divisor
+    emit("ldindq", "sp,t0,0");
+    emit("lda", "sp,sp,8");  // t0 = dividend
     genDivModCore(wantRemainder, isUnsigned, bits);
 }
 
@@ -671,57 +691,63 @@ void AlphaCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
 void AlphaCodegen::genDivModCore(bool wantRemainder, bool isUnsigned, int bits) {
     std::string LskipNegN = newLabel(), LskipNegD = newLabel();
     if (!isUnsigned) {
-        code_ << "    srl t6,t0," << (bits - 1) << "\n    and t6,t6,1\n";  // t6 = dividend's sign
-        code_ << "    srl t7,t1," << (bits - 1) << "\n    and t7,t7,1\n";  // t7 = divisor's sign
-        code_ << "    beq t6," << LskipNegN << "\n";
-        code_ << "    subq t0,zero,t0\n";
-        if (bits == 32) code_ << "    sll t0,t0,32\n    srl t0,t0,32\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    beq t7," << LskipNegD << "\n";
-        code_ << "    subq t1,zero,t1\n";
-        if (bits == 32) code_ << "    sll t1,t1,32\n    srl t1,t1,32\n";
-        code_ << LskipNegD << ":\n";
+        emit("srl", cat("t6,t0,", (bits - 1)));
+        emit("and", "t6,t6,1");  // t6 = dividend's sign
+        emit("srl", cat("t7,t1,", (bits - 1)));
+        emit("and", "t7,t7,1");  // t7 = divisor's sign
+        emit("beq", cat("t6,", LskipNegN));
+        emit("subq", "t0,zero,t0");
+        if (bits == 32) { emit("sll", "t0,t0,32"); emit("srl", "t0,t0,32"); }
+        emitLabel(LskipNegN);
+        emit("beq", cat("t7,", LskipNegD));
+        emit("subq", "t1,zero,t1");
+        if (bits == 32) { emit("sll", "t1,t1,32"); emit("srl", "t1,t1,32"); }
+        emitLabel(LskipNegD);
     }
 
-    code_ << "    bis t3,zero,zero\n";  // t3 = remainder
-    code_ << "    bis t4,zero,zero\n";  // t4 = quotient
-    code_ << "    lda t5,zero," << bits << "\n";
+    emit("bis", "t3,zero,zero");  // t3 = remainder
+    emit("bis", "t4,zero,zero");  // t4 = quotient
+    emit("lda", cat("t5,zero,", bits));
 
     std::string Lloop = newLabel(), Ldone = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), Lcont = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    beq t5," << Ldone << "\n";
-    code_ << "    subq t5,t5,1\n";
-    code_ << "    srl t8,t0," << (bits - 1) << "\n    and t8,t8,1\n";  // t8 = dividend's own top bit
-    code_ << "    sll t0,t0,1\n";
-    code_ << "    srl t9,t3," << (bits - 1) << "\n    and t9,t9,1\n";  // t9 = remainder's own top bit (overflow)
-    code_ << "    sll t3,t3,1\n    bis t3,t3,t8\n";                     // remainder = (remainder<<1)|dividendBit
-    code_ << "    bne t9," << LsubYes << "\n";
-    code_ << "    cmpult at,t3,t1\n";
-    code_ << "    bne at," << LsubNo << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    subq t3,t3,t1\n";
-    code_ << "    sll t4,t4,1\n    bis t4,t4,1\n";
-    code_ << "    br " << Lcont << "\n";
-    code_ << LsubNo << ":\n";
-    code_ << "    sll t4,t4,1\n";
-    code_ << Lcont << ":\n";
-    code_ << "    br " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lloop);
+    emit("beq", cat("t5,", Ldone));
+    emit("subq", "t5,t5,1");
+    emit("srl", cat("t8,t0,", (bits - 1)));
+    emit("and", "t8,t8,1");  // t8 = dividend's own top bit
+    emit("sll", "t0,t0,1");
+    emit("srl", cat("t9,t3,", (bits - 1)));
+    emit("and", "t9,t9,1");  // t9 = remainder's own top bit (overflow)
+    emit("sll", "t3,t3,1");
+    emit("bis", "t3,t3,t8");  // remainder = (remainder<<1)|dividendBit
+    emit("bne", cat("t9,", LsubYes));
+    emit("cmpult", "at,t3,t1");
+    emit("bne", cat("at,", LsubNo));
+    emitLabel(LsubYes);
+    emit("subq", "t3,t3,t1");
+    emit("sll", "t4,t4,1");
+    emit("bis", "t4,t4,1");
+    emit("br", Lcont);
+    emitLabel(LsubNo);
+    emit("sll", "t4,t4,1");
+    emitLabel(Lcont);
+    emit("br", Lloop);
+    emitLabel(Ldone);
 
     if (!isUnsigned) {
         std::string LnoNegQ = newLabel(), LnoNegR = newLabel();
-        code_ << "    xor at,t6,t7\n";
-        code_ << "    beq at," << LnoNegQ << "\n";
-        code_ << "    subq t4,zero,t4\n";
-        code_ << LnoNegQ << ":\n";
-        code_ << "    beq t6," << LnoNegR << "\n";  // remainder's sign follows the dividend's
-        code_ << "    subq t3,zero,t3\n";
-        code_ << LnoNegR << ":\n";
+        emit("xor", "at,t6,t7");
+        emit("beq", cat("at,", LnoNegQ));
+        emit("subq", "t4,zero,t4");
+        emitLabel(LnoNegQ);
+        emit("beq", cat("t6,", LnoNegR));  // remainder's sign follows the dividend's
+        emit("subq", "t3,zero,t3");
+        emitLabel(LnoNegR);
     }
-    code_ << "    bis t0," << (wantRemainder ? "t3" : "t4") << ",zero\n";
+    emit("bis", cat("t0,", (wantRemainder ? "t3" : "t4"), ",zero"));
     if (bits == 32) {
-        code_ << "    sll t0,t0,32\n";
-        code_ << "    " << (isUnsigned ? "srl" : "sra") << " t0,t0,32\n";
+        emit("sll", "t0,t0,32");
+        emit(isUnsigned ? "srl" : "sra", "t0,t0,32");
     }
 }
 
@@ -730,32 +756,32 @@ void AlphaCodegen::genDivModCore(bool wantRemainder, bool isUnsigned, int bits) 
 void AlphaCodegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
     if (op == "+") {
-        code_ << "    addq t0,t0,t1\n";
+        emit("addq", "t0,t0,t1");
         return;
     }
     if (op == "-") {
-        code_ << "    subq t0,t0,t1\n";
+        emit("subq", "t0,t0,t1");
         return;
     }
     if (op == "*") {
-        code_ << "    mulq t0,t0,t1\n";
+        emit("mulq", "t0,t0,t1");
         return;
     }
     if (op == "&") {
-        code_ << "    and t0,t0,t1\n";
+        emit("and", "t0,t0,t1");
         return;
     }
     if (op == "|") {
-        code_ << "    bis t0,t0,t1\n";
+        emit("bis", "t0,t0,t1");
         return;
     }
     if (op == "^") {
-        code_ << "    xor t0,t0,t1\n";
+        emit("xor", "t0,t0,t1");
         return;
     }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         return;
     }
     // "/" or "%"
@@ -766,21 +792,27 @@ void AlphaCodegen::genCompoundOp(const std::string &op, Type type) {
 // evaluating e.rhs (which may clobber t0-t9) and never recomputed, so the target's address
 // sub-expression runs exactly once.
 void AlphaCodegen::genCompoundThroughT2(const ir::Expr &e) {
-    code_ << "    lda sp,sp,-8\n    stindq sp,t2,0\n";  // stash address
+    emit("lda", "sp,sp,-8");
+    emit("stindq", "sp,t2,0");  // stash address
     genExpr(*e.rhs);                                      // t0 = rhs
-    code_ << "    bis t1,t0,zero\n";                         // t1 = rhs
-    code_ << "    ldindq sp,t2,0\n    lda sp,sp,8\n";          // t2 = address (restored)
+    emit("bis", "t1,t0,zero");  // t1 = rhs
+    emit("ldindq", "sp,t2,0");
+    emit("lda", "sp,sp,8");  // t2 = address (restored)
     loadOperand("t2", e.type);                                   // t0 = old
-    if (e.yieldOld) code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";  // stash old
+    if (e.yieldOld) {
+        emit("lda", "sp,sp,-8");
+        emit("stindq", "sp,t0,0");  // stash old
+    }
     genCompoundOp(e.op, e.type);                                   // t0 = new (raw)
     narrowT0To(e.type);
     if (e.yieldOld) {
-        code_ << "    bis t1,t0,zero\n";                                // t1 = new
-        code_ << "    ldindq sp,t0,0\n    lda sp,sp,8\n";                 // t0 = old
-        code_ << "    bis t3,t0,zero\n";                                    // t3 = old, preserved across the store
-        code_ << "    bis t0,t1,zero\n";                                      // t0 = new - storeOperand stores from t0
+        emit("bis", "t1,t0,zero");  // t1 = new
+        emit("ldindq", "sp,t0,0");
+        emit("lda", "sp,sp,8");  // t0 = old
+        emit("bis", "t3,t0,zero");  // t3 = old, preserved across the store
+        emit("bis", "t0,t1,zero");  // t0 = new - storeOperand stores from t0
         storeOperand("t2", e.type);
-        code_ << "    bis t0,t3,zero\n";                                        // t0 = old (final result)
+        emit("bis", "t0,t3,zero");  // t0 = old (final result)
     } else {
         storeOperand("t2", e.type);  // t0 already = new
     }
@@ -795,34 +827,36 @@ void AlphaCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
     bool isUnsigned = lhs.type.isUnsigned;
     const char *ltInsn = isUnsigned ? "cmpult" : "cmplt";
     genExpr(lhs);
-    code_ << "    lda sp,sp,-8\n    stindq sp,t0,0\n";
+    emit("lda", "sp,sp,-8");
+    emit("stindq", "sp,t0,0");
     genExpr(rhs);
-    code_ << "    ldindq sp,t1,0\n    lda sp,sp,8\n";  // t1 = lhs, t0 = rhs
+    emit("ldindq", "sp,t1,0");
+    emit("lda", "sp,sp,8");  // t1 = lhs, t0 = rhs
     if (op == "<") {
-        code_ << "    " << ltInsn << " t0,t1,t0\n";  // t0 = (lhs < rhs)
+        emit(ltInsn, "t0,t1,t0");  // t0 = (lhs < rhs)
         return;
     }
     if (op == ">") {
-        code_ << "    " << ltInsn << " t0,t0,t1\n";  // t0 = (rhs < lhs) = (lhs > rhs)
+        emit(ltInsn, "t0,t0,t1");  // t0 = (rhs < lhs) = (lhs > rhs)
         return;
     }
     if (op == "<=") {
-        code_ << "    " << ltInsn << " at,t0,t1\n";  // at = (rhs < lhs)
-        code_ << "    xor t0,at,1\n";                    // t0 = !(rhs<lhs) = (lhs<=rhs)
+        emit(ltInsn, "at,t0,t1");  // at = (rhs < lhs)
+        emit("xor", "t0,at,1");  // t0 = !(rhs<lhs) = (lhs<=rhs)
         return;
     }
     if (op == ">=") {
-        code_ << "    " << ltInsn << " at,t1,t0\n";  // at = (lhs < rhs)
-        code_ << "    xor t0,at,1\n";                    // t0 = !(lhs<rhs) = (lhs>=rhs)
+        emit(ltInsn, "at,t1,t0");  // at = (lhs < rhs)
+        emit("xor", "t0,at,1");  // t0 = !(lhs<rhs) = (lhs>=rhs)
         return;
     }
     if (op == "==") {
-        code_ << "    cmpeq t0,t1,t0\n";
+        emit("cmpeq", "t0,t1,t0");
         return;
     }
     if (op == "!=") {
-        code_ << "    cmpeq at,t1,t0\n";
-        code_ << "    xor t0,at,1\n";
+        emit("cmpeq", "at,t1,t0");
+        emit("xor", "t0,at,1");
         return;
     }
     err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
@@ -831,32 +865,38 @@ void AlphaCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 void AlphaCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    beq t0," << Lfalse << "\n";
+    emit("beq", cat("t0,", Lfalse));
     genExpr(rhs);
-    code_ << "    beq t0," << Lfalse << "\n";
-    code_ << "    br " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    lda t0,zero,0\n    br " << Ldone << "\n";
-    code_ << Ltrue << ":\n    lda t0,zero,1\n";
-    code_ << Ldone << ":\n";
+    emit("beq", cat("t0,", Lfalse));
+    emit("br", Ltrue);
+    emitLabel(Lfalse);
+    emit("lda", "t0,zero,0");
+    emit("br", Ldone);
+    emitLabel(Ltrue);
+    emit("lda", "t0,zero,1");
+    emitLabel(Ldone);
 }
 
 void AlphaCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    bne t0," << Ltrue << "\n";
+    emit("bne", cat("t0,", Ltrue));
     genExpr(rhs);
-    code_ << "    bne t0," << Ltrue << "\n";
-    code_ << "    br " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    lda t0,zero,1\n    br " << Ldone << "\n";
-    code_ << Lfalse << ":\n    lda t0,zero,0\n";
-    code_ << Ldone << ":\n";
+    emit("bne", cat("t0,", Ltrue));
+    emit("br", Lfalse);
+    emitLabel(Ltrue);
+    emit("lda", "t0,zero,1");
+    emit("br", Ldone);
+    emitLabel(Lfalse);
+    emit("lda", "t0,zero,0");
+    emitLabel(Ldone);
 }
 
 // `cmpeq t0,t0,zero` computes `(t0 == 0) ? 1 : 0` directly - logical not - in one instruction;
 // `zero` is an ordinary operand register here (real register 31), not special syntax.
 void AlphaCodegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    code_ << "    cmpeq t0,t0,zero\n";
+    emit("cmpeq", "t0,t0,zero");
 }
 
 std::optional<std::string> AlphaCodegen::assembleInProcess(const std::string &asmText,

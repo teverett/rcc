@@ -56,13 +56,16 @@ std::string Z8000Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    ld r15," << kInitialSp << "\n";
-        code_ << "    call " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("ld", cat("r15,", kInitialSp));
+        emit("call", label(mainFn));
         // The result sits in r0 once execution reaches `halt`.
-        code_ << "halt:\n    halt\n\n";
+        emitLabel("halt");
+        emit("halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -119,14 +122,15 @@ std::map<std::string, std::string> Z8000Codegen::perFileAsm() const { return per
 // pushed arguments above that - see addr()), then `sub` reserves Locals below `r13`. Epilogue
 // (here and every `Return`) undoes it.
 void Z8000Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    push r13\n";
-    code_ << "    ld r13,r15\n";
-    if (fn.func->frameSize > 0) code_ << "    sub r15," << fn.func->frameSize << "\n";
+    emitLabel(label(fn.func));
+    emit("push", "r13");
+    emit("ld", "r13,r15");
+    if (fn.func->frameSize > 0) emit("sub", cat("r15,", fn.func->frameSize));
     genStmt(*fn.body);
-    code_ << "    ld r15,r13\n";
-    code_ << "    pop r13\n";
-    code_ << "    ret\n\n";
+    emit("ld", "r15,r13");
+    emit("pop", "r13");
+    emit("ret");
+    emitRaw("");
 }
 
 void Z8000Codegen::genStmt(const ir::Stmt &s) {
@@ -140,40 +144,40 @@ void Z8000Codegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    beq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("beq", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    br " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("br", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    beq " << Lend << "\n";
+            emit("beq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    br " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("br", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    br " << loopLabels_.back().second << "\n";
+            emit("br", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    br " << loopLabels_.back().first << "\n";
+            emit("br", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -181,12 +185,12 @@ void Z8000Codegen::genStmt(const ir::Stmt &s) {
                 genExpr(*s.initOrReturnOrExpr);
                 if (isWide(s.initOrReturnOrExpr->type)) {
                     int words = wordCountOf(s.initOrReturnOrExpr->type);
-                    for (int i = 0; i < words; i++) code_ << "    pop r" << i << "\n";
+                    for (int i = 0; i < words; i++) emit("pop", cat("r", i));
                 }
             }
-            code_ << "    ld r15,r13\n";
-            code_ << "    pop r13\n";
-            code_ << "    ret\n";
+            emit("ld", "r15,r13");
+            emit("pop", "r13");
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -209,16 +213,16 @@ void Z8000Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    br " << irLabel(s.labelId) << "\n";
+            emit("br", irLabel(s.labelId));
             return;
         }
     }
@@ -233,7 +237,7 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
                 genWideLoadLiteral(e.intValue, wordCountOf(e.type));
                 return;
             }
-            code_ << "    ld r0," << static_cast<int>(static_cast<uint16_t>(e.intValue)) << "\n";
+            emit("ld", cat("r0,", static_cast<int>(static_cast<uint16_t>(e.intValue))));
             return;
         }
         case ir::ExprKind::Var: {
@@ -251,13 +255,13 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs (never wide).
                 genIndexAddr(e.slot, *e.lhs);  // r2 = target address
-                code_ << "    push r2\n";
+                emit("push", "r2");
                 genExpr(*e.rhs);
-                code_ << "    pop r2\n";
+                emit("pop", "r2");
                 if (widthOfType(e.slot->type) == 1) {
-                    code_ << "    ldb [r2+0],rl0\n";
+                    emit("ldb", "[r2+0],rl0");
                 } else {
-                    code_ << "    ld [r2+0],r0\n";
+                    emit("ld", "[r2+0],r0");
                 }
                 return;
             }
@@ -265,9 +269,10 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
                 genExpr(*e.rhs);  // pushes `words` words
                 int words = wordCountOf(e.slot->type);
                 for (int i = 0; i < words; i++) {
-                    code_ << "    ld r0,[r15+" << (2 * i) << "]\n    ld " << wideWordOperand(e.slot, i) << ",r0\n";
+                    emit("ld", cat("r0,[r15+", (2 * i), "]"));
+                    emit("ld", cat(wideWordOperand(e.slot, i), ",r0"));
                 }
-                code_ << "    add r15," << (2 * words) << "\n";
+                emit("add", cat("r15,", (2 * words)));
                 return;
             }
             genExpr(*e.rhs);
@@ -276,8 +281,8 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    ld r2,r0\n";
-            code_ << "    push r2\n";
+            emit("ld", "r2,r0");
+            emit("push", "r2");
             genExpr(*e.rhs);  // r0, or pushes `words` words (LSW on top) if wide
             storeIndirect(e.type);
             return;
@@ -290,18 +295,18 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
             }
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // r0 = rhs
-            code_ << "    ld r1,r0\n";
+            emit("ld", "r1,r0");
             loadOperand(mem, e.type);  // r0 = old
-            if (e.yieldOld) code_ << "    push r0\n";
+            if (e.yieldOld) emit("push", "r0");
             genCompoundOp(e.op, e.type);
             narrowR0To(e.type);
             storeOperand(mem, e.type);
-            if (e.yieldOld) code_ << "    pop r0\n";
+            if (e.yieldOld) emit("pop", "r0");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    ld r2,r0\n";
+            emit("ld", "r2,r0");
             genCompoundThroughR2(e);
             return;
         }
@@ -310,12 +315,12 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq " << Lelse << "\n";
+            emit("beq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    br " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("br", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -324,13 +329,13 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genWideNegate(wordCountOf(e.rhs->type));
                 } else {
-                    code_ << "    neg r0\n";
+                    emit("neg", "r0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // r0 = pointer value
-                code_ << "    ld r2,r0\n";
+                emit("ld", "r2,r0");
                 loadIndirect("r2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
@@ -338,10 +343,12 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
                     int words = wordCountOf(e.rhs->type);
                     for (int i = 0; i < words; i++) {
                         std::string w = "[r15+" + std::to_string(2 * i) + "]";
-                        code_ << "    ld r0," << w << "\n    com r0\n    ld " << w << ",r0\n";
+                        emit("ld", cat("r0,", w));
+                        emit("com", "r0");
+                        emit("ld", cat(w, ",r0"));
                     }
                 } else {
-                    code_ << "    com r0\n";
+                    emit("com", "r0");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -355,22 +362,22 @@ void Z8000Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.args[i]->type)) {
                     totalWords += wordCountOf(e.args[i]->type);
                 } else {
-                    code_ << "    push r0\n";
+                    emit("push", "r0");
                     totalWords += 1;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
-            if (totalWords > 0) code_ << "    add r15," << (2 * totalWords) << "\n";
+            emit("call", label(e.func));
+            if (totalWords > 0) emit("add", cat("r15,", (2 * totalWords)));
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
-                for (int i = words - 1; i >= 0; i--) code_ << "    push r" << i << "\n";
+                for (int i = words - 1; i >= 0; i--) emit("push", cat("r", i));
             }
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // r0 = the callee's own entry address
-            code_ << "    ld r2,r0\n";
-            code_ << "    callind r2\n";
+            emit("ld", "r2,r0");
+            emit("callind", "r2");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -405,22 +412,22 @@ std::string Z8000Codegen::wideWordOperand(const ir::Slot *slot, int wordIndex) c
 // PDP-11's `movb` - so a signed `char` load needs an explicit `extsb` afterward.
 void Z8000Codegen::loadOperand(const std::string &mem, Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    ldb rl0," << mem << "\n";
+        emit("ldb", cat("rl0,", mem));
         if (type.isUnsigned) {
-            code_ << "    and r0,0x00FF\n";
+            emit("and", "r0,0x00FF");
         } else {
-            code_ << "    extsb r0\n";
+            emit("extsb", "r0");
         }
     } else {
-        code_ << "    ld r0," << mem << "\n";
+        emit("ld", cat("r0,", mem));
     }
 }
 
 void Z8000Codegen::storeOperand(const std::string &mem, Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    ldb " << mem << ",rl0\n";
+        emit("ldb", cat(mem, ",rl0"));
     } else {
-        code_ << "    ld " << mem << ",r0\n";
+        emit("ld", cat(mem, ",r0"));
     }
 }
 
@@ -431,28 +438,28 @@ void Z8000Codegen::loadIndirect(const std::string &addrReg, Type type) {
     }
     int words = wordCountOf(type);
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    ld r0,[" << addrReg << "+" << (2 * i) << "]\n";
-        code_ << "    push r0\n";
+        emit("ld", cat("r0,[", addrReg, "+", (2 * i), "]"));
+        emit("push", "r0");
     }
 }
 
 void Z8000Codegen::storeIndirect(Type type) {
     if (!isWide(type)) {
-        code_ << "    pop r2\n";
+        emit("pop", "r2");
         storeOperand("[r2+0]", type);
         return;
     }
     int words = wordCountOf(type);
     static const char *const tempRegs[] = {"r0", "r1", "r3", "r4"};
-    for (int i = 0; i < words; i++) code_ << "    pop " << tempRegs[i] << "\n";
-    code_ << "    pop r2\n";
-    for (int i = 0; i < words; i++) code_ << "    ld [r2+" << (2 * i) << "]," << tempRegs[i] << "\n";
+    for (int i = 0; i < words; i++) emit("pop", tempRegs[i]);
+    emit("pop", "r2");
+    for (int i = 0; i < words; i++) emit("ld", cat("[r2+", (2 * i), "],", tempRegs[i]));
 }
 
 void Z8000Codegen::genWideLoad(const ir::Slot *slot, int words) {
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    ld r0," << wideWordOperand(slot, i) << "\n";
-        code_ << "    push r0\n";
+        emit("ld", cat("r0,", wideWordOperand(slot, i)));
+        emit("push", "r0");
     }
 }
 
@@ -460,15 +467,15 @@ void Z8000Codegen::genWideLoadLiteral(long value, int words) {
     auto uv = static_cast<unsigned long>(value);
     for (int i = words - 1; i >= 0; i--) {
         int shiftedWord = static_cast<int>((uv >> (16 * i)) & 0xFFFF);
-        code_ << "    ld r0," << shiftedWord << "\n";
-        code_ << "    push r0\n";
+        emit("ld", cat("r0,", shiftedWord));
+        emit("push", "r0");
     }
 }
 
 void Z8000Codegen::genWideStore(const ir::Slot *slot, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pop r0\n";
-        code_ << "    ld " << wideWordOperand(slot, i) << ",r0\n";
+        emit("pop", "r0");
+        emit("ld", cat(wideWordOperand(slot, i), ",r0"));
     }
 }
 
@@ -485,12 +492,12 @@ void Z8000Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
         std::string rhsOperand = "[r15+" + std::to_string(2 * i) + "]";
         std::string lhsOperand = "[r15+" + std::to_string(2 * words + 2 * i) + "]";
         const char *op = i == 0 ? (isAdd ? "add" : "sub") : (isAdd ? "adc" : "sbc");
-        code_ << "    ld r0," << lhsOperand << "\n";
-        code_ << "    ld r1," << rhsOperand << "\n";
-        code_ << "    " << op << " r0,r1\n";
-        code_ << "    ld " << lhsOperand << ",r0\n";
+        emit("ld", cat("r0,", lhsOperand));
+        emit("ld", cat("r1,", rhsOperand));
+        emit(op, "r0,r1");
+        emit("ld", cat(lhsOperand, ",r0"));
     }
-    code_ << "    add r15," << (2 * words) << "\n";
+    emit("add", cat("r15,", (2 * words)));
 }
 
 void Z8000Codegen::genWideNegate(int words) {
@@ -500,12 +507,19 @@ void Z8000Codegen::genWideNegate(int words) {
     // adds 0 with the carry folded in.
     for (int i = 0; i < words; i++) {
         std::string w = "[r15+" + std::to_string(2 * i) + "]";
-        code_ << "    ld r0," << w << "\n    com r0\n    ld " << w << ",r0\n";
+        emit("ld", cat("r0,", w));
+        emit("com", "r0");
+        emit("ld", cat(w, ",r0"));
     }
-    code_ << "    ld r0,[r15+0]\n    add r0,1\n    ld [r15+0],r0\n";
+    emit("ld", "r0,[r15+0]");
+    emit("add", "r0,1");
+    emit("ld", "[r15+0],r0");
     for (int i = 1; i < words; i++) {
         std::string w = "[r15+" + std::to_string(2 * i) + "]";
-        code_ << "    ld r0," << w << "\n    ld r1,0\n    adc r0,r1\n    ld " << w << ",r0\n";
+        emit("ld", cat("r0,", w));
+        emit("ld", "r1,0");
+        emit("adc", "r0,r1");
+        emit("ld", cat(w, ",r0"));
     }
 }
 
@@ -515,18 +529,18 @@ void Z8000Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, cons
     for (int i = 0; i < words; i++) {
         std::string rhsOperand = "[r15+" + std::to_string(2 * i) + "]";
         std::string lhsOperand = "[r15+" + std::to_string(2 * words + 2 * i) + "]";
-        code_ << "    ld r0," << lhsOperand << "\n";
-        code_ << "    ld r1," << rhsOperand << "\n";
+        emit("ld", cat("r0,", lhsOperand));
+        emit("ld", cat("r1,", rhsOperand));
         if (op == "&") {
-            code_ << "    and r0,r1\n";
+            emit("and", "r0,r1");
         } else if (op == "|") {
-            code_ << "    or r0,r1\n";
+            emit("or", "r0,r1");
         } else {
-            code_ << "    xor r0,r1\n";
+            emit("xor", "r0,r1");
         }
-        code_ << "    ld " << lhsOperand << ",r0\n";
+        emit("ld", cat(lhsOperand, ",r0"));
     }
-    code_ << "    add r15," << (2 * words) << "\n";
+    emit("add", cat("r15,", (2 * words)));
 }
 
 void Z8000Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned,
@@ -538,33 +552,40 @@ void Z8000Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, co
         for (int i = words - 1; i >= 0; i--) {
             std::string lhsOperand = "[r15+" + std::to_string(2 * words + 2 * i) + "]";
             std::string rhsOperand = "[r15+" + std::to_string(2 * i) + "]";
-            code_ << "    ld r0," << lhsOperand << "\n    ld r1," << rhsOperand << "\n    cp r0,r1\n";
+            emit("ld", cat("r0,", lhsOperand));
+            emit("ld", cat("r1,", rhsOperand));
+            emit("cp", "r0,r1");
             std::string Lcontinue = newLabel();
-            code_ << "    beq " << Lcontinue << "\n";
-            code_ << "    br " << (op == "==" ? Lfalse : Ltrue) << "\n";
-            code_ << Lcontinue << ":\n";
+            emit("beq", Lcontinue);
+            emit("br", (op == "==" ? Lfalse : Ltrue));
+            emitLabel(Lcontinue);
         }
-        code_ << "    br " << (op == "==" ? Ltrue : Lfalse) << "\n";
+        emit("br", (op == "==" ? Ltrue : Lfalse));
     } else {
         std::string signedBranch = op == "<" ? "blt" : op == "<=" ? "ble" : op == ">" ? "bgt" : "bge";
         std::string unsignedBranch = op == "<" ? "blo" : op == "<=" ? "blos" : op == ">" ? "bhi" : "bhis";
         for (int i = words - 1; i >= 0; i--) {
             std::string lhsOperand = "[r15+" + std::to_string(2 * words + 2 * i) + "]";
             std::string rhsOperand = "[r15+" + std::to_string(2 * i) + "]";
-            code_ << "    ld r0," << lhsOperand << "\n    ld r1," << rhsOperand << "\n    cp r0,r1\n";
+            emit("ld", cat("r0,", lhsOperand));
+            emit("ld", cat("r1,", rhsOperand));
+            emit("cp", "r0,r1");
             std::string Lcontinue = newLabel();
-            code_ << "    beq " << Lcontinue << "\n";
+            emit("beq", Lcontinue);
             bool useSigned = (i == words - 1) && !isUnsigned;
-            code_ << "    " << (useSigned ? signedBranch : unsignedBranch) << " " << Ltrue << "\n";
-            code_ << "    br " << Lfalse << "\n";
-            code_ << Lcontinue << ":\n";
+            emit((useSigned ? signedBranch : unsignedBranch), Ltrue);
+            emit("br", Lfalse);
+            emitLabel(Lcontinue);
         }
-        code_ << "    br " << Lfalse << "\n";
+        emit("br", Lfalse);
     }
-    code_ << Lfalse << ":\n    ld r0,0\n    br " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ld r0,1\n";
-    code_ << Ldone << ":\n";
-    code_ << "    add r15," << (4 * words) << "\n";
+    emitLabel(Lfalse);
+    emit("ld", "r0,0");
+    emit("br", Ldone);
+    emitLabel(Ltrue);
+    emit("ld", "r0,1");
+    emitLabel(Ldone);
+    emit("add", cat("r15,", (4 * words)));
 }
 
 // A `long`/`long long` shifted by a runtime count loops one bit at a time via `rlc`/`rrc`
@@ -573,35 +594,45 @@ void Z8000Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, co
 // Z8000Codegen.h's own header comment, and docs/known-bugs.md).
 void Z8000Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned, int words) {
     genExpr(lhs);  // pushes `words` words
-    code_ << "    push r1\n";
+    emit("push", "r1");
     genExpr(rhs);  // r0 = shift count
-    code_ << "    ld [r15+0],r0\n";
+    emit("ld", "[r15+0],r0");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ld r0,[r15+0]\n    test r0\n";
-    code_ << "    beq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("ld", "r0,[r15+0]");
+    emit("test", "r0");
+    emit("beq", Ldone);
     if (isLeft) {
-        code_ << "    clc\n";
+        emit("clc");
         for (int i = 0; i < words; i++) {
             std::string w = "[r15+" + std::to_string(2 + 2 * i) + "]";
-            code_ << "    ld r0," << w << "\n    rlc r0\n    ld " << w << ",r0\n";
+            emit("ld", cat("r0,", w));
+            emit("rlc", "r0");
+            emit("ld", cat(w, ",r0"));
         }
     } else {
-        code_ << "    clc\n";
+        emit("clc");
         for (int i = words - 1; i >= 0; i--) {
             std::string w = "[r15+" + std::to_string(2 + 2 * i) + "]";
             // The top word's sign bit, not a cleared carry, feeds back in for a signed shift.
             if (i == words - 1 && !isUnsigned) {
-                code_ << "    ld r0," << w << "\n    test r0\n    rrc r0\n    ld " << w << ",r0\n";
+                emit("ld", cat("r0,", w));
+                emit("test", "r0");
+                emit("rrc", "r0");
+                emit("ld", cat(w, ",r0"));
             } else {
-                code_ << "    ld r0," << w << "\n    rrc r0\n    ld " << w << ",r0\n";
+                emit("ld", cat("r0,", w));
+                emit("rrc", "r0");
+                emit("ld", cat(w, ",r0"));
             }
         }
     }
-    code_ << "    ld r0,[r15+0]\n    sub r0,1\n    ld [r15+0],r0\n";
-    code_ << "    br " << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    code_ << "    pop r1\n";
+    emit("ld", "r0,[r15+0]");
+    emit("sub", "r0,1");
+    emit("ld", "[r15+0],r0");
+    emit("br", Lloop);
+    emitLabel(Ldone);
+    emit("pop", "r1");
 }
 
 // Deliberately not implemented - see docs/known-bugs.md and Pdp11Codegen.cpp's own
@@ -628,9 +659,9 @@ void Z8000Codegen::genConvert(const ir::Expr &e) {
         genExpr(*e.lhs);
         if (widthOfType(to) == 1) {
             if (to.isUnsigned) {
-                code_ << "    and r0,0x00FF\n";
+                emit("and", "r0,0x00FF");
             } else {
-                code_ << "    extsb r0\n";
+                emit("extsb", "r0");
             }
         }
         return;
@@ -638,46 +669,48 @@ void Z8000Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
-        code_ << "    ld r0,[r15+0]\n";
-        code_ << "    add r15," << (2 * words) << "\n";
+        emit("ld", "r0,[r15+0]");
+        emit("add", cat("r15,", (2 * words)));
         if (widthOfType(to) == 1) {
-            code_ << "    " << (to.isUnsigned ? "and r0,0x00FF\n" : "extsb r0\n");
+            emit((to.isUnsigned ? "and r0,0x00FF\n" : "extsb r0\n"));
         }
         return;
     }
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);  // r0 = the native-width value, already correctly sign/zero-extended to 16 bits
-        code_ << "    ld r1,r0\n";
+        emit("ld", "r1,r0");
         if (from.isUnsigned) {
-            code_ << "    ld r0,0\n";
+            emit("ld", "r0,0");
         } else {
-            code_ << "    exts r0\n";  // sign-extends r1 into r0 (the pair r0:r1)
+            emit("exts", "r0");  // sign-extends r1 into r0 (the pair r0:r1)
         }
-        for (int i = 1; i < toWords; i++) code_ << "    push r0\n";
-        code_ << "    push r1\n";
+        for (int i = 1; i < toWords; i++) emit("push", "r0");
+        emit("push", "r1");
         return;
     }
     int fromWords = wordCountOf(from);
     int toWords = wordCountOf(to);
     genExpr(*e.lhs);
     if (toWords > fromWords) {
-        code_ << "    ld r1,[r15+" << (2 * (fromWords - 1)) << "]\n    ld r0,r1\n    exts r0\n";
+        emit("ld", cat("r1,[r15+", (2 * (fromWords - 1)), "]"));
+        emit("ld", "r0,r1");
+        emit("exts", "r0");
         static const char *const tempRegs[] = {"r1", "r3", "r4"};
-        for (int i = 0; i < fromWords; i++) code_ << "    pop " << tempRegs[i] << "\n";
-        for (int i = 0; i < toWords - fromWords; i++) code_ << "    push r0\n";
-        for (int i = fromWords - 1; i >= 0; i--) code_ << "    push " << tempRegs[i] << "\n";
+        for (int i = 0; i < fromWords; i++) emit("pop", tempRegs[i]);
+        for (int i = 0; i < toWords - fromWords; i++) emit("push", "r0");
+        for (int i = fromWords - 1; i >= 0; i--) emit("push", tempRegs[i]);
     } else if (toWords < fromWords) {
-        code_ << "    add r15," << (2 * (fromWords - toWords)) << "\n";
+        emit("add", cat("r15,", (2 * (fromWords - toWords))));
     }
 }
 
 void Z8000Codegen::narrowR0To(Type to) {
     if (widthOfType(to) != 1) return;
     if (to.isUnsigned) {
-        code_ << "    and r0,0x00FF\n";
+        emit("and", "r0,0x00FF");
     } else {
-        code_ << "    extsb r0\n";
+        emit("extsb", "r0");
     }
 }
 
@@ -687,41 +720,41 @@ void Z8000Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // r0 = index
     int shift = elemShift(slot->type);
     if (shift >= 0) {
-        for (int i = 0; i < shift; i++) code_ << "    add r0,r0\n";
+        for (int i = 0; i < shift; i++) emit("add", "r0,r0");
     } else {
         // A non-power-of-two element width (e.g. a packed struct's) has no shift-based
         // scaling, so multiply by the real width via `mult` instead; only the low word of the
         // 32-bit product is kept, same convention as genMul().
-        code_ << "    ld r1,r0\n";                       // r1 = index (MULT's pre-loaded pair-low operand)
-        code_ << "    ld r2," << widthOfType(slot->type) << "\n";  // r2 = width (the source operand)
-        code_ << "    mult r0,r2\n";                      // r0:r1 = r2 * r1 = width * index
-        code_ << "    ld r0,r1\n";
+        emit("ld", "r1,r0");                       // r1 = index (MULT's pre-loaded pair-low operand)
+        emit("ld", cat("r2,", widthOfType(slot->type)));  // r2 = width (the source operand)
+        emit("mult", "r0,r2");                      // r0:r1 = r2 * r1 = width * index
+        emit("ld", "r0,r1");
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    lda r2," << label(slot) << "\n";
-            code_ << "    add r2,r0\n";
+            emit("lda", cat("r2,", label(slot)));
+            emit("add", "r2,r0");
         } else {
-            code_ << "    lda r2,[r13-" << localArrayBase(slot) << "]\n";
-            code_ << "    add r2,r0\n";
+            emit("lda", cat("r2,[r13-", localArrayBase(slot), "]"));
+            emit("add", "r2,r0");
         }
         return;
     }
-    code_ << "    ld r2," << operandOf(slot) << "\n";
-    code_ << "    add r2,r0\n";
+    emit("ld", cat("r2,", operandOf(slot)));
+    emit("add", "r2,r0");
 }
 
 void Z8000Codegen::genIndex(const ir::Expr &e) {
     genIndexAddr(e.slot, *e.lhs);
     if (widthOfType(e.slot->type) == 1) {
-        code_ << "    ldb rl0,[r2+0]\n";
+        emit("ldb", "rl0,[r2+0]");
         if (e.slot->type.isUnsigned) {
-            code_ << "    and r0,0x00FF\n";
+            emit("and", "r0,0x00FF");
         } else {
-            code_ << "    extsb r0\n";
+            emit("extsb", "r0");
         }
     } else {
-        code_ << "    ld r0,[r2+0]\n";
+        emit("ld", "r0,[r2+0]");
     }
 }
 
@@ -729,37 +762,36 @@ void Z8000Codegen::genLocalArrayInit(const ir::Slot *slot) {
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
         const ir::ArrayInitElem &elem = slot->arrayInit[i];
         if (elem.isSymbol) {
-            code_ << "    lda r0," << (elem.slot ? label(elem.slot) : label(elem.func)) << "\n";
+            emit("lda", cat("r0,", (elem.slot ? label(elem.slot) : label(elem.func))));
         } else {
-            code_ << "    ld r0," << static_cast<int>(static_cast<uint16_t>(elem.value)) << "\n";
+            emit("ld", cat("r0,", static_cast<int>(static_cast<uint16_t>(elem.value))));
         }
         int elemW = widthOfType(slot->type);
-        code_ << "    " << (elemW == 1 ? "ldb" : "ld") << " [r13-" << (localArrayBase(slot) - elemW * static_cast<int>(i))
-              << "]," << (elemW == 1 ? "rl0" : "r0") << "\n";
+        emit((elemW == 1 ? "ldb" : "ld"), cat("[r13-", (localArrayBase(slot) - elemW * static_cast<int>(i)), "],", (elemW == 1 ? "rl0" : "r0")));
     }
 }
 
 void Z8000Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    lda r0," << label(operand.slot) << "\n";
+            emit("lda", cat("r0,", label(operand.slot)));
             return;
         }
         if (operand.slot->kind == ir::SlotKind::Param) {
-            code_ << "    lda r0,[r13+" << operand.slot->frameOffset << "]\n";
+            emit("lda", cat("r0,[r13+", operand.slot->frameOffset, "]"));
         } else {
             int below = ir::localOffsetDescendingWide(*operand.slot, typeWidths());
-            code_ << "    lda r0,[r13-" << below << "]\n";
+            emit("lda", cat("r0,[r13-", below, "]"));
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    ld r0,r2\n";
+        emit("ld", "r0,r2");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    lda r0," << label(operand.func) << "\n";
+        emit("lda", cat("r0,", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -768,58 +800,65 @@ void Z8000Codegen::genAddrOf(const ir::Expr &operand) {
 // Entry convention: r0 = old value, r1 = rhs value, both at `type`'s width/signedness.
 void Z8000Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add r0,r1\n"; return; }
-    if (op == "-") { code_ << "    sub r0,r1\n"; return; }
-    if (op == "*") { code_ << "    ld r2,r0\n    mult r0,r2\n    ld r0,r1\n"; return; }
-    if (op == "&") { code_ << "    and r0,r1\n"; return; }
-    if (op == "|") { code_ << "    or r0,r1\n"; return; }
-    if (op == "^") { code_ << "    xor r0,r1\n"; return; }
+    if (op == "+") { emit("add", "r0,r1"); return; }
+    if (op == "-") { emit("sub", "r0,r1"); return; }
+    if (op == "*") { emit("ld", "r2,r0");
+emit("mult", "r0,r2");
+emit("ld", "r0,r1"); return; }
+    if (op == "&") { emit("and", "r0,r1"); return; }
+    if (op == "|") { emit("or", "r0,r1"); return; }
+    if (op == "^") { emit("xor", "r0,r1"); return; }
     if (op == "<<" || op == ">>") {
         std::string Lloop = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n    test r1\n";
-        code_ << "    beq " << Ldone << "\n";
+        emitLabel(Lloop);
+        emit("test", "r1");
+        emit("beq", Ldone);
         if (op == "<<") {
-            code_ << "    clc\n    rlc r0\n";
+            emit("clc");
+            emit("rlc", "r0");
         } else if (isUnsigned) {
-            code_ << "    clc\n    rrc r0\n";
+            emit("clc");
+            emit("rrc", "r0");
         } else {
-            code_ << "    test r0\n    rrc r0\n";
+            emit("test", "r0");
+            emit("rrc", "r0");
         }
-        code_ << "    sub r1,1\n";
-        code_ << "    br " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("sub", "r1,1");
+        emit("br", Lloop);
+        emitLabel(Ldone);
         return;
     }
     // "/" or "%"
-    code_ << "    ld r2,r1\n";  // r2 = divisor
-    code_ << "    ld r1,r0\n";  // r1 = dividend
+    emit("ld", "r2,r1");  // r2 = divisor
+    emit("ld", "r1,r0");  // r1 = dividend
     if (isUnsigned) {
         emitUnsignedDiv();
     } else {
-        code_ << "    test r1\n    exts r0\n";
-        code_ << "    div r0,r2\n";
+        emit("test", "r1");
+        emit("exts", "r0");
+        emit("div", "r0,r2");
     }
-    if (op == "%") code_ << "    ld r0,r1\n";
+    if (op == "%") emit("ld", "r0,r1");
 }
 
 void Z8000Codegen::genCompoundThroughR2(const ir::Expr &e) {
-    code_ << "    push r2\n";
+    emit("push", "r2");
     genExpr(*e.rhs);
-    code_ << "    push r0\n";
-    code_ << "    pop r1\n";
-    code_ << "    pop r2\n";
+    emit("push", "r0");
+    emit("pop", "r1");
+    emit("pop", "r2");
     loadOperand("[r2+0]", e.type);  // r0 = old
-    code_ << "    push r2\n";
-    if (e.yieldOld) code_ << "    push r0\n";
+    emit("push", "r2");
+    if (e.yieldOld) emit("push", "r0");
     genCompoundOp(e.op, e.type);  // r0 = new (raw)
     narrowR0To(e.type);
     if (e.yieldOld) {
-        code_ << "    pop r1\n";
-        code_ << "    pop r2\n";
+        emit("pop", "r1");
+        emit("pop", "r2");
         storeOperand("[r2+0]", e.type);
-        code_ << "    ld r0,r1\n";
+        emit("ld", "r0,r1");
     } else {
-        code_ << "    pop r2\n";
+        emit("pop", "r2");
         storeOperand("[r2+0]", e.type);
     }
 }
@@ -836,14 +875,14 @@ void Z8000Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push r0\n";
+        emit("push", "r0");
         genExpr(*e.rhs);
-        code_ << "    pop r1\n";  // r1 = lhs, r0 = rhs
+        emit("pop", "r1");  // r1 = lhs, r0 = rhs
         if (op == "+") {
-            code_ << "    add r0,r1\n";
+            emit("add", "r0,r1");
         } else {
-            code_ << "    sub r1,r0\n";  // r1 = r1 - r0 = lhs - rhs
-            code_ << "    ld r0,r1\n";
+            emit("sub", "r1,r0");  // r1 = r1 - r0 = lhs - rhs
+            emit("ld", "r0,r1");
         }
         return;
     }
@@ -869,15 +908,15 @@ void Z8000Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push r0\n";
+        emit("push", "r0");
         genExpr(*e.rhs);
-        code_ << "    pop r1\n";  // r1 = lhs, r0 = rhs
+        emit("pop", "r1");  // r1 = lhs, r0 = rhs
         if (op == "&") {
-            code_ << "    and r0,r1\n";
+            emit("and", "r0,r1");
         } else if (op == "|") {
-            code_ << "    or r0,r1\n";
+            emit("or", "r0,r1");
         } else {
-            code_ << "    xor r0,r1\n";
+            emit("xor", "r0,r1");
         }
         return;
     }
@@ -906,51 +945,56 @@ void Z8000Codegen::genBinary(const ir::Expr &e) {
 
 void Z8000Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push r0\n";
+    emit("push", "r0");
     genExpr(rhs);
-    code_ << "    ld r1,r0\n";  // r1 = shift count
-    code_ << "    pop r0\n";    // r0 = value to shift
+    emit("ld", "r1,r0");  // r1 = shift count
+    emit("pop", "r0");    // r0 = value to shift
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    test r1\n";
-    code_ << "    beq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("test", "r1");
+    emit("beq", Ldone);
     if (isLeft) {
-        code_ << "    clc\n    rlc r0\n";
+        emit("clc");
+        emit("rlc", "r0");
     } else if (isUnsigned) {
-        code_ << "    clc\n    rrc r0\n";
+        emit("clc");
+        emit("rrc", "r0");
     } else {
-        code_ << "    test r0\n    rrc r0\n";  // arithmetic: sign bit stays, rotated back into bit 15
+        emit("test", "r0");
+        emit("rrc", "r0");  // arithmetic: sign bit stays, rotated back into bit 15
     }
-    code_ << "    sub r1,1\n";
-    code_ << "    br " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("sub", "r1,1");
+    emit("br", Lloop);
+    emitLabel(Ldone);
 }
 
 // `mult`: the low word of its 32-bit product (`r1`) is the 16-bit truncated answer.
 void Z8000Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    push r0\n";
+    emit("push", "r0");
     genExpr(rhs);
-    code_ << "    pop r1\n";  // r1 = lhs, r0 = rhs
-    code_ << "    ld r2,r0\n";  // r2 = rhs - MULT's source operand must not be part of the r0:r1 pair
-    code_ << "    mult r0,r2\n";  // r0:r1 = r2 * r1 = rhs * lhs (high:low)
-    code_ << "    ld r0,r1\n";
+    emit("pop", "r1");  // r1 = lhs, r0 = rhs
+    emit("ld", "r2,r0");  // r2 = rhs - MULT's source operand must not be part of the r0:r1 pair
+    emit("mult", "r0,r2");  // r0:r1 = r2 * r1 = rhs * lhs (high:low)
+    emit("ld", "r0,r1");
 }
 
 // `div` needs a 32-bit dividend in `r0:r1`, so the 16-bit dividend is first sign-extended into
 // that pair with `exts` (`test` first, to set the flags `exts` reads).
 void Z8000Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push r0\n";
+    emit("push", "r0");
     genExpr(rhs);
-    code_ << "    ld r2,r0\n";  // r2 = divisor
-    code_ << "    pop r1\n";    // r1 = dividend (low word)
+    emit("ld", "r2,r0");  // r2 = divisor
+    emit("pop", "r1");    // r1 = dividend (low word)
     if (isUnsigned) {
         emitUnsignedDiv();
     } else {
-        code_ << "    test r1\n    exts r0\n";
-        code_ << "    div r0,r2\n";  // r0 = quotient, r1 = remainder
+        emit("test", "r1");
+        emit("exts", "r0");
+        emit("div", "r0,r2");  // r0 = quotient, r1 = remainder
     }
-    if (wantRemainder) code_ << "    ld r0,r1\n";
+    if (wantRemainder) emit("ld", "r0,r1");
 }
 
 // `div` is signed: the divisor is a signed 16-bit value and the quotient must fit in 15 bits.
@@ -961,23 +1005,33 @@ void Z8000Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
 void Z8000Codegen::emitUnsignedDiv() {
     std::string Lbig = newLabel(), Lsmall = newLabel(), Lone = newLabel(), Lnorm = newLabel(), Lge = newLabel(),
                 Llt = newLabel(), Ldone = newLabel();
-    code_ << "    test r2\n";
-    code_ << "    blt " << Lbig << "\n    br " << Lsmall << "\n";
-    code_ << Lsmall << ":\n";
-    code_ << "    ld r0,r2\n    sub r0,1\n";
-    code_ << "    beq " << Lone << "\n    br " << Lnorm << "\n";
-    code_ << Lnorm << ":\n";
-    code_ << "    ld r0,0\n    div r0,r2\n    br " << Ldone << "\n";
-    code_ << Lone << ":\n";
-    code_ << "    ld r0,r1\n    ld r1,0\n    br " << Ldone << "\n";
-    code_ << Lbig << ":\n";
-    code_ << "    cp r1,r2\n";  // flags = dividend - divisor
-    code_ << "    bhis " << Lge << "\n    br " << Llt << "\n";
-    code_ << Llt << ":\n";
-    code_ << "    ld r0,0\n    br " << Ldone << "\n";
-    code_ << Lge << ":\n";
-    code_ << "    sub r1,r2\n    ld r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("test", "r2");
+    emit("blt", Lbig);
+    emit("br", Lsmall);
+    emitLabel(Lsmall);
+    emit("ld", "r0,r2");
+    emit("sub", "r0,1");
+    emit("beq", Lone);
+    emit("br", Lnorm);
+    emitLabel(Lnorm);
+    emit("ld", "r0,0");
+    emit("div", "r0,r2");
+    emit("br", Ldone);
+    emitLabel(Lone);
+    emit("ld", "r0,r1");
+    emit("ld", "r1,0");
+    emit("br", Ldone);
+    emitLabel(Lbig);
+    emit("cp", "r1,r2");  // flags = dividend - divisor
+    emit("bhis", Lge);
+    emit("br", Llt);
+    emitLabel(Llt);
+    emit("ld", "r0,0");
+    emit("br", Ldone);
+    emitLabel(Lge);
+    emit("sub", "r1,r2");
+    emit("ld", "r0,1");
+    emitLabel(Ldone);
 }
 
 void Z8000Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
@@ -994,66 +1048,75 @@ void Z8000Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 // `lhs - rhs`, with `jpCondIfTrue` applying with no further sign/overflow fixup.
 void Z8000Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &jpCondIfTrue) {
     genExpr(lhs);
-    code_ << "    push r0\n";
+    emit("push", "r0");
     genExpr(rhs);
-    code_ << "    pop r1\n";  // r1 = lhs, r0 = rhs
-    code_ << "    cp r1,r0\n";
+    emit("pop", "r1");  // r1 = lhs, r0 = rhs
+    emit("cp", "r1,r0");
     std::string Ldone = newLabel();
     std::string Ltrue = newLabel();
-    code_ << "    " << jpCondIfTrue << " " << Ltrue << "\n";
-    code_ << "    ld r0,0\n    br " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ld r0,1\n";
-    code_ << Ldone << ":\n";
+    emit(jpCondIfTrue, Ltrue);
+    emit("ld", "r0,0");
+    emit("br", Ldone);
+    emitLabel(Ltrue);
+    emit("ld", "r0,1");
+    emitLabel(Ldone);
 }
 
 void Z8000Codegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    test r0\n";
+        emit("test", "r0");
         return;
     }
     int words = wordCountOf(e.type);
-    code_ << "    ld r0,[r15+0]\n";
+    emit("ld", "r0,[r15+0]");
     for (int i = 1; i < words; i++) {
-        code_ << "    ld r1,[r15+" << (2 * i) << "]\n    or r0,r1\n";
+        emit("ld", cat("r1,[r15+", (2 * i), "]"));
+        emit("or", "r0,r1");
     }
-    code_ << "    add r15," << (2 * words) << "\n";
-    code_ << "    test r0\n";
+    emit("add", cat("r15,", (2 * words)));
+    emit("test", "r0");
 }
 
 void Z8000Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    beq " << Lfalse << "\n";
+    emit("beq", Lfalse);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    beq " << Lfalse << "\n";
-    code_ << "    ld r0,1\n    br " << Ldone << "\n";
-    code_ << Lfalse << ":\n    ld r0,0\n";
-    code_ << Ldone << ":\n";
+    emit("beq", Lfalse);
+    emit("ld", "r0,1");
+    emit("br", Ldone);
+    emitLabel(Lfalse);
+    emit("ld", "r0,0");
+    emitLabel(Ldone);
 }
 
 void Z8000Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    bne " << Ltrue << "\n";
+    emit("bne", Ltrue);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    bne " << Ltrue << "\n";
-    code_ << "    ld r0,0\n    br " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ld r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("bne", Ltrue);
+    emit("ld", "r0,0");
+    emit("br", Ldone);
+    emitLabel(Ltrue);
+    emit("ld", "r0,1");
+    emitLabel(Ldone);
 }
 
 void Z8000Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    beq " << Ltrue << "\n";
-    code_ << "    ld r0,0\n    br " << Ldone << "\n";
-    code_ << Ltrue << ":\n    ld r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("beq", Ltrue);
+    emit("ld", "r0,0");
+    emit("br", Ldone);
+    emitLabel(Ltrue);
+    emit("ld", "r0,1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> Z8000Codegen::assembleInProcess(const std::string &asmText,

@@ -82,7 +82,7 @@ namespace rcc {
 // unconditional B with full +-16MB range - see encodeConditionalBranch().
 // This avoids the trickier 32-bit wide conditional-branch encoding, at the
 // cost of 2 extra bytes per conditional branch.
-class ArmMCodegen : public Backend {
+class ArmMCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "cortex-m3"; }
@@ -208,7 +208,6 @@ class ArmMCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

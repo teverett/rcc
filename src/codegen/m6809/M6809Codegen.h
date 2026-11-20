@@ -44,7 +44,7 @@ namespace rcc {
 // whose frame or whose Local/Param offsets exceed +/-127 bytes will fail to
 // assemble - a real, currently undocumented-elsewhere limitation worth
 // knowing before trusting a large stack frame on this target.
-class M6809Codegen : public Backend {
+class M6809Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "6809"; }
@@ -190,7 +190,6 @@ class M6809Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw/db value, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

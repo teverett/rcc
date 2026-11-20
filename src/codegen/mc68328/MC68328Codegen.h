@@ -22,7 +22,7 @@ namespace rcc {
 // reset so the CPU's reset exception can fetch initial SSP from vector 0 and initial PC from
 // vector 1. `_start` still reloads A7 explicitly too, since some simulators (confirmed on
 // qemu-system-m68k's `-M none`) honor the PC half of reset but not the A7 half.
-class MC68328Codegen : public Backend {
+class MC68328Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "mc68328"; }
@@ -171,7 +171,6 @@ class MC68328Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dl v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

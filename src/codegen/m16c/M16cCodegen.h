@@ -45,7 +45,7 @@ namespace rcc {
 // Every jump/conditional jump always encodes a full absolute address (a
 // deliberate simplification - real M16C conditional jumps are short and
 // PC-relative), so there's no branch-range limit to work around.
-class M16cCodegen : public Backend {
+class M16cCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "m16c"; }
@@ -182,7 +182,6 @@ class M16cCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

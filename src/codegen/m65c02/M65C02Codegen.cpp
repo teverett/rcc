@@ -36,31 +36,36 @@ void M65C02Codegen::declareArray(const std::string &lbl, const std::vector<ir::A
     if (values.empty()) return;
     int w = widthOfType(elemType);
     bool first = true;
-    auto emit = [&](const std::string &text) {
+    auto appendTrailer = [&](const std::string &text) {
         trailer_.push_back((first ? lbl + ": " : "") + text);
         first = false;
     };
     for (const auto &e : values) {
         if (w == 1) {
-            emit("db " + std::to_string(static_cast<int>(static_cast<uint8_t>(e.value))));
+            appendTrailer("db " + std::to_string(static_cast<int>(static_cast<uint8_t>(e.value))));
         } else if (w == 2) {
             std::string text = arrayElemText(e);
-            emit("dblo " + text);
+            appendTrailer("dblo " + text);
             trailer_.push_back("dbhi " + text);
         } else {
             auto uv = static_cast<unsigned long>(e.value);
-            for (int b = 0; b < w; b++) emit("db " + std::to_string(static_cast<int>((uv >> (8 * b)) & 0xFF)));
+            for (int b = 0; b < w; b++) {
+                appendTrailer("db " + std::to_string(static_cast<int>((uv >> (8 * b)) & 0xFF)));
+            }
         }
     }
 }
 
 void M65C02Codegen::copy16(const std::string &dst, const std::string &src) {
-    code_ << "    lda " << src << "\n    sta " << dst << "\n";
-    code_ << "    lda " << src << "+1\n    sta " << dst << "+1\n";
+    emit("lda", src);
+    emit("sta", dst);
+    emit("lda", src + "+1");
+    emit("sta", dst + "+1");
 }
 
 void M65C02Codegen::zeroZp(const std::string &lbl) {
-    code_ << "    stzp " << lbl << "\n    stzp " << lbl << "+1\n";
+    emit("stzp", lbl);
+    emit("stzp", lbl + "+1");
 }
 
 namespace {
@@ -68,42 +73,59 @@ std::string byteAt(const char *base, int i) { return i == 0 ? base : (std::strin
 }  // namespace
 
 void M65C02Codegen::pushWide(const char *base, int nbytes) {
-    for (int i = 0; i < nbytes; i++) code_ << "    lda " << byteAt(base, i) << "\n    pha\n";
+    for (int i = 0; i < nbytes; i++) {
+        emit("lda", byteAt(base, i));
+        emit("pha");
+    }
 }
 
 void M65C02Codegen::popWide(const char *base, int nbytes) {
-    for (int i = nbytes - 1; i >= 0; i--) code_ << "    pla\n    sta " << byteAt(base, i) << "\n";
+    for (int i = nbytes - 1; i >= 0; i--) {
+        emit("pla");
+        emit("sta", byteAt(base, i));
+    }
 }
 
 void M65C02Codegen::copyWide(const char *dst, const char *src, int nbytes) {
-    for (int i = 0; i < nbytes; i++) code_ << "    lda " << byteAt(src, i) << "\n    sta " << byteAt(dst, i) << "\n";
+    for (int i = 0; i < nbytes; i++) {
+        emit("lda", byteAt(src, i));
+        emit("sta", byteAt(dst, i));
+    }
 }
 
 void M65C02Codegen::negateWideBuffer(const char *buf, int nbytes) {
-    for (int i = 0; i < nbytes; i++) code_ << "    lda " << byteAt(buf, i) << "\n    eori 255\n    sta "
-                                            << byteAt(buf, i) << "\n";
-    code_ << "    clc\n    lda " << byteAt(buf, 0) << "\n    adci 1\n    sta " << byteAt(buf, 0) << "\n";
+    for (int i = 0; i < nbytes; i++) {
+        emit("lda", byteAt(buf, i));
+        emit("eori", 255);
+        emit("sta", byteAt(buf, i));
+    }
+    emit("clc");
+    emit("lda", byteAt(buf, 0));
+    emit("adci", 1);
+    emit("sta", byteAt(buf, 0));
     for (int i = 1; i < nbytes; i++) {
-        code_ << "    lda " << byteAt(buf, i) << "\n    adci 0\n    sta " << byteAt(buf, i) << "\n";
+        emit("lda", byteAt(buf, i));
+        emit("adci", 0);
+        emit("sta", byteAt(buf, i));
     }
 }
 
 void M65C02Codegen::safeBranch(const std::string &branchMnemonic, const std::string &targetIfTaken,
                                const std::string &targetIfNot) {
     std::string Lnear = newLabel();
-    code_ << "    " << branchMnemonic << " " << Lnear << "\n";
-    code_ << "    jmp " << targetIfNot << "\n";
-    code_ << Lnear << ":\n";
-    code_ << "    jmp " << targetIfTaken << "\n";
+    emit(branchMnemonic, Lnear);
+    emit("jmp", targetIfNot);
+    emitLabel(Lnear);
+    emit("jmp", targetIfTaken);
 }
 
 void M65C02Codegen::inc16(const std::string &lbl) {
     std::string Lskip = newLabel();
-    code_ << "    inc " << lbl << "\n";
-    code_ << "    lda " << lbl << "\n";
-    code_ << "    bne " << Lskip << "\n";
-    code_ << "    inc " << lbl << "+1\n";
-    code_ << Lskip << ":\n";
+    emit("inc", lbl);
+    emit("lda", lbl);
+    emit("bne", Lskip);
+    emit("inc", lbl + "+1");
+    emitLabel(Lskip);
 }
 
 void M65C02Codegen::addConst16(const std::string &dstReg, const std::string &srcReg, int disp) {
@@ -112,28 +134,51 @@ void M65C02Codegen::addConst16(const std::string &dstReg, const std::string &src
         return;
     }
     uint16_t k = static_cast<uint16_t>(disp);
-    code_ << "    lda " << srcReg << "\n    clc\n    adci " << k << "\n    sta " << dstReg << "\n";
-    code_ << "    lda " << srcReg << "+1\n    adci_hi " << k << "\n    sta " << dstReg << "+1\n";
+    emit("lda", srcReg);
+    emit("clc");
+    emit("adci", k);
+    emit("sta", dstReg);
+    emit("lda", srcReg + "+1");
+    emit("adci_hi", k);
+    emit("sta", dstReg + "+1");
 }
 
 void M65C02Codegen::add16(const std::string &dst, const std::string &a, const std::string &b) {
-    code_ << "    clc\n    lda " << a << "\n    adc " << b << "\n    sta " << dst << "\n";
-    code_ << "    lda " << a << "+1\n    adc " << b << "+1\n    sta " << dst << "+1\n";
+    emit("clc");
+    emit("lda", a);
+    emit("adc", b);
+    emit("sta", dst);
+    emit("lda", a + "+1");
+    emit("adc", b + "+1");
+    emit("sta", dst + "+1");
 }
 
 void M65C02Codegen::sub16(const std::string &dst, const std::string &a, const std::string &b) {
-    code_ << "    sec\n    lda " << a << "\n    sbc " << b << "\n    sta " << dst << "\n";
-    code_ << "    lda " << a << "+1\n    sbc " << b << "+1\n    sta " << dst << "+1\n";
+    emit("sec");
+    emit("lda", a);
+    emit("sbc", b);
+    emit("sta", dst);
+    emit("lda", a + "+1");
+    emit("sbc", b + "+1");
+    emit("sta", dst + "+1");
 }
 
 void M65C02Codegen::loadIndirect(const std::string &zpPtr, const std::string &dstReg) {
-    code_ << "    ldyi 0\n    ldaind " << zpPtr << "\n    sta " << dstReg << "\n";
-    code_ << "    ldyi 1\n    ldaind " << zpPtr << "\n    sta " << dstReg << "+1\n";
+    emit("ldyi", 0);
+    emit("ldaind", zpPtr);
+    emit("sta", dstReg);
+    emit("ldyi", 1);
+    emit("ldaind", zpPtr);
+    emit("sta", dstReg + "+1");
 }
 
 void M65C02Codegen::storeIndirect(const std::string &zpPtr, const std::string &srcReg) {
-    code_ << "    ldyi 0\n    lda " << srcReg << "\n    staind " << zpPtr << "\n";
-    code_ << "    ldyi 1\n    lda " << srcReg << "+1\n    staind " << zpPtr << "\n";
+    emit("ldyi", 0);
+    emit("lda", srcReg);
+    emit("staind", zpPtr);
+    emit("ldyi", 1);
+    emit("lda", srcReg + "+1");
+    emit("staind", zpPtr);
 }
 
 void M65C02Codegen::slotAddrToPtr(const ir::Slot *slot) {
@@ -151,21 +196,28 @@ void M65C02Codegen::loadSlotToAc(const ir::Slot *slot) {
     int w = widthOfType(slot->type);
     if (w == 1) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    lda " << label(slot) << "\n    sta ac\n";
+            emit("lda", label(slot));
+            emit("sta", "ac");
         } else {
             slotAddrToPtr(slot);
-            code_ << "    ldyi 0\n    ldaind ptr\n    sta ac\n";
+            emit("ldyi", 0);
+            emit("ldaind", "ptr");
+            emit("sta", "ac");
         }
         if (slot->type.isUnsigned) {
-            code_ << "    stzp ac+1\n";
+            emit("stzp", "ac+1");
             return;
         }
-        code_ << "    lda ac\n    sta cx\n    asl cx\n";
+        emit("lda", "ac");
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    stzp ac+1\n";
+        emit("stzp", "ac+1");
         safeBranch("bcs", Lneg, Ldone);
-        code_ << Lneg << ":\n    ldai 255\n    sta ac+1\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 255);
+        emit("sta", "ac+1");
+        emitLabel(Ldone);
         return;
     }
     if (slot->kind == ir::SlotKind::Global) {
@@ -179,10 +231,13 @@ void M65C02Codegen::loadSlotToAc(const ir::Slot *slot) {
 void M65C02Codegen::storeAcToSlot(const ir::Slot *slot) {
     if (widthOfType(slot->type) == 1) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    lda ac\n    sta " << label(slot) << "\n";
+            emit("lda", "ac");
+            emit("sta", label(slot));
         } else {
             slotAddrToPtr(slot);
-            code_ << "    ldyi 0\n    lda ac\n    staind ptr\n";
+            emit("ldyi", 0);
+            emit("lda", "ac");
+            emit("staind", "ptr");
         }
         return;
     }
@@ -199,8 +254,8 @@ void M65C02Codegen::genWideLoad(const ir::Slot *slot, int words) {
     if (slot->kind == ir::SlotKind::Global) {
         std::string lbl = label(slot);
         for (int i = 0; i < n; i++) {
-            code_ << "    lda " << lbl << (i ? "+" + std::to_string(i) : "") << "\n    sta " << byteAt("wac", i)
-                  << "\n";
+            emit("lda", lbl + (i ? "+" + std::to_string(i) : ""));
+            emit("sta", byteAt("wac", i));
         }
         return;
     }
@@ -211,8 +266,10 @@ void M65C02Codegen::genWideLoad(const ir::Slot *slot, int words) {
 void M65C02Codegen::genWideLoadLiteral(long value, int words) {
     auto uv = static_cast<unsigned long>(value);
     int n = 2 * words;
-    for (int i = 0; i < n; i++) code_ << "    ldai " << ((uv >> (8 * i)) & 0xFF) << "\n    sta " << byteAt("wac", i)
-                                       << "\n";
+    for (int i = 0; i < n; i++) {
+        emit("ldai", (uv >> (8 * i)) & 0xFF);
+        emit("sta", byteAt("wac", i));
+    }
 }
 
 void M65C02Codegen::genWideStore(const ir::Slot *slot, int words) {
@@ -220,8 +277,8 @@ void M65C02Codegen::genWideStore(const ir::Slot *slot, int words) {
     if (slot->kind == ir::SlotKind::Global) {
         std::string lbl = label(slot);
         for (int i = 0; i < n; i++) {
-            code_ << "    lda " << byteAt("wac", i) << "\n    sta " << lbl << (i ? "+" + std::to_string(i) : "")
-                  << "\n";
+            emit("lda", byteAt("wac", i));
+            emit("sta", lbl + (i ? "+" + std::to_string(i) : ""));
         }
         return;
     }
@@ -231,14 +288,20 @@ void M65C02Codegen::genWideStore(const ir::Slot *slot, int words) {
 
 void M65C02Codegen::genWideLoadAtPtr(int words) {
     int n = 2 * words;
-    for (int i = 0; i < n; i++) code_ << "    ldyi " << i << "\n    ldaind ptr\n    sta " << byteAt("wac", i)
-                                       << "\n";
+    for (int i = 0; i < n; i++) {
+        emit("ldyi", i);
+        emit("ldaind", "ptr");
+        emit("sta", byteAt("wac", i));
+    }
 }
 
 void M65C02Codegen::genWideStoreAtPtr(int words) {
     int n = 2 * words;
-    for (int i = 0; i < n; i++) code_ << "    ldyi " << i << "\n    lda " << byteAt("wac", i)
-                                       << "\n    staind ptr\n";
+    for (int i = 0; i < n; i++) {
+        emit("ldyi", i);
+        emit("lda", byteAt("wac", i));
+        emit("staind", "ptr");
+    }
 }
 
 void M65C02Codegen::loadOperandAtPtr(Type type) {
@@ -248,21 +311,31 @@ void M65C02Codegen::loadOperandAtPtr(Type type) {
         return;
     }
     if (w == 1) {
-        code_ << "    ldyi 0\n    ldaind ptr\n    sta ac\n";
+        emit("ldyi", 0);
+        emit("ldaind", "ptr");
+        emit("sta", "ac");
         if (type.isUnsigned) {
-            code_ << "    stzp ac+1\n";
+            emit("stzp", "ac+1");
             return;
         }
-        code_ << "    lda ac\n    sta cx\n    asl cx\n";
+        emit("lda", "ac");
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    stzp ac+1\n";
+        emit("stzp", "ac+1");
         safeBranch("bcs", Lneg, Ldone);
-        code_ << Lneg << ":\n    ldai 255\n    sta ac+1\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 255);
+        emit("sta", "ac+1");
+        emitLabel(Ldone);
         return;
     }
-    code_ << "    ldyi 0\n    ldaind ptr\n    sta ac\n";
-    code_ << "    ldyi 1\n    ldaind ptr\n    sta ac+1\n";
+    emit("ldyi", 0);
+    emit("ldaind", "ptr");
+    emit("sta", "ac");
+    emit("ldyi", 1);
+    emit("ldaind", "ptr");
+    emit("sta", "ac+1");
 }
 
 void M65C02Codegen::storeOperandAtPtr(Type type) {
@@ -271,35 +344,55 @@ void M65C02Codegen::storeOperandAtPtr(Type type) {
         genWideStoreAtPtr(wordCountOf(type));
         return;
     }
-    code_ << "    ldyi 0\n    lda ac\n    staind ptr\n";
-    if (w == 2) code_ << "    ldyi 1\n    lda ac+1\n    staind ptr\n";
+    emit("ldyi", 0);
+    emit("lda", "ac");
+    emit("staind", "ptr");
+    if (w == 2) {
+        emit("ldyi", 1);
+        emit("lda", "ac+1");
+        emit("staind", "ptr");
+    }
 }
 
 void M65C02Codegen::narrowAcTo(Type to) {
     if (widthOfType(to) != 1) return;  // a native word: ac already holds the full value
     if (to.isUnsigned) {
-        code_ << "    stzp ac+1\n";
+        emit("stzp", "ac+1");
         return;
     }
-    code_ << "    lda ac\n    sta cx\n    asl cx\n";
+    emit("lda", "ac");
+    emit("sta", "cx");
+    emit("asl", "cx");
     std::string Lneg = newLabel(), Ldone = newLabel();
-    code_ << "    stzp ac+1\n";
+    emit("stzp", "ac+1");
     safeBranch("bcs", Lneg, Ldone);
-    code_ << Lneg << ":\n    ldai 255\n    sta ac+1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lneg);
+    emit("ldai", 255);
+    emit("sta", "ac+1");
+    emitLabel(Ldone);
 }
 
 // `op` applied to ac=old, bc=rhs, leaving the raw new value in ac.
 void M65C02Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
     if (op == "+") {
-        code_ << "    clc\n    lda ac\n    adc bc\n    sta ac\n";
-        code_ << "    lda ac+1\n    adc bc+1\n    sta ac+1\n";
+        emit("clc");
+        emit("lda", "ac");
+        emit("adc", "bc");
+        emit("sta", "ac");
+        emit("lda", "ac+1");
+        emit("adc", "bc+1");
+        emit("sta", "ac+1");
         return;
     }
     if (op == "-") {
-        code_ << "    sec\n    lda ac\n    sbc bc\n    sta ac\n";
-        code_ << "    lda ac+1\n    sbc bc+1\n    sta ac+1\n";
+        emit("sec");
+        emit("lda", "ac");
+        emit("sbc", "bc");
+        emit("sta", "ac");
+        emit("lda", "ac+1");
+        emit("sbc", "bc+1");
+        emit("sta", "ac+1");
         return;
     }
     if (op == "*") {
@@ -314,11 +407,16 @@ void M65C02Codegen::genCompoundOp(const std::string &op, Type type) {
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "ora" : "eor";
-        code_ << "    lda ac\n    " << insn << " bc\n    sta ac\n";
-        code_ << "    lda ac+1\n    " << insn << " bc+1\n    sta ac+1\n";
+        emit("lda", "ac");
+        emit(insn, "bc");
+        emit("sta", "ac");
+        emit("lda", "ac+1");
+        emit(insn, "bc+1");
+        emit("sta", "ac+1");
         return;
     }
-    code_ << "    lda bc\n    sta cx\n";  // bc's low byte is the shift count; bc is dead afterward
+    emit("lda", "bc");  // bc's low byte is the shift count; bc is dead afterward
+    emit("sta", "cx");
     genShiftCore(op == "<<", isUnsigned);
 }
 
@@ -327,30 +425,56 @@ void M65C02Codegen::genCompoundOp(const std::string &op, Type type) {
 // hardware stack across it, and again around genCompoundOp() since its
 // "/"/"%" case also uses ptr as scratch.
 void M65C02Codegen::genCompoundThroughPtr(const ir::Expr &e) {
-    code_ << "    lda ptr\n    pha\n    lda ptr+1\n    pha\n";
+    emit("lda", "ptr");
+    emit("pha");
+    emit("lda", "ptr+1");
+    emit("pha");
     genExpr(*e.rhs);      // ac = rhs
     copy16("bc", "ac");   // bc = rhs
-    code_ << "    pla\n    sta ptr+1\n    pla\n    sta ptr\n";
+    emit("pla");
+    emit("sta", "ptr+1");
+    emit("pla");
+    emit("sta", "ptr");
     loadOperandAtPtr(e.type);  // ac = old
-    if (e.yieldOld) code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
-    code_ << "    lda ptr\n    pha\n    lda ptr+1\n    pha\n";
+    if (e.yieldOld) {
+        emit("lda", "ac");
+        emit("pha");
+        emit("lda", "ac+1");
+        emit("pha");
+    }
+    emit("lda", "ptr");
+    emit("pha");
+    emit("lda", "ptr+1");
+    emit("pha");
     genCompoundOp(e.op, e.type);  // ac = new (raw)
     narrowAcTo(e.type);
-    code_ << "    pla\n    sta ptr+1\n    pla\n    sta ptr\n";
+    emit("pla");
+    emit("sta", "ptr+1");
+    emit("pla");
+    emit("sta", "ptr");
     storeOperandAtPtr(e.type);
-    if (e.yieldOld) code_ << "    pla\n    sta ac+1\n    pla\n    sta ac\n";  // ac = old (final result)
+    if (e.yieldOld) {  // ac = old (final result)
+        emit("pla");
+        emit("sta", "ac+1");
+        emit("pla");
+        emit("sta", "ac");
+    }
 }
 
 void M65C02Codegen::loadArrayElemToAc(const ir::ArrayInitElem &e) {
     if (!e.isSymbol) {
         uint16_t v16 = static_cast<uint16_t>(e.value);
-        code_ << "    ldai " << (v16 & 0xFF) << "\n    sta ac\n";
-        code_ << "    ldai " << ((v16 >> 8) & 0xFF) << "\n    sta ac+1\n";
+        emit("ldai", v16 & 0xFF);
+        emit("sta", "ac");
+        emit("ldai", (v16 >> 8) & 0xFF);
+        emit("sta", "ac+1");
         return;
     }
     std::string lbl = e.slot ? label(e.slot) : label(e.func);
-    code_ << "    ldai " << lbl << "\n    sta ac\n";
-    code_ << "    ldai_hi " << lbl << "\n    sta ac+1\n";
+    emit("ldai", lbl);
+    emit("sta", "ac");
+    emit("ldai_hi", lbl);
+    emit("sta", "ac+1");
 }
 
 void M65C02Codegen::genLocalArrayInit(const ir::Slot *slot) {
@@ -361,7 +485,9 @@ void M65C02Codegen::genLocalArrayInit(const ir::Slot *slot) {
         if (w <= 2) {
             loadArrayElemToAc(elem);
             if (w == 1) {
-                code_ << "    ldyi 0\n    lda ac\n    staind ptr\n";
+                emit("ldyi", 0);
+                emit("lda", "ac");
+                emit("staind", "ptr");
             } else {
                 storeIndirect("ptr", "ac");
             }
@@ -370,8 +496,11 @@ void M65C02Codegen::genLocalArrayInit(const ir::Slot *slot) {
             // into w plain bytes, least significant first.
             auto uv = static_cast<unsigned long>(elem.value);
             for (int b = 0; b < w; b++) {
-                code_ << "    ldai " << ((uv >> (8 * b)) & 0xFF) << "\n    sta ac\n";
-                code_ << "    ldyi " << b << "\n    lda ac\n    staind ptr\n";
+                emit("ldai", (uv >> (8 * b)) & 0xFF);
+                emit("sta", "ac");
+                emit("ldyi", b);
+                emit("lda", "ac");
+                emit("staind", "ptr");
             }
         }
     }
@@ -393,26 +522,41 @@ std::string M65C02Codegen::generate(const ir::Program &prog, bool objectMode) {
     // M65C02Linker.cpp synthesizes it once every object is merged and
     // main's linked address is known. An object file's own base is org 0;
     // placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     // The fixed zero-page pseudo-registers, bound as equates rather than a
     // sequential data-trailer layout. Safe to declare identically in every
     // separately-compiled object since an equate's value is a fixed
     // constant, not a linker-visible address.
-    code_ << "ptr = 0\nac = 2\nbc = 4\ncx = 6\ndx = 8\nsp = 10\nfp = 12\n";
-    code_ << "wac = 14\nwbc = 22\nwtmp = 30\nwtmp2 = 38\n\n";
+    emitEquate("ptr", 0);
+    emitEquate("ac", 2);
+    emitEquate("bc", 4);
+    emitEquate("cx", 6);
+    emitEquate("dx", 8);
+    emitEquate("sp", 10);
+    emitEquate("fp", 12);
+    emitEquate("wac", 14);
+    emitEquate("wbc", 22);
+    emitEquate("wtmp", 30);
+    emitEquate("wtmp2", 38);
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         // Seeds the software call-frame stack before main's prologue runs.
         // fp only needs zeroing for tidiness: main never returns to a
         // caller that reads its saved value back.
-        code_ << "    ldai " << kFrameStackTop << "\n    sta sp\n";
-        code_ << "    ldai_hi " << kFrameStackTop << "\n    sta sp+1\n";
+        emit("ldai", kFrameStackTop);
+        emit("sta", "sp");
+        emit("ldai_hi", kFrameStackTop);
+        emit("sta", "sp+1");
         zeroZp("fp");
-        code_ << "    jsr " << label(mainFn) << "\n";
+        emit("jsr", label(mainFn));
         // The program's result sits in ac/ac+1; this lda also leaves the
         // low byte in the real A register for a quick register-dump look.
-        code_ << "    lda ac\n";
-        code_ << "halt:\n    jmp halt\n\n";
+        emit("lda", "ac");
+        emitLabel("halt");
+        emit("jmp", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -447,15 +591,16 @@ std::map<std::string, std::string> M65C02Codegen::perFileAsm() const { return pe
 // caller's pushed arguments end, sets fp to that saved word, then reserves
 // frameSize*2 more bytes below fp for locals.
 void M65C02Codegen::genFunction(const ir::FunctionBody &fn) {
-    if (fn.func->hasAddress) code_ << placementLine(fn.func->address) << "\n";
-    code_ << label(fn.func) << ":\n";
+    if (fn.func->hasAddress) emitRaw(placementLine(fn.func->address));
+    emitLabel(label(fn.func));
     addConst16("ptr", "sp", -2);     // ptr = saved-fp word's address
     storeIndirect("ptr", "fp");      // [ptr] = caller's fp
     copy16("fp", "ptr");             // fp = this call's frame base
     addConst16("sp", "fp", -fn.func->frameSize);  // reserve the locals below fp
     genStmt(*fn.body);
     emitEpilogue();
-    code_ << "    rts\n\n";
+    emit("rts");
+    emitRaw("");
 }
 
 void M65C02Codegen::genStmt(const ir::Stmt &s) {
@@ -471,41 +616,41 @@ void M65C02Codegen::genStmt(const ir::Stmt &s) {
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
             safeBranch("beq", s.elseStmt ? Lelse : Ldone, Lthen);
-            code_ << Lthen << ":\n";
+            emitLabel(Lthen);
             genStmt(*s.thenStmt);
-            code_ << "    jmp " << Ldone << "\n";
+            emit("jmp", Ldone);
             if (s.elseStmt) {
-                code_ << Lelse << ":\n";
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lbody = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
             safeBranch("beq", Lend, Lbody);
-            code_ << Lbody << ":\n";
+            emitLabel(Lbody);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -513,7 +658,7 @@ void M65C02Codegen::genStmt(const ir::Stmt &s) {
             // Early exit: genFunction()'s fall-through epilogue never runs
             // for this path, so it's repeated inline here.
             emitEpilogue();
-            code_ << "    rts\n";
+            emit("rts");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -536,16 +681,15 @@ void M65C02Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -564,14 +708,16 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
             // 16-bit literal aren't usually zero together.
             uint16_t v16 = static_cast<uint16_t>(e.intValue);
             if ((v16 & 0xFF) == 0) {
-                code_ << "    stzp ac\n";
+                emit("stzp", "ac");
             } else {
-                code_ << "    ldai " << (v16 & 0xFF) << "\n    sta ac\n";
+                emit("ldai", v16 & 0xFF);
+                emit("sta", "ac");
             }
             if (((v16 >> 8) & 0xFF) == 0) {
-                code_ << "    stzp ac+1\n";
+                emit("stzp", "ac+1");
             } else {
-                code_ << "    ldai " << ((v16 >> 8) & 0xFF) << "\n    sta ac+1\n";
+                emit("ldai", (v16 >> 8) & 0xFF);
+                emit("sta", "ac+1");
             }
             return;
         }
@@ -593,14 +739,26 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
                 genIndexAddr(e.slot, *e.lhs);  // ptr = target address
                 // Stash ptr on the hardware stack since rhs might index
                 // through ptr again.
-                code_ << "    lda ptr\n    pha\n    lda ptr+1\n    pha\n";
+                emit("lda", "ptr");
+                emit("pha");
+                emit("lda", "ptr+1");
+                emit("pha");
                 genExpr(*e.rhs);
-                code_ << "    pla\n    sta ptr+1\n    pla\n    sta ptr\n";
+                emit("pla");
+                emit("sta", "ptr+1");
+                emit("pla");
+                emit("sta", "ptr");
                 if (w > 2) {
                     genWideStoreAtPtr(wordCountOf(e.slot->type));
                 } else {
-                    code_ << "    ldyi 0\n    lda ac\n    staind ptr\n";
-                    if (w == 2) code_ << "    ldyi 1\n    lda ac+1\n    staind ptr\n";
+                    emit("ldyi", 0);
+                    emit("lda", "ac");
+                    emit("staind", "ptr");
+                    if (w == 2) {
+                        emit("ldyi", 1);
+                        emit("lda", "ac+1");
+                        emit("staind", "ptr");
+                    }
                 }
                 return;
             }
@@ -615,9 +773,15 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // ac = pointer value
             copy16("ptr", "ac");
-            code_ << "    lda ptr\n    pha\n    lda ptr+1\n    pha\n";
+            emit("lda", "ptr");
+            emit("pha");
+            emit("lda", "ptr+1");
+            emit("pha");
             genExpr(*e.rhs);
-            code_ << "    pla\n    sta ptr+1\n    pla\n    sta ptr\n";
+            emit("pla");
+            emit("sta", "ptr+1");
+            emit("pla");
+            emit("sta", "ptr");
             storeOperandAtPtr(e.type);
             return;
         }
@@ -633,11 +797,21 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.rhs);     // ac = rhs
             copy16("bc", "ac");  // bc = rhs
             loadSlotToAc(e.slot);  // ac = old
-            if (e.yieldOld) code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+            if (e.yieldOld) {
+                emit("lda", "ac");
+                emit("pha");
+                emit("lda", "ac+1");
+                emit("pha");
+            }
             genCompoundOp(e.op, e.type);
             narrowAcTo(e.type);
             storeAcToSlot(e.slot);
-            if (e.yieldOld) code_ << "    pla\n    sta ac+1\n    pla\n    sta ac\n";
+            if (e.yieldOld) {
+                emit("pla");
+                emit("sta", "ac+1");
+                emit("pla");
+                emit("sta", "ac");
+            }
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
@@ -653,12 +827,12 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             safeBranch("beq", Lelse, Lthen);
-            code_ << Lthen << ":\n";
+            emitLabel(Lthen);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -668,8 +842,13 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
                 if (wide) {
                     negateWideBuffer("wac", 2 * wordCountOf(e.rhs->type));
                 } else {
-                    code_ << "    ldai 0\n    sec\n    sbc ac\n    sta ac\n";
-                    code_ << "    ldai 0\n    sbc ac+1\n    sta ac+1\n";
+                    emit("ldai", 0);
+                    emit("sec");
+                    emit("sbc", "ac");
+                    emit("sta", "ac");
+                    emit("ldai", 0);
+                    emit("sbc", "ac+1");
+                    emit("sta", "ac+1");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
@@ -683,11 +862,17 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
                     int n = 2 * wordCountOf(e.rhs->type);
                     for (int i = 0; i < n; i++) {
                         std::string b = byteAt("wac", i);
-                        code_ << "    lda " << b << "\n    eori 255\n    sta " << b << "\n";
+                        emit("lda", b);
+                        emit("eori", 255);
+                        emit("sta", b);
                     }
                 } else {
-                    code_ << "    lda ac\n    eori 255\n    sta ac\n";
-                    code_ << "    lda ac+1\n    eori 255\n    sta ac+1\n";
+                    emit("lda", "ac");
+                    emit("eori", 255);
+                    emit("sta", "ac");
+                    emit("lda", "ac+1");
+                    emit("eori", 255);
+                    emit("sta", "ac+1");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -705,13 +890,16 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
                 totalBytes += w;
                 addConst16("sp", "sp", -w);
                 if (w > 2) {
-                    for (int b = 0; b < w; b++) code_ << "    ldyi " << b << "\n    lda " << byteAt("wac", b)
-                                                         << "\n    staind sp\n";
+                    for (int b = 0; b < w; b++) {
+                        emit("ldyi", b);
+                        emit("lda", byteAt("wac", b));
+                        emit("staind", "sp");
+                    }
                 } else {
                     storeIndirect("sp", "ac");
                 }
             }
-            code_ << "    jsr " << label(e.func) << "\n";
+            emit("jsr", label(e.func));
             if (totalBytes > 0) addConst16("sp", "sp", totalBytes);
             return;
         }
@@ -725,10 +913,12 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);  // ac = the callee's own entry address
             copy16("ptr", "ac");
             std::string Lret = newLabel();
-            code_ << "    ldai_hi " << Lret << "-1\n    pha\n";
-            code_ << "    ldai " << Lret << "-1\n    pha\n";
-            code_ << "    jmpi ptr\n";
-            code_ << Lret << ":\n";
+            emit("ldai_hi", Lret + "-1");
+            emit("pha");
+            emit("ldai", Lret + "-1");
+            emit("pha");
+            emit("jmpi", "ptr");
+            emitLabel(Lret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -737,7 +927,7 @@ void M65C02Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // SEI sets the interrupt-disable flag, CLI clears it.
-            code_ << "    " << (e.op == "ion" ? "cli" : "sei") << "\n";
+            emit(e.op == "ion" ? "cli" : "sei");
             return;
         }
         case ir::ExprKind::Convert: {
@@ -759,29 +949,46 @@ void M65C02Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) 
     genExpr(idxExpr);  // ac = index
     int shift = elemShift(slot->type);  // ac *= widthOf(slot->type), a power of two
     if (shift >= 0) {
-        for (int i = 0; i < shift; i++) code_ << "    asl ac\n    rol ac+1\n";
+        for (int i = 0; i < shift; i++) {
+            emit("asl", "ac");
+            emit("rol", "ac+1");
+        }
     } else {
         // Non-power-of-two element width (a struct's): scale via the shared software
         // multiply routine instead - see genMulCore()'s own comment (bc * dx -> ac).
-        code_ << "    lda ac\n    sta bc\n    lda ac+1\n    sta bc+1\n";
-        code_ << "    ldai " << widthOfType(slot->type) << "\n    sta dx\n    ldai 0\n    sta dx+1\n";
+        emit("lda", "ac");
+        emit("sta", "bc");
+        emit("lda", "ac+1");
+        emit("sta", "bc+1");
+        emit("ldai", widthOfType(slot->type));
+        emit("sta", "dx");
+        emit("ldai", 0);
+        emit("sta", "dx+1");
         genMulCore();
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
             std::string lbl = label(slot);
-            code_ << "    clc\n";
-            code_ << "    lda ac\n    adci " << lbl << "\n    sta ptr\n";
-            code_ << "    lda ac+1\n    adci_hi " << lbl << "\n    sta ptr+1\n";
+            emit("clc");
+            emit("lda", "ac");
+            emit("adci", lbl);
+            emit("sta", "ptr");
+            emit("lda", "ac+1");
+            emit("adci_hi", lbl);
+            emit("sta", "ptr+1");
         } else {
             addConst16("ptr", "fp", -ir::localLowOffset(*slot, typeWidths()));  // ptr = element 0's own address
             add16("ptr", "ptr", "ac");                                          // ptr += idx*2
         }
     } else if (slot->kind == ir::SlotKind::Global) {
         std::string lbl = label(slot);
-        code_ << "    clc\n";
-        code_ << "    lda ac\n    adc " << lbl << "\n    sta ptr\n";
-        code_ << "    lda ac+1\n    adc " << lbl << "+1\n    sta ptr+1\n";
+        emit("clc");
+        emit("lda", "ac");
+        emit("adc", lbl);
+        emit("sta", "ptr");
+        emit("lda", "ac+1");
+        emit("adc", lbl + "+1");
+        emit("sta", "ptr+1");
     } else {
         slotAddrToPtr(slot);        // ptr = slot's own frame address
         loadIndirect("ptr", "bc");  // bc = slot's own stored pointer value
@@ -797,29 +1004,41 @@ void M65C02Codegen::genIndex(const ir::Expr &e) {
         return;
     }
     if (w == 1) {
-        code_ << "    ldyi 0\n    ldaind ptr\n    sta ac\n";
+        emit("ldyi", 0);
+        emit("ldaind", "ptr");
+        emit("sta", "ac");
         if (e.slot->type.isUnsigned) {
-            code_ << "    stzp ac+1\n";
+            emit("stzp", "ac+1");
             return;
         }
-        code_ << "    lda ac\n    sta cx\n    asl cx\n";
+        emit("lda", "ac");
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    stzp ac+1\n";
+        emit("stzp", "ac+1");
         safeBranch("bcs", Lneg, Ldone);
-        code_ << Lneg << ":\n    ldai 255\n    sta ac+1\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 255);
+        emit("sta", "ac+1");
+        emitLabel(Ldone);
         return;
     }
-    code_ << "    ldyi 0\n    ldaind ptr\n    sta ac\n";
-    code_ << "    ldyi 1\n    ldaind ptr\n    sta ac+1\n";
+    emit("ldyi", 0);
+    emit("ldaind", "ptr");
+    emit("sta", "ac");
+    emit("ldyi", 1);
+    emit("ldaind", "ptr");
+    emit("sta", "ac+1");
 }
 
 void M65C02Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
             std::string lbl = label(operand.slot);
-            code_ << "    ldai " << lbl << "\n    sta ac\n";
-            code_ << "    ldai_hi " << lbl << "\n    sta ac+1\n";
+            emit("ldai", lbl);
+            emit("sta", "ac");
+            emit("ldai_hi", lbl);
+            emit("sta", "ac+1");
         } else {
             slotAddrToPtr(operand.slot);
             copy16("ac", "ptr");
@@ -833,8 +1052,10 @@ void M65C02Codegen::genAddrOf(const ir::Expr &operand) {
     }
     if (operand.kind == ir::ExprKind::Func) {
         std::string lbl = label(operand.func);
-        code_ << "    ldai " << lbl << "\n    sta ac\n";
-        code_ << "    ldai_hi " << lbl << "\n    sta ac+1\n";
+        emit("ldai", lbl);
+        emit("sta", "ac");
+        emit("ldai_hi", lbl);
+        emit("sta", "ac+1");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -848,15 +1069,19 @@ void M65C02Codegen::genConvert(const ir::Expr &e) {
     auto narrowCharFixup = [&]() {
         if (widthOfType(to) != 1) return;
         if (to.isUnsigned) {
-            code_ << "    stzp ac+1\n";
+            emit("stzp", "ac+1");
             return;
         }
-        code_ << "    lda ac\n    sta cx\n    asl cx\n";
+        emit("lda", "ac");
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    stzp ac+1\n";
+        emit("stzp", "ac+1");
         safeBranch("bcs", Lneg, Ldone);
-        code_ << Lneg << ":\n    ldai 255\n    sta ac+1\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 255);
+        emit("sta", "ac+1");
+        emitLabel(Ldone);
     };
     if (!fromWide && !toWide) {
         genExpr(*e.lhs);
@@ -865,31 +1090,42 @@ void M65C02Codegen::genConvert(const ir::Expr &e) {
     }
     if (fromWide && !toWide) {
         genExpr(*e.lhs);
-        code_ << "    lda " << byteAt("wac", 0) << "\n    sta ac\n";
-        code_ << "    lda " << byteAt("wac", 1) << "\n    sta ac+1\n";
+        emit("lda", byteAt("wac", 0));
+        emit("sta", "ac");
+        emit("lda", byteAt("wac", 1));
+        emit("sta", "ac+1");
         narrowCharFixup();
         return;
     }
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);
-        code_ << "    lda ac\n    sta " << byteAt("wac", 0) << "\n";
-        code_ << "    lda ac+1\n    sta " << byteAt("wac", 1) << "\n";
+        emit("lda", "ac");
+        emit("sta", byteAt("wac", 0));
+        emit("lda", "ac+1");
+        emit("sta", byteAt("wac", 1));
         if (toWords > 1) {
             // from.isUnsigned describes the pointee's signedness for a
             // pointer type, not the pointer's own (which has no sign), so
             // isPointer(from) is checked separately to force zero-extension.
             if (isPointer(from) || from.isUnsigned) {
-                code_ << "    stzp dx\n";
+                emit("stzp", "dx");
             } else {
-                code_ << "    lda ac+1\n    sta cx\n    asl cx\n";
+                emit("lda", "ac+1");
+                emit("sta", "cx");
+                emit("asl", "cx");
                 std::string Lneg = newLabel(), Ldone = newLabel();
-                code_ << "    stzp dx\n";
+                emit("stzp", "dx");
                 safeBranch("bcc", Ldone, Lneg);
-                code_ << Lneg << ":\n    ldai 255\n    sta dx\n";
-                code_ << Ldone << ":\n";
+                emitLabel(Lneg);
+                emit("ldai", 255);
+                emit("sta", "dx");
+                emitLabel(Ldone);
             }
-            for (int i = 2; i < 2 * toWords; i++) code_ << "    lda dx\n    sta " << byteAt("wac", i) << "\n";
+            for (int i = 2; i < 2 * toWords; i++) {
+                emit("lda", "dx");
+                emit("sta", byteAt("wac", i));
+            }
         }
         return;
     }
@@ -898,16 +1134,23 @@ void M65C02Codegen::genConvert(const ir::Expr &e) {
     genExpr(*e.lhs);
     if (toN > fromN) {
         if (from.isUnsigned) {
-            code_ << "    stzp dx\n";
+            emit("stzp", "dx");
         } else {
-            code_ << "    lda " << byteAt("wac", fromN - 1) << "\n    sta cx\n    asl cx\n";
+            emit("lda", byteAt("wac", fromN - 1));
+            emit("sta", "cx");
+            emit("asl", "cx");
             std::string Lneg = newLabel(), Ldone = newLabel();
-            code_ << "    stzp dx\n";
+            emit("stzp", "dx");
             safeBranch("bcc", Ldone, Lneg);
-            code_ << Lneg << ":\n    ldai 255\n    sta dx\n";
-            code_ << Ldone << ":\n";
+            emitLabel(Lneg);
+            emit("ldai", 255);
+            emit("sta", "dx");
+            emitLabel(Ldone);
         }
-        for (int i = fromN; i < toN; i++) code_ << "    lda dx\n    sta " << byteAt("wac", i) << "\n";
+        for (int i = fromN; i < toN; i++) {
+            emit("lda", "dx");
+            emit("sta", byteAt("wac", i));
+        }
     }
 }
 
@@ -917,10 +1160,11 @@ void M65C02Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool is
     pushWide("wac", n);
     genExpr(rhs);
     popWide("wbc", n);  // wbc = lhs, wac = rhs
-    code_ << "    " << (isAdd ? "clc" : "sec") << "\n";
+    emit(isAdd ? "clc" : "sec");
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wbc", i) << "\n    " << (isAdd ? "adc" : "sbc") << " " << byteAt("wac", i)
-              << "\n    sta " << byteAt("wac", i) << "\n";
+        emit("lda", byteAt("wbc", i));
+        emit(isAdd ? "adc" : "sbc", byteAt("wac", i));
+        emit("sta", byteAt("wac", i));
     }
 }
 
@@ -932,8 +1176,9 @@ void M65C02Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, con
     popWide("wbc", n);  // wbc = lhs, wac = rhs
     const char *insn = (op == "&") ? "and" : (op == "|") ? "ora" : "eor";
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wbc", i) << "\n    " << insn << " " << byteAt("wac", i) << "\n    sta "
-              << byteAt("wac", i) << "\n";
+        emit("lda", byteAt("wbc", i));
+        emit(insn, byteAt("wac", i));
+        emit("sta", byteAt("wac", i));
     }
 }
 
@@ -943,17 +1188,26 @@ void M65C02Codegen::emitWideEqualityCompare(const ir::Expr &lhs, const ir::Expr 
     pushWide("wac", n);
     genExpr(rhs);
     popWide("wbc", n);  // wbc = lhs, wac = rhs
-    code_ << "    lda " << byteAt("wbc", 0) << "\n    eor " << byteAt("wac", 0) << "\n    sta dx\n";
+    emit("lda", byteAt("wbc", 0));
+    emit("eor", byteAt("wac", 0));
+    emit("sta", "dx");
     for (int i = 1; i < n; i++) {
-        code_ << "    lda " << byteAt("wbc", i) << "\n    eor " << byteAt("wac", i) << "\n    ora dx\n    sta dx\n";
+        emit("lda", byteAt("wbc", i));
+        emit("eor", byteAt("wac", i));
+        emit("ora", "dx");
+        emit("sta", "dx");
     }
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    lda dx\n";
+    emit("lda", "dx");
     safeBranch(wantEqual ? "beq" : "bne", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::emitWideLessCompare(const ir::Expr &a, const ir::Expr &b, bool isUnsigned, int words,
@@ -963,22 +1217,29 @@ void M65C02Codegen::emitWideLessCompare(const ir::Expr &a, const ir::Expr &b, bo
     pushWide("wac", n);
     genExpr(b);
     popWide("wbc", n);  // wbc = a, wac = b
-    code_ << "    sec\n";
+    emit("sec");
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wbc", i) << "\n    sbc " << byteAt("wac", i) << "\n";
+        emit("lda", byteAt("wbc", i));
+        emit("sbc", byteAt("wac", i));
     }
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (isUnsigned) {
         safeBranch(invert ? "bcs" : "bcc", Ltrue, Lfalse);
     } else {
         std::string Lfixskip = newLabel();
-        code_ << "    bvc " << Lfixskip << "\n    eori 128\n" << Lfixskip << ":\n";
+        emit("bvc", Lfixskip);
+        emit("eori", 128);
+        emitLabel(Lfixskip);
         safeBranch(invert ? "bpl" : "bmi", Ltrue, Lfalse);
     }
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned,
@@ -997,26 +1258,30 @@ void M65C02Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool 
     genExpr(lhs);
     pushWide("wac", n);
     genExpr(rhs);
-    code_ << "    lda ac\n    sta cx\n";
+    emit("lda", "ac");
+    emit("sta", "cx");
     popWide("wac", n);
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    lda cx\n";
+    emitLabel(Lloop);
+    emit("lda", "cx");
     safeBranch("beq", Ldone, Lbody);
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     if (isLeft) {
-        code_ << "    asl " << byteAt("wac", 0) << "\n";
-        for (int i = 1; i < n; i++) code_ << "    rol " << byteAt("wac", i) << "\n";
+        emit("asl", byteAt("wac", 0));
+        for (int i = 1; i < n; i++) emit("rol", byteAt("wac", i));
     } else if (isUnsigned) {
-        code_ << "    lsr " << byteAt("wac", n - 1) << "\n";
-        for (int i = n - 2; i >= 0; i--) code_ << "    ror " << byteAt("wac", i) << "\n";
+        emit("lsr", byteAt("wac", n - 1));
+        for (int i = n - 2; i >= 0; i--) emit("ror", byteAt("wac", i));
     } else {
-        code_ << "    lda " << byteAt("wac", n - 1) << "\n    sta dx\n    asl dx\n";
-        code_ << "    ror " << byteAt("wac", n - 1) << "\n";
-        for (int i = n - 2; i >= 0; i--) code_ << "    ror " << byteAt("wac", i) << "\n";
+        emit("lda", byteAt("wac", n - 1));
+        emit("sta", "dx");
+        emit("asl", "dx");
+        emit("ror", byteAt("wac", n - 1));
+        for (int i = n - 2; i >= 0; i--) emit("ror", byteAt("wac", i));
     }
-    code_ << "    dec cx\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("dec", "cx");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs, int words) {
@@ -1025,29 +1290,36 @@ void M65C02Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs, int wor
     pushWide("wac", n);
     genExpr(rhs);
     popWide("wbc", n);  // wbc = multiplicand, wac = multiplier
-    for (int i = 0; i < n; i++) code_ << "    ldai 0\n    sta " << byteAt("wtmp", i) << "\n";
-    code_ << "    ldai " << (8 * n) << "\n    sta cx\n";
+    for (int i = 0; i < n; i++) {
+        emit("ldai", 0);
+        emit("sta", byteAt("wtmp", i));
+    }
+    emit("ldai", 8 * n);
+    emit("sta", "cx");
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
     std::string Ladd = newLabel(), Lskipadd = newLabel();
-    code_ << Lloop << ":\n    lda cx\n";
+    emitLabel(Lloop);
+    emit("lda", "cx");
     safeBranch("beq", Ldone, Lbody);
-    code_ << Lbody << ":\n";
-    code_ << "    lda " << byteAt("wac", 0) << "\n    andi 1\n";
+    emitLabel(Lbody);
+    emit("lda", byteAt("wac", 0));
+    emit("andi", 1);
     safeBranch("bne", Ladd, Lskipadd);
-    code_ << Ladd << ":\n";
-    code_ << "    clc\n";
+    emitLabel(Ladd);
+    emit("clc");
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wtmp", i) << "\n    adc " << byteAt("wbc", i) << "\n    sta "
-              << byteAt("wtmp", i) << "\n";
+        emit("lda", byteAt("wtmp", i));
+        emit("adc", byteAt("wbc", i));
+        emit("sta", byteAt("wtmp", i));
     }
-    code_ << Lskipadd << ":\n";
-    code_ << "    asl " << byteAt("wbc", 0) << "\n";
-    for (int i = 1; i < n; i++) code_ << "    rol " << byteAt("wbc", i) << "\n";
-    code_ << "    lsr " << byteAt("wac", n - 1) << "\n";
-    for (int i = n - 2; i >= 0; i--) code_ << "    ror " << byteAt("wac", i) << "\n";
-    code_ << "    dec cx\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lskipadd);
+    emit("asl", byteAt("wbc", 0));
+    for (int i = 1; i < n; i++) emit("rol", byteAt("wbc", i));
+    emit("lsr", byteAt("wac", n - 1));
+    for (int i = n - 2; i >= 0; i--) emit("ror", byteAt("wac", i));
+    emit("dec", "cx");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     copyWide("wac", "wtmp", n);
 }
 
@@ -1055,20 +1327,25 @@ void M65C02Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool
                                    int words) {
     int n = 2 * words;
     auto isNegByte = [&](const std::string &lblByte, const char *dst) {
-        code_ << "    lda " << lblByte << "\n    sta cx\n    asl cx\n";
+        emit("lda", lblByte);
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    ldai 0\n    sta " << dst << "\n";
+        emit("ldai", 0);
+        emit("sta", dst);
         safeBranch("bcc", Ldone, Lneg);
-        code_ << Lneg << ":\n    ldai 1\n    sta " << dst << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 1);
+        emit("sta", dst);
+        emitLabel(Ldone);
     };
     auto negateIfFlag = [&](const char *flag, const char *buf) {
         std::string Lskip = newLabel(), Ldo = newLabel();
-        code_ << "    lda " << flag << "\n";
+        emit("lda", flag);
         safeBranch("beq", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negateWideBuffer(buf, n);
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
     };
     genExpr(lhs);
     pushWide("wac", n);
@@ -1080,43 +1357,53 @@ void M65C02Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool
         negateIfFlag("dx", "wbc");
         negateIfFlag("dx+1", "wac");
     }
-    for (int i = 0; i < n; i++) code_ << "    ldai 0\n    sta " << byteAt("wtmp", i) << "\n    sta "
-                                       << byteAt("wtmp2", i) << "\n";
-    code_ << "    ldai " << (8 * n) << "\n    sta cx\n";
+    for (int i = 0; i < n; i++) {
+        emit("ldai", 0);
+        emit("sta", byteAt("wtmp", i));
+        emit("sta", byteAt("wtmp2", i));
+    }
+    emit("ldai", 8 * n);
+    emit("sta", "cx");
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
     std::string Lrestore = newLabel(), Lsetbit = newLabel(), Lshiftq = newLabel();
-    code_ << Lloop << ":\n    lda cx\n";
+    emitLabel(Lloop);
+    emit("lda", "cx");
     safeBranch("beq", Ldone, Lbody);
-    code_ << Lbody << ":\n";
-    code_ << "    asl " << byteAt("wbc", 0) << "\n";
-    for (int i = 1; i < n; i++) code_ << "    rol " << byteAt("wbc", i) << "\n";
-    for (int i = 0; i < n; i++) code_ << "    rol " << byteAt("wtmp", i) << "\n";
-    code_ << "    sec\n";
+    emitLabel(Lbody);
+    emit("asl", byteAt("wbc", 0));
+    for (int i = 1; i < n; i++) emit("rol", byteAt("wbc", i));
+    for (int i = 0; i < n; i++) emit("rol", byteAt("wtmp", i));
+    emit("sec");
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wtmp", i) << "\n    sbc " << byteAt("wac", i) << "\n    sta "
-              << byteAt("wtmp", i) << "\n";
+        emit("lda", byteAt("wtmp", i));
+        emit("sbc", byteAt("wac", i));
+        emit("sta", byteAt("wtmp", i));
     }
     safeBranch("bcs", Lsetbit, Lrestore);
-    code_ << Lrestore << ":\n";
-    code_ << "    clc\n";
+    emitLabel(Lrestore);
+    emit("clc");
     for (int i = 0; i < n; i++) {
-        code_ << "    lda " << byteAt("wtmp", i) << "\n    adc " << byteAt("wac", i) << "\n    sta "
-              << byteAt("wtmp", i) << "\n";
+        emit("lda", byteAt("wtmp", i));
+        emit("adc", byteAt("wac", i));
+        emit("sta", byteAt("wtmp", i));
     }
-    code_ << "    clc\n    jmp " << Lshiftq << "\n";
-    code_ << Lsetbit << ":\n    sec\n";
-    code_ << Lshiftq << ":\n";
-    for (int i = 0; i < n; i++) code_ << "    rol " << byteAt("wtmp2", i) << "\n";
-    code_ << "    dec cx\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("clc");
+    emit("jmp", Lshiftq);
+    emitLabel(Lsetbit);
+    emit("sec");
+    emitLabel(Lshiftq);
+    for (int i = 0; i < n; i++) emit("rol", byteAt("wtmp2", i));
+    emit("dec", "cx");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     if (!isUnsigned) {
-        code_ << "    lda dx\n    eor dx+1\n";
+        emit("lda", "dx");
+        emit("eor", "dx+1");
         std::string Lskip = newLabel(), Ldo = newLabel();
         safeBranch("beq", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negateWideBuffer("wtmp2", n);
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
         negateIfFlag("dx", "wtmp");
     }
     copyWide("wac", wantRemainder ? "wtmp" : "wtmp2", n);
@@ -1124,14 +1411,16 @@ void M65C02Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool
 
 void M65C02Codegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    lda ac\n    ora ac+1\n";
+        emit("lda", "ac");
+        emit("ora", "ac+1");
         return;
     }
     int n = 2 * wordCountOf(e.type);
-    code_ << "    lda " << byteAt("wac", 0) << "\n";
-    for (int i = 1; i < n; i++) code_ << "    ora " << byteAt("wac", i) << "\n";
-    code_ << "    sta ac\n    stzp ac+1\n";
-    code_ << "    lda ac\n";
+    emit("lda", byteAt("wac", 0));
+    for (int i = 1; i < n; i++) emit("ora", byteAt("wac", i));
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("lda", "ac");
 }
 
 void M65C02Codegen::genBinary(const ir::Expr &e) {
@@ -1154,15 +1443,31 @@ void M65C02Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+        emit("lda", "ac");
+        emit("pha");
+        emit("lda", "ac+1");
+        emit("pha");
         genExpr(*e.rhs);
-        code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";  // bc = lhs
+        emit("pla");
+        emit("sta", "bc+1");
+        emit("pla");
+        emit("sta", "bc");  // bc = lhs
         if (op == "+") {
-            code_ << "    clc\n    lda bc\n    adc ac\n    sta ac\n";
-            code_ << "    lda bc+1\n    adc ac+1\n    sta ac+1\n";
+            emit("clc");
+            emit("lda", "bc");
+            emit("adc", "ac");
+            emit("sta", "ac");
+            emit("lda", "bc+1");
+            emit("adc", "ac+1");
+            emit("sta", "ac+1");
         } else {
-            code_ << "    sec\n    lda bc\n    sbc ac\n    sta ac\n";
-            code_ << "    lda bc+1\n    sbc ac+1\n    sta ac+1\n";
+            emit("sec");
+            emit("lda", "bc");
+            emit("sbc", "ac");
+            emit("sta", "ac");
+            emit("lda", "bc+1");
+            emit("sbc", "ac+1");
+            emit("sta", "ac+1");
         }
         return;
     }
@@ -1188,12 +1493,22 @@ void M65C02Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+        emit("lda", "ac");
+        emit("pha");
+        emit("lda", "ac+1");
+        emit("pha");
         genExpr(*e.rhs);
-        code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";
+        emit("pla");
+        emit("sta", "bc+1");
+        emit("pla");
+        emit("sta", "bc");
         const char *insn = (op == "&") ? "and" : (op == "|") ? "ora" : "eor";
-        code_ << "    lda bc\n    " << insn << " ac\n    sta ac\n";
-        code_ << "    lda bc+1\n    " << insn << " ac+1\n    sta ac+1\n";
+        emit("lda", "bc");
+        emit(insn, "ac");
+        emit("sta", "ac");
+        emit("lda", "bc+1");
+        emit(insn, "ac+1");
+        emit("sta", "ac+1");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -1214,31 +1529,44 @@ void M65C02Codegen::genBinary(const ir::Expr &e) {
 // ASL/LSR shift exactly one bit, so this loops `rhs` times.
 void M65C02Codegen::genShiftCore(bool isLeft, bool isUnsigned) {
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    lda cx\n";
+    emitLabel(Lloop);
+    emit("lda", "cx");
     safeBranch("beq", Ldone, Lbody);
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     if (isLeft) {
-        code_ << "    asl ac\n    rol ac+1\n";
+        emit("asl", "ac");
+        emit("rol", "ac+1");
     } else if (isUnsigned) {
-        code_ << "    lsr ac+1\n    ror ac\n";
+        emit("lsr", "ac+1");
+        emit("ror", "ac");
     } else {
         // Re-derives the current sign bit into carry each iteration (via a
         // throwaway copy in bc+1) and rotates it back in at the top,
         // instead of LSR's fixed 0-fill.
-        code_ << "    lda ac+1\n    sta bc+1\n    asl bc+1\n";
-        code_ << "    ror ac+1\n    ror ac\n";
+        emit("lda", "ac+1");
+        emit("sta", "bc+1");
+        emit("asl", "bc+1");
+        emit("ror", "ac+1");
+        emit("ror", "ac");
     }
-    code_ << "    dec cx\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("dec", "cx");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+    emit("lda", "ac");
+    emit("pha");
+    emit("lda", "ac+1");
+    emit("pha");
     genExpr(rhs);
-    code_ << "    lda ac\n    sta cx\n";  // cx = shift count (always small; low byte is enough)
-    code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";
+    emit("lda", "ac");
+    emit("sta", "cx");  // cx = shift count (always small; low byte is enough)
+    emit("pla");
+    emit("sta", "bc+1");
+    emit("pla");
+    emit("sta", "bc");
     copy16("ac", "bc");  // ac = value to shift; bc is dead from here on (free as scratch)
     genShiftCore(isLeft, isUnsigned);
 }
@@ -1248,31 +1576,47 @@ void M65C02Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLe
 // time), ac the accumulating product.
 void M65C02Codegen::genMulCore() {
     zeroZp("ac");  // ac = product = 0
-    code_ << "    ldai 16\n    sta cx\n";
+    emit("ldai", 16);
+    emit("sta", "cx");
     std::string Lloop = newLabel(), Lbody = newLabel(), Ldone = newLabel();
     std::string Ladd = newLabel(), Lskipadd = newLabel();
-    code_ << Lloop << ":\n    lda cx\n";
+    emitLabel(Lloop);
+    emit("lda", "cx");
     safeBranch("beq", Ldone, Lbody);
-    code_ << Lbody << ":\n";
-    code_ << "    lda dx\n    andi 1\n";
+    emitLabel(Lbody);
+    emit("lda", "dx");
+    emit("andi", 1);
     safeBranch("bne", Ladd, Lskipadd);
-    code_ << Ladd << ":\n";
-    code_ << "    clc\n    lda ac\n    adc bc\n    sta ac\n";
-    code_ << "    lda ac+1\n    adc bc+1\n    sta ac+1\n";
-    code_ << Lskipadd << ":\n";
-    code_ << "    asl bc\n    rol bc+1\n";
-    code_ << "    lsr dx+1\n    ror dx\n";
-    code_ << "    dec cx\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Ladd);
+    emit("clc");
+    emit("lda", "ac");
+    emit("adc", "bc");
+    emit("sta", "ac");
+    emit("lda", "ac+1");
+    emit("adc", "bc+1");
+    emit("sta", "ac+1");
+    emitLabel(Lskipadd);
+    emit("asl", "bc");
+    emit("rol", "bc+1");
+    emit("lsr", "dx+1");
+    emit("ror", "dx");
+    emit("dec", "cx");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+    emit("lda", "ac");
+    emit("pha");
+    emit("lda", "ac+1");
+    emit("pha");
     genExpr(rhs);
     copy16("dx", "ac");  // dx = multiplier
-    code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";  // bc = multiplicand
+    emit("pla");
+    emit("sta", "bc+1");
+    emit("pla");
+    emit("sta", "bc");  // bc = multiplicand
     genMulCore();
 }
 
@@ -1281,24 +1625,34 @@ void M65C02Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // times bc was subtracted out of dx before it would've gone negative.
 void M65C02Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
     auto negate16 = [&](const char *lbl) {
-        code_ << "    ldai 0\n    sec\n    sbc " << lbl << "\n    sta " << lbl << "\n";
-        code_ << "    ldai 0\n    sbc " << lbl << "+1\n    sta " << lbl << "+1\n";
+        emit("ldai", 0);
+        emit("sec");
+        emit("sbc", lbl);
+        emit("sta", lbl);
+        emit("ldai", 0);
+        emit("sbc", std::string(lbl) + "+1");
+        emit("sta", std::string(lbl) + "+1");
     };
     auto isNeg = [&](const char *lbl, const char *dst) {
-        code_ << "    lda " << lbl << "+1\n    sta cx\n    asl cx\n";
+        emit("lda", std::string(lbl) + "+1");
+        emit("sta", "cx");
+        emit("asl", "cx");
         std::string Lneg = newLabel(), Ldone = newLabel();
-        code_ << "    ldai 0\n    sta " << dst << "\n";
+        emit("ldai", 0);
+        emit("sta", dst);
         safeBranch("bcc", Ldone, Lneg);
-        code_ << Lneg << ":\n    ldai 1\n    sta " << dst << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lneg);
+        emit("ldai", 1);
+        emit("sta", dst);
+        emitLabel(Ldone);
     };
     auto negateIf = [&](const char *flag, const char *lbl) {
         std::string Lskip = newLabel(), Ldo = newLabel();
-        code_ << "    lda " << flag << "\n";
+        emit("lda", flag);
         safeBranch("beq", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negate16(lbl);
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
     };
     // ptr's low/high byte double as this operation's two sign flags.
     if (!isUnsigned) {
@@ -1309,28 +1663,35 @@ void M65C02Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
     }
     zeroZp("ac");  // ac = quotient = 0
     std::string Lloop = newLabel(), Lcommit = newLabel(), Llt = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
+    emitLabel(Lloop);
     // Tentatively computes dx - bc; carry set means dx >= bc. The low
     // byte's result is stashed on the stack until it's known whether to
     // commit it.
-    code_ << "    sec\n    lda dx\n    sbc bc\n    pha\n";
-    code_ << "    lda dx+1\n    sbc bc+1\n";
+    emit("sec");
+    emit("lda", "dx");
+    emit("sbc", "bc");
+    emit("pha");
+    emit("lda", "dx+1");
+    emit("sbc", "bc+1");
     safeBranch("bcs", Lcommit, Llt);
-    code_ << Lcommit << ":\n";
-    code_ << "    sta dx+1\n    pla\n    sta dx\n";
+    emitLabel(Lcommit);
+    emit("sta", "dx+1");
+    emit("pla");
+    emit("sta", "dx");
     inc16("ac");
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Llt << ":\n";
-    code_ << "    pla\n";  // discard the rejected tentative low byte
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Ldone << ":\n";
+    emit("jmp", Lloop);
+    emitLabel(Llt);
+    emit("pla");  // discard the rejected tentative low byte
+    emit("jmp", Ldone);
+    emitLabel(Ldone);
     if (!isUnsigned) {
-        code_ << "    lda ptr\n    eor ptr+1\n";
+        emit("lda", "ptr");
+        emit("eor", "ptr+1");
         std::string Lskip = newLabel(), Ldo = newLabel();
         safeBranch("beq", Lskip, Ldo);
-        code_ << Ldo << ":\n";
+        emitLabel(Ldo);
         negate16("ac");
-        code_ << Lskip << ":\n";
+        emitLabel(Lskip);
         negateIf("ptr", "dx");
     }
     if (wantRemainder) copy16("ac", "dx");
@@ -1338,10 +1699,16 @@ void M65C02Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
 
 void M65C02Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+    emit("lda", "ac");
+    emit("pha");
+    emit("lda", "ac+1");
+    emit("pha");
     genExpr(rhs);
     copy16("bc", "ac");  // bc = divisor
-    code_ << "    pla\n    sta dx+1\n    pla\n    sta dx\n";  // dx = dividend (running remainder)
+    emit("pla");
+    emit("sta", "dx+1");
+    emit("pla");
+    emit("sta", "dx");  // dx = dividend (running remainder)
     genDivModCore(wantRemainder, isUnsigned);
 }
 
@@ -1361,17 +1728,32 @@ void M65C02Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const
 // a==b; needs no sign handling.
 void M65C02Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs, bool wantEqual) {
     genExpr(lhs);
-    code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+    emit("lda", "ac");
+    emit("pha");
+    emit("lda", "ac+1");
+    emit("pha");
     genExpr(rhs);
-    code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";  // bc = lhs
-    code_ << "    sec\n    lda bc\n    sbc ac\n    sta dx\n";
-    code_ << "    lda bc+1\n    sbc ac+1\n    ora dx\n";
+    emit("pla");
+    emit("sta", "bc+1");
+    emit("pla");
+    emit("sta", "bc");  // bc = lhs
+    emit("sec");
+    emit("lda", "bc");
+    emit("sbc", "ac");
+    emit("sta", "dx");
+    emit("lda", "bc+1");
+    emit("sbc", "ac+1");
+    emit("ora", "dx");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     safeBranch(wantEqual ? "beq" : "bne", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 // Signed 16-bit "a < b" via subtraction: after the final SBC, the sign bit
@@ -1379,24 +1761,38 @@ void M65C02Codegen::emitEqualityCompare(const ir::Expr &lhs, const ir::Expr &rhs
 // (V) - if V is set the apparent sign is backwards, so EOR #$80 fixes it.
 void M65C02Codegen::emitLessCompare(const ir::Expr &a, const ir::Expr &b, bool isUnsigned, bool invert) {
     genExpr(a);
-    code_ << "    lda ac\n    pha\n    lda ac+1\n    pha\n";
+    emit("lda", "ac");
+    emit("pha");
+    emit("lda", "ac+1");
+    emit("pha");
     genExpr(b);
-    code_ << "    pla\n    sta bc+1\n    pla\n    sta bc\n";  // bc = a
-    code_ << "    sec\n    lda bc\n    sbc ac\n    lda bc+1\n    sbc ac+1\n";
+    emit("pla");
+    emit("sta", "bc+1");
+    emit("pla");
+    emit("sta", "bc");  // bc = a
+    emit("sec");
+    emit("lda", "bc");
+    emit("sbc", "ac");
+    emit("lda", "bc+1");
+    emit("sbc", "ac+1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (isUnsigned) {
         safeBranch(invert ? "bcs" : "bcc", Ltrue, Lfalse);
     } else {
         std::string Lfixskip = newLabel();
-        code_ << "    bvc " << Lfixskip << "\n";
-        code_ << "    eori 128\n";
-        code_ << Lfixskip << ":\n";
+        emit("bvc", Lfixskip);
+        emit("eori", 128);
+        emitLabel(Lfixskip);
         safeBranch(invert ? "bpl" : "bmi", Ltrue, Lfalse);
     }
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -1404,14 +1800,18 @@ void M65C02Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     safeBranch("beq", Lfalse, Lcont);
-    code_ << Lcont << ":\n";
+    emitLabel(Lcont);
     genExpr(rhs);
     testTruthy(rhs);
     safeBranch("beq", Lfalse, Ltrue);
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -1419,14 +1819,18 @@ void M65C02Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     safeBranch("bne", Ltrue, Lcont);
-    code_ << Lcont << ":\n";
+    emitLabel(Lcont);
     genExpr(rhs);
     testTruthy(rhs);
     safeBranch("bne", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void M65C02Codegen::genLogicalNot(const ir::Expr &rhs) {
@@ -1434,10 +1838,14 @@ void M65C02Codegen::genLogicalNot(const ir::Expr &rhs) {
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     safeBranch("beq", Ltrue, Lfalse);
-    code_ << Ltrue << ":\n    ldai 1\n    sta ac\n    stzp ac+1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emitLabel(Ltrue);
+    emit("ldai", 1);
+    emit("sta", "ac");
+    emit("stzp", "ac+1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     zeroZp("ac");
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> M65C02Codegen::assembleInProcess(const std::string &asmText,

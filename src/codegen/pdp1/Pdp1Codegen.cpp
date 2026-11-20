@@ -107,15 +107,15 @@ std::string Pdp1Codegen::newLabel() { return "J" + std::to_string(labelCounter_+
 // offset arithmetic, since hardware `sub` does the negating for free.
 void Pdp1Codegen::addConst(long v) {
     if (v >= 0) {
-        code_ << "   add " << literalLabel(v) << "\n";
+        emitRaw(cat("   add ", literalLabel(v)));
     } else {
-        code_ << "   sub " << literalLabel(-v) << "\n";
+        emitRaw(cat("   sub ", literalLabel(-v)));
         normalizeNegZero();
     }
 }
 
 void Pdp1Codegen::negateAC() {
-    code_ << "   cma\n";
+    emitRaw("   cma");
     normalizeNegZero();
 }
 
@@ -130,11 +130,12 @@ void Pdp1Codegen::negateAC() {
 // about which zero it's looking at.
 void Pdp1Codegen::normalizeNegZero() {
     std::string Lclean = newLabel(), Lskip = newLabel();
-    code_ << "   sad __mone\n";
-    code_ << "   jmp " << Lclean << "\n";
-    code_ << "   jmp " << Lskip << "\n";
-    code_ << Lclean << ":\n   lac __zero\n";
-    code_ << Lskip << ":\n";
+    emitRaw("   sad __mone");
+    emitRaw(cat("   jmp ", Lclean));
+    emitRaw(cat("   jmp ", Lskip));
+    emitLabel(Lclean);
+    emitRaw("   lac __zero");
+    emitLabel(Lskip);
 }
 
 void Pdp1Codegen::genWideUnsupported(int line, const std::string &what) {
@@ -162,8 +163,8 @@ std::string Pdp1Codegen::generate(const ir::Program &prog, bool objectMode) {
 
     if (mainFn) {
         size_t rangeStart = static_cast<size_t>(code_.tellp());
-        code_ << "   jsp " << label(mainFn) << "  ; call main\n";
-        code_ << "   hlt\n";
+        emitRaw(cat("   jsp ", label(mainFn), "  ; call main"));
+        emitRaw("   hlt");
         codeRanges.push_back({mainFn->sourceFile, rangeStart, static_cast<size_t>(code_.tellp())});
     }
 
@@ -171,11 +172,11 @@ std::string Pdp1Codegen::generate(const ir::Program &prog, bool objectMode) {
         size_t fCodeStart = static_cast<size_t>(code_.tellp());
         size_t fTrailerStart = trailer_.size();
         if (fb.func->hasAddress) {
-            code_ << "__saveloc = .\n";
-            code_ << ". = ..+" << fb.func->address << "\n";
+            emitRaw("__saveloc = .");
+            emitRaw(cat(". = ..+", fb.func->address));
         }
         genFunction(fb);
-        if (fb.func->hasAddress) code_ << ". = __saveloc\n";
+        if (fb.func->hasAddress) emitRaw(". = __saveloc");
         codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
         trailerRanges.push_back({fb.func->sourceFile, fTrailerStart, trailer_.size()});
     }
@@ -239,10 +240,10 @@ std::map<std::string, std::string> Pdp1Codegen::perFileAsm() const { return perF
 
 void Pdp1Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
-    code_ << curFunctionLabel_ << ":  ; fn " << fn.func->sourceName << "\n";
+    emitRaw(cat(curFunctionLabel_, ":  ; fn ", fn.func->sourceName));
     // `jsp` just set AC to the return address and jumped here - it must be
     // tucked away before anything else touches AC (see the class comment).
-    code_ << "   dac " << retAddrCell() << "\n";
+    emitRaw(cat("   dac ", retAddrCell()));
     trailer_.push_back(retAddrCell() + ": 0");
 
     currentFunctionIsLeaf_ = computeIsLeaf(fn.func, fn.body.get());
@@ -258,114 +259,114 @@ void Pdp1Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void Pdp1Codegen::pushAC() {
-    code_ << "   dac __stmp\n";
-    code_ << "   lac __sp\n";
-    code_ << "   sub __one\n";
+    emitRaw("   dac __stmp");
+    emitRaw("   lac __sp");
+    emitRaw("   sub __one");
     normalizeNegZero();
-    code_ << "   dac __sp\n";
-    code_ << "   lac __stmp\n";
-    code_ << "   dac __sp i\n";
+    emitRaw("   dac __sp");
+    emitRaw("   lac __stmp");
+    emitRaw("   dac __sp i");
 }
 
 void Pdp1Codegen::popAC() {
-    code_ << "   lac __sp i\n";
-    code_ << "   dac __stmp\n";
-    code_ << "   lac __sp\n";
-    code_ << "   add __one\n";
-    code_ << "   dac __sp\n";
-    code_ << "   lac __stmp\n";
+    emitRaw("   lac __sp i");
+    emitRaw("   dac __stmp");
+    emitRaw("   lac __sp");
+    emitRaw("   add __one");
+    emitRaw("   dac __sp");
+    emitRaw("   lac __stmp");
 }
 
 // Entry's "dac retAddrCell()" (genFunction()) already captured the return
 // address; from here this is the same shape as pdp7's own prologue.
 void Pdp1Codegen::emitPrologue(const ir::Function *fn) {
-    code_ << "   lac " << retAddrCell() << "\n";
+    emitRaw(cat("   lac ", retAddrCell()));
     pushAC();
-    code_ << "   lac __fp\n";
+    emitRaw("   lac __fp");
     pushAC();
-    code_ << "   lac __sp\n";
-    code_ << "   dac __fp\n";
+    emitRaw("   lac __sp");
+    emitRaw("   dac __fp");
     if (fn->frameSize > 0) {
-        code_ << "   lac __fp\n";
+        emitRaw("   lac __fp");
         addConst(-static_cast<long>(fn->frameSize));
-        code_ << "   dac __sp\n";
+        emitRaw("   dac __sp");
     }
 }
 
 void Pdp1Codegen::emitEpilogueAndReturn(bool hasValue) {
-    if (hasValue) code_ << "   dac __retval\n";
-    code_ << "   lac __fp\n";
-    code_ << "   dac __sp\n";
+    if (hasValue) emitRaw("   dac __retval");
+    emitRaw("   lac __fp");
+    emitRaw("   dac __sp");
     popAC();
-    code_ << "   dac __fp\n";
+    emitRaw("   dac __fp");
     popAC();
-    code_ << "   dac " << retAddrCell() << "\n";
-    if (hasValue) code_ << "   lac __retval\n";
-    code_ << "   jmp " << retAddrCell() << " i\n";
+    emitRaw(cat("   dac ", retAddrCell()));
+    if (hasValue) emitRaw("   lac __retval");
+    emitRaw(cat("   jmp ", retAddrCell(), " i"));
 }
 
 void Pdp1Codegen::emitLeafParamBinding(const ir::Function *fn) {
     for (ir::Slot *p : fn->params) {
-        code_ << "   lac __sp\n";
+        emitRaw("   lac __sp");
         addConst(p->paramIndex);
-        code_ << "   dac __addr\n";
-        code_ << "   lac __addr i\n";
+        emitRaw("   dac __addr");
+        emitRaw("   lac __addr i");
         trailer_.push_back(leafLabel(p) + ": 0");
-        code_ << "   dac " << leafLabel(p) << "\n";
+        emitRaw(cat("   dac ", leafLabel(p)));
     }
 }
 
 void Pdp1Codegen::emitLeafReturn(bool hasValue) {
     (void)hasValue;
-    code_ << "   jmp " << retAddrCell() << " i\n";
+    emitRaw(cat("   jmp ", retAddrCell(), " i"));
 }
 
 void Pdp1Codegen::emitLoadSlotAddress(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "   law " << label(slot) << "\n";
+        emitRaw(cat("   law ", label(slot)));
         return;
     }
     if (currentFunctionIsLeaf_) {
-        code_ << "   law " << leafLabel(slot) << "\n";
+        emitRaw(cat("   law ", leafLabel(slot)));
         return;
     }
     long offset = (slot->kind == ir::SlotKind::Param) ? static_cast<long>(slot->frameOffset)
                                                        : -localBaseOffset(slot);
-    code_ << "   lac __fp\n";
+    emitRaw("   lac __fp");
     addConst(offset);
 }
 
 void Pdp1Codegen::emitLoadSlot(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "   lac " << label(slot) << "\n";
+        emitRaw(cat("   lac ", label(slot)));
         narrowAC(slot->type);
         return;
     }
     if (currentFunctionIsLeaf_) {
-        code_ << "   lac " << leafLabel(slot) << "\n";
+        emitRaw(cat("   lac ", leafLabel(slot)));
         narrowAC(slot->type);
         return;
     }
     emitLoadSlotAddress(slot);
-    code_ << "   dac __addr\n";
-    code_ << "   lac __addr i\n";
+    emitRaw("   dac __addr");
+    emitRaw("   lac __addr i");
     narrowAC(slot->type);
 }
 
 void Pdp1Codegen::emitStoreSlot(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "   dac " << label(slot) << "\n";
+        emitRaw(cat("   dac ", label(slot)));
         return;
     }
     if (currentFunctionIsLeaf_) {
-        code_ << "   dac " << leafLabel(slot) << "\n";
+        emitRaw(cat("   dac ", leafLabel(slot)));
         return;
     }
-    code_ << "   dac __stmp\n";
+    emitRaw("   dac __stmp");
     emitLoadSlotAddress(slot);
-    code_ << "   dac __addr\n";
-    code_ << "   lac __stmp\n";
-    code_ << "   dac __addr i\n";
+    emitRaw("   dac __addr");
+    emitRaw("   lac __stmp");
+    emitRaw("   dac __addr i");
 }
 
 void Pdp1Codegen::emitSlotBaseAddress(const ir::Slot *slot) {
@@ -388,36 +389,36 @@ void Pdp1Codegen::emitLocalArrayInit(const ir::Slot *slot) {
                 // not pre-mask `elem.value` with a plain two's-complement
                 // `&0777777` here, which would bake in the wrong bit
                 // pattern for a negative value before that conversion runs.
-                code_ << "   lac " << literalLabel(elem.value >> (18 * j)) << "\n";
+                emitRaw(cat("   lac ", literalLabel(elem.value >> (18 * j))));
             } else if (j > 0) {
-                code_ << "   lac __zero\n";
+                emitRaw("   lac __zero");
             } else if (elem.slot) {
                 emitLoadSlotAddress(elem.slot);
             } else {
-                code_ << "   law " << label(elem.func) << "\n";
+                emitRaw(cat("   law ", label(elem.func)));
             }
-            code_ << "   dac __stmp\n";
-            code_ << "   lac __fp\n";
+            emitRaw("   dac __stmp");
+            emitRaw("   lac __fp");
             long offset = -localBaseOffset(slot) + static_cast<long>(i) * elemW + j;
             addConst(offset);
-            code_ << "   dac __addr\n";
-            code_ << "   lac __stmp\n";
-            code_ << "   dac __addr i\n";
+            emitRaw("   dac __addr");
+            emitRaw("   lac __stmp");
+            emitRaw("   dac __addr i");
         }
     }
 }
 
 void Pdp1Codegen::storeThroughStackedAddress() {
-    code_ << "   dac __stmp2\n";
+    emitRaw("   dac __stmp2");
     popAC();
-    code_ << "   dac __addr\n";
-    code_ << "   lac __stmp2\n";
-    code_ << "   dac __addr i\n";
+    emitRaw("   dac __addr");
+    emitRaw("   lac __stmp2");
+    emitRaw("   dac __addr i");
 }
 
 std::string Pdp1Codegen::popAddressIntoScratch() {
     popAC();
-    code_ << "   dac __addr\n";
+    emitRaw("   dac __addr");
     return "__addr";
 }
 
@@ -433,36 +434,36 @@ void Pdp1Codegen::genStmt(const ir::Stmt &s) {
             genCondBranch(*s.cond, s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "   jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emitRaw(cat("   jmp ", Ldone));
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genCondBranch(*s.cond, Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "   jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emitRaw(cat("   jmp ", Lstart));
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "   jmp " << loopLabels_.back().second << "\n";
+            emitRaw(cat("   jmp ", loopLabels_.back().second));
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "   jmp " << loopLabels_.back().first << "\n";
+            emitRaw(cat("   jmp ", loopLabels_.back().first));
             return;
         }
         case ir::StmtKind::Return: {
@@ -487,7 +488,7 @@ void Pdp1Codegen::genStmt(const ir::Stmt &s) {
                 if (s.initOrReturnOrExpr) {
                     genExpr(*s.initOrReturnOrExpr);
                 } else {
-                    code_ << "   lac __zero\n";
+                    emitRaw("   lac __zero");
                 }
                 emitStoreSlot(s.declSlot);
             }
@@ -500,16 +501,15 @@ void Pdp1Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "   jmp " << irLabel(s.labelId) << "\n";
+            emitRaw(cat("   jmp ", irLabel(s.labelId)));
             return;
         }
     }
@@ -532,28 +532,34 @@ void Pdp1Codegen::narrowAC(Type to) {
     if (isPointer(to)) return;
     if (to.base != BaseType::Char) return;
     std::string Lneg = newLabel(), Ldone = newLabel();
-    code_ << "   sma\n   jmp " << Ldone << "\n   jmp " << Lneg << "\n";
-    code_ << Lneg << ":\n";
-    code_ << "   cma\n";                                // AC = |V|
-    code_ << "   and " << literalLabel(0377) << "\n";  // AC = |V| mod 256
-    code_ << "   dac __stmp\n";
-    code_ << "   lac " << literalLabel(256) << "\n";
-    code_ << "   sub __stmp\n";  // 256 - (|V| mod 256); 256 itself (when the
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", Ldone));
+    emitRaw(cat("   jmp ", Lneg));
+    emitLabel(Lneg);
+    emitRaw("   cma");                                // AC = |V|
+    emitRaw(cat("   and ", literalLabel(0377)));  // AC = |V| mod 256
+    emitRaw("   dac __stmp");
+    emitRaw(cat("   lac ", literalLabel(256)));
+    emitRaw("   sub __stmp");  // 256 - (|V| mod 256); 256 itself (when the
                                  // mod result was 0) masks to 0 below, still
                                  // correct
     normalizeNegZero();
-    code_ << Ldone << ":\n";
-    code_ << "   and " << literalLabel(0377) << "\n";
+    emitLabel(Ldone);
+    emitRaw(cat("   and ", literalLabel(0377)));
     if (to.isUnsigned) return;
-    code_ << "   dac __stmp\n";
-    code_ << "   and " << literalLabel(0200) << "\n";
+    emitRaw("   dac __stmp");
+    emitRaw(cat("   and ", literalLabel(0200)));
     std::string Lhineg = newLabel(), Lhipos = newLabel(), Lhidone = newLabel();
-    code_ << "   sza\n   jmp " << Lhineg << "\n   jmp " << Lhipos << "\n";
-    code_ << Lhineg << ":\n   lac __stmp\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Lhineg));
+    emitRaw(cat("   jmp ", Lhipos));
+    emitLabel(Lhineg);
+    emitRaw("   lac __stmp");
     addConst(-256);
-    code_ << "   jmp " << Lhidone << "\n";
-    code_ << Lhipos << ":\n   lac __stmp\n";
-    code_ << Lhidone << ":\n";
+    emitRaw(cat("   jmp ", Lhidone));
+    emitLabel(Lhipos);
+    emitRaw("   lac __stmp");
+    emitLabel(Lhidone);
 }
 
 void Pdp1Codegen::genExpr(const ir::Expr &e) {
@@ -562,7 +568,7 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::FloatLit:
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
-            code_ << "   lac " << literalLabel(e.intValue) << "\n";
+            emitRaw(cat("   lac ", literalLabel(e.intValue)));
             return;
         }
         case ir::ExprKind::Var: {
@@ -579,9 +585,9 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
                     computeElementAddressAC(e.slot, *e.lhs);
                     std::string T = allocTemp();
                     declareTemp(T);
-                    code_ << "   dac " << T << "\n";
+                    emitRaw(cat("   dac ", T));
                     genExpr(*e.rhs);
-                    code_ << "   dac " << T << " i\n";
+                    emitRaw(cat("   dac ", T, " i"));
                     return;
                 }
                 computeElementAddress(e.slot, *e.lhs);
@@ -601,17 +607,17 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);
-                code_ << "   dac __addr\n";
-                code_ << "   lac __addr i\n";
+                emitRaw("   dac __addr");
+                emitRaw("   lac __addr i");
             } else if (e.op == "~") {
                 // C's `~x` is the VALUE -x-1, same on every target
                 // regardless of the hardware's own complement scheme -
                 // `cma` alone only gives -x here (one's-complement
                 // negate), so the extra `sub __one` finishes it: -x-1.
                 genExpr(*e.rhs);
-                code_ << "   cma\n";
+                emitRaw("   cma");
                 normalizeNegZero();
-                code_ << "   sub __one\n";
+                emitRaw("   sub __one");
                 normalizeNegZero();
             } else {
                 genAddrOf(*e.rhs);
@@ -623,9 +629,9 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
             if (isCallFree(*e.rhs)) {
                 std::string T = allocTemp();
                 declareTemp(T);
-                code_ << "   dac " << T << "\n";
+                emitRaw(cat("   dac ", T));
                 genExpr(*e.rhs);
-                code_ << "   dac " << T << " i\n";
+                emitRaw(cat("   dac ", T, " i"));
                 return;
             }
             pushAC();
@@ -669,10 +675,10 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
             std::string Ldone = newLabel();
             genCondBranch(*e.lhs, Lelse);
             genExpr(*e.rhs);
-            code_ << "   jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emitRaw(cat("   jmp ", Ldone));
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Call: {
@@ -682,20 +688,20 @@ void Pdp1Codegen::genExpr(const ir::Expr &e) {
                 pushAC();
                 totalWords += 1;
             }
-            code_ << "   jsp " << label(e.func) << "\n";
+            emitRaw(cat("   jsp ", label(e.func)));
             if (totalWords > 0) {
-                code_ << "   dac __retval\n";
-                code_ << "   lac __sp\n";
+                emitRaw("   dac __retval");
+                emitRaw("   lac __sp");
                 addConst(static_cast<long>(totalWords));
-                code_ << "   dac __sp\n";
-                code_ << "   lac __retval\n";
+                emitRaw("   dac __sp");
+                emitRaw("   lac __retval");
             }
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);
-            code_ << "   dac __addr\n";
-            code_ << "   jsp __addr i\n";
+            emitRaw("   dac __addr");
+            emitRaw("   jsp __addr i");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -764,7 +770,7 @@ std::string Pdp1Codegen::genOperandPair(const ir::Expr &lhs, const ir::Expr &rhs
         }
     }
     std::string cell = dest.empty() ? "__stmp2" : dest;
-    auto finishRhs = [&]() { code_ << "   dac " << cell << "\n"; };
+    auto finishRhs = [&]() { emitRaw(cat("   dac ", cell)); };
     if (simpleCell(lhs)) {
         genExpr(rhs);
         finishRhs();
@@ -775,10 +781,10 @@ std::string Pdp1Codegen::genOperandPair(const ir::Expr &lhs, const ir::Expr &rhs
     if (isCallFree(rhs)) {
         std::string T = allocTemp();
         declareTemp(T);
-        code_ << "   dac " << T << "\n";
+        emitRaw(cat("   dac ", T));
         genExpr(rhs);
         finishRhs();
-        code_ << "   lac " << T << "\n";
+        emitRaw(cat("   lac ", T));
         return cell;
     }
     pushAC();
@@ -805,18 +811,18 @@ void Pdp1Codegen::computeElementAddressAC(const ir::Slot *slot, const ir::Expr &
     if (elemW > 1) {
         std::string Tidx = allocTemp();
         declareTemp(Tidx);
-        code_ << "   dac " << Tidx << "\n";
-        for (int i = 1; i < elemW; i++) code_ << "   add " << Tidx << "\n";
+        emitRaw(cat("   dac ", Tidx));
+        for (int i = 1; i < elemW; i++) emitRaw(cat("   add ", Tidx));
     }
-    code_ << "   dac __stmp2\n";
+    emitRaw("   dac __stmp2");
     emitSlotBaseAddress(slot);
-    code_ << "   add __stmp2\n";
+    emitRaw("   add __stmp2");
 }
 
 void Pdp1Codegen::genIndex(const ir::Expr &e) {
     computeElementAddressAC(e.slot, *e.lhs);
-    code_ << "   dac __addr\n";
-    code_ << "   lac __addr i\n";
+    emitRaw("   dac __addr");
+    emitRaw("   lac __addr i");
 }
 
 void Pdp1Codegen::genAddrOf(const ir::Expr &operand) {
@@ -829,7 +835,7 @@ void Pdp1Codegen::genAddrOf(const ir::Expr &operand) {
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "   law " << label(operand.func) << "\n";
+        emitRaw(cat("   law ", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -838,23 +844,23 @@ void Pdp1Codegen::genAddrOf(const ir::Expr &operand) {
 std::string Pdp1Codegen::prepareCompoundRhs(const ir::Expr &e) {
     const std::string &op = e.op;
     if (op == "+" || op == "-" || op == "&" || op == "^" || op == "|") {
-        code_ << "   dac __stmp2\n";
+        emitRaw("   dac __stmp2");
         return "__stmp2";
     }
     if (op == "*") {
         std::string Tr = allocTemp();
         declareTemp(Tr);
-        code_ << "   dac " << Tr << "\n";
+        emitRaw(cat("   dac ", Tr));
         return Tr;
     }
     if (op == "/" || op == "%") {
-        code_ << "   dac __dm_b\n";
+        emitRaw("   dac __dm_b");
         return "__dm_b";
     }
     if (op == "<<" || op == ">>") {
         std::string N = allocTemp();
         declareTemp(N);
-        code_ << "   dac " << N << "\n";
+        emitRaw(cat("   dac ", N));
         return N;
     }
     err(e.line, "internal: unhandled compound-assignment operator '" + op + "'");
@@ -863,51 +869,57 @@ std::string Pdp1Codegen::prepareCompoundRhs(const ir::Expr &e) {
 void Pdp1Codegen::finishCompoundOp(const ir::Expr &e, const std::string &rhsCell) {
     const std::string &op = e.op;
     if (op == "+") {
-        code_ << "   add " << rhsCell << "\n";
+        emitRaw(cat("   add ", rhsCell));
         return;
     }
     if (op == "-") {
-        code_ << "   sub " << rhsCell << "\n";
+        emitRaw(cat("   sub ", rhsCell));
         normalizeNegZero();
         return;
     }
     if (op == "&" || op == "^") {
-        code_ << "   " << (op == "&" ? "and" : "xor") << " " << rhsCell << "\n";
+        emitRaw(cat("   ", (op == "&" ? "and" : "xor"), " ", rhsCell));
         return;
     }
     if (op == "|") {
-        code_ << "   ior " << rhsCell << "\n";
+        emitRaw(cat("   ior ", rhsCell));
         return;
     }
     if (op == "*") {
         needMul_ = true;
-        code_ << "   dac __mul_a\n   lac " << rhsCell << "\n   dac __mul_b\n   jsp __mul\n";
+        emitRaw("   dac __mul_a");
+        emitRaw(cat("   lac ", rhsCell));
+        emitRaw("   dac __mul_b");
+        emitRaw("   jsp __mul");
         return;
     }
     if (op == "/" || op == "%") {
-        code_ << "   dac __dm_a\n";
+        emitRaw("   dac __dm_a");
         callDivMod(e.type.isUnsigned);
-        if (op == "%") code_ << "   lac __dm_a\n";
+        if (op == "%") emitRaw("   lac __dm_a");
         return;
     }
     if (op == "<<" || op == ">>") {
         std::string V = allocTemp();
         declareTemp(V);
-        code_ << "   dac " << V << "\n";
+        emitRaw(cat("   dac ", V));
         std::string Lstart = newLabel(), Lbody = newLabel(), Lend = newLabel();
-        code_ << Lstart << ":\n";
-        code_ << "   lac " << rhsCell << "\n";
-        code_ << "   sza\n   jmp " << Lbody << "\n   jmp " << Lend << "\n";
-        code_ << Lbody << ":\n";
-        code_ << "   lac " << V << "\n";
+        emitLabel(Lstart);
+        emitRaw(cat("   lac ", rhsCell));
+        emitRaw("   sza");
+        emitRaw(cat("   jmp ", Lbody));
+        emitRaw(cat("   jmp ", Lend));
+        emitLabel(Lbody);
+        emitRaw(cat("   lac ", V));
         emitShiftOne(op, e.type.isUnsigned);
-        code_ << "   dac " << V << "\n";
-        code_ << "   lac " << rhsCell << "\n   sub __one\n";
+        emitRaw(cat("   dac ", V));
+        emitRaw(cat("   lac ", rhsCell));
+        emitRaw("   sub __one");
         normalizeNegZero();
-        code_ << "   dac " << rhsCell << "\n";
-        code_ << "   jmp " << Lstart << "\n";
-        code_ << Lend << ":\n";
-        code_ << "   lac " << V << "\n";
+        emitRaw(cat("   dac ", rhsCell));
+        emitRaw(cat("   jmp ", Lstart));
+        emitLabel(Lend);
+        emitRaw(cat("   lac ", V));
         return;
     }
     err(e.line, "internal: unhandled compound-assignment operator '" + op + "'");
@@ -916,14 +928,14 @@ void Pdp1Codegen::finishCompoundOp(const ir::Expr &e, const std::string &rhsCell
 void Pdp1Codegen::genCompoundThroughCell(const ir::Expr &e) {
     std::string T = allocTemp();
     declareTemp(T);
-    code_ << "   dac " << T << "\n";
+    emitRaw(cat("   dac ", T));
     genExpr(*e.rhs);
     std::string rhsCell = prepareCompoundRhs(e);
-    code_ << "   lac " << T << " i\n";
+    emitRaw(cat("   lac ", T, " i"));
     if (e.yieldOld) pushAC();
     finishCompoundOp(e, rhsCell);
     narrowAC(e.type);
-    code_ << "   dac " << T << " i\n";
+    emitRaw(cat("   dac ", T, " i"));
     if (e.yieldOld) popAC();
 }
 
@@ -931,11 +943,11 @@ void Pdp1Codegen::genCompoundThroughStackedAddress(const ir::Expr &e) {
     genExpr(*e.rhs);
     std::string rhsCell = prepareCompoundRhs(e);
     std::string addr = popAddressIntoScratch();
-    code_ << "   lac " << addr << " i\n";
+    emitRaw(cat("   lac ", addr, " i"));
     if (e.yieldOld) pushAC();
     finishCompoundOp(e, rhsCell);
     narrowAC(e.type);
-    code_ << "   dac " << addr << " i\n";
+    emitRaw(cat("   dac ", addr, " i"));
     if (e.yieldOld) popAC();
 }
 
@@ -943,12 +955,12 @@ void Pdp1Codegen::genBinary(const ir::Expr &e) {
     const std::string &op = e.op;
     if (op == "+") {
         std::string rhsCell = genOperandPair(*e.lhs, *e.rhs, RhsXform::None);
-        code_ << "   add " << rhsCell << "\n";
+        emitRaw(cat("   add ", rhsCell));
         return;
     }
     if (op == "-") {
         std::string rhsCell = genOperandPair(*e.lhs, *e.rhs, RhsXform::None);
-        code_ << "   sub " << rhsCell << "\n";
+        emitRaw(cat("   sub ", rhsCell));
         normalizeNegZero();
         return;
     }
@@ -996,11 +1008,16 @@ void Pdp1Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const i
 void Pdp1Codegen::emitEq(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) {
     std::string rhsCell = genOperandPair(lhs, rhs, RhsXform::None);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "   sad " << rhsCell << "\n   jmp " << Ltrue << "\n   jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n   lac __one\n   jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n   lac __zero\n";
-    code_ << Ldone << ":\n";
-    if (negate) code_ << "   xor __one\n";
+    emitRaw(cat("   sad ", rhsCell));
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Ltrue);
+    emitRaw("   lac __one");
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lfalse);
+    emitRaw("   lac __zero");
+    emitLabel(Ldone);
+    if (negate) emitRaw("   xor __one");
 }
 
 // a<b via `sub`+sign-test when same-sign (safe: same-sign magnitudes can't
@@ -1011,13 +1028,13 @@ void Pdp1Codegen::emitEq(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
 void Pdp1Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) {
     bool unsignedCmp = lhs.type.isUnsigned;
     auto flip = [&]() {
-        if (unsignedCmp) code_ << "   xor __signbit\n";
+        if (unsignedCmp) emitRaw("   xor __signbit");
     };
     std::string A, B;
     auto toTemp = [&]() {
         std::string T = allocTemp();
         declareTemp(T);
-        code_ << "   dac " << T << "\n";
+        emitRaw(cat("   dac ", T));
         return T;
     };
     if (isCallFree(rhs)) {
@@ -1051,17 +1068,35 @@ void Pdp1Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
     // skip jumps over X, landing on Y) - every branch below is ordered to
     // that rule, not to the "jmp true-case then jmp false-case" shape
     // used elsewhere in this file for an `sza`/`sad` test.
-    code_ << "   lac " << A << "\n   sma\n   jmp " << LaPos << "\n   jmp " << LaNeg << "\n";
+    emitRaw(cat("   lac ", A));
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", LaPos));
+    emitRaw(cat("   jmp ", LaNeg));
     // A<0: B>=0 decides A<B directly (true); B<0 (same sign) needs Lsub.
-    code_ << LaNeg << ":\n   lac " << B << "\n   sma\n   jmp " << Ltrue << "\n   jmp " << Lsub << "\n";
+    emitLabel(LaNeg);
+    emitRaw(cat("   lac ", B));
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lsub));
     // A>=0: B>=0 (same sign) needs Lsub; B<0 decides A<B directly (false).
-    code_ << LaPos << ":\n   lac " << B << "\n   sma\n   jmp " << Lsub << "\n   jmp " << Lfalse << "\n";
-    code_ << Lsub << ":\n   lac " << A << "\n   sub " << B << "\n";
+    emitLabel(LaPos);
+    emitRaw(cat("   lac ", B));
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", Lsub));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Lsub);
+    emitRaw(cat("   lac ", A));
+    emitRaw(cat("   sub ", B));
     normalizeNegZero();
-    code_ << "   sma\n   jmp " << Lfalse << "\n   jmp " << Ltrue << "\n";
-    code_ << Ltrue << ":\n   lac " << (negate ? "__zero" : "__one") << "\n   jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n   lac " << (negate ? "__one" : "__zero") << "\n";
-    code_ << Ldone << ":\n";
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", Lfalse));
+    emitRaw(cat("   jmp ", Ltrue));
+    emitLabel(Ltrue);
+    emitRaw(cat("   lac ", (negate ? "__zero" : "__one")));
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lfalse);
+    emitRaw(cat("   lac ", (negate ? "__one" : "__zero")));
+    emitLabel(Ldone);
 }
 
 void Pdp1Codegen::genCondBranch(const ir::Expr &cond, const std::string &Lfalse) {
@@ -1072,41 +1107,62 @@ void Pdp1Codegen::genCondBranch(const ir::Expr &cond, const std::string &Lfalse)
     }
     genExpr(cond);
     std::string Ltrue = newLabel();
-    code_ << "   sza\n   jmp " << Ltrue << "\n   jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Ltrue);
 }
 
 void Pdp1Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Lcheckb = newLabel(), Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "   sza\n   jmp " << Lcheckb << "\n   jmp " << Lfalse << "\n";
-    code_ << Lcheckb << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Lcheckb));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Lcheckb);
     genExpr(rhs);
-    code_ << "   sza\n   jmp " << Ltrue << "\n   jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n   lac __one\n   jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n   lac __zero\n";
-    code_ << Ldone << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Ltrue);
+    emitRaw("   lac __one");
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lfalse);
+    emitRaw("   lac __zero");
+    emitLabel(Ldone);
 }
 
 void Pdp1Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Ltrue = newLabel(), Lcheckb = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "   sza\n   jmp " << Ltrue << "\n   jmp " << Lcheckb << "\n";
-    code_ << Lcheckb << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lcheckb));
+    emitLabel(Lcheckb);
     genExpr(rhs);
-    code_ << "   sza\n   jmp " << Ltrue << "\n   jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n   lac __one\n   jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n   lac __zero\n";
-    code_ << Ldone << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Ltrue));
+    emitRaw(cat("   jmp ", Lfalse));
+    emitLabel(Ltrue);
+    emitRaw("   lac __one");
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lfalse);
+    emitRaw("   lac __zero");
+    emitLabel(Ldone);
 }
 
 void Pdp1Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "   sza\n   jmp " << Lfalse << "\n   jmp " << Ltrue << "\n";
-    code_ << Ltrue << ":\n   lac __one\n   jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n   lac __zero\n";
-    code_ << Ldone << ":\n";
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Lfalse));
+    emitRaw(cat("   jmp ", Ltrue));
+    emitLabel(Ltrue);
+    emitRaw("   lac __one");
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lfalse);
+    emitRaw("   lac __zero");
+    emitLabel(Ldone);
 }
 
 // Software sign-magnitude multiply (see pdp1RuntimeAsm()'s `__mul`): this
@@ -1118,8 +1174,8 @@ void Pdp1Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     // into __mul_b; AC only needs to be stashed into __mul_a to complete
     // the pair.
     genOperandPair(lhs, rhs, RhsXform::None, "__mul_b");
-    code_ << "   dac __mul_a\n";
-    code_ << "   jsp __mul\n";
+    emitRaw("   dac __mul_a");
+    emitRaw("   jsp __mul");
 }
 
 void Pdp1Codegen::ensureRuntimeRoutines() {
@@ -1129,18 +1185,18 @@ void Pdp1Codegen::ensureRuntimeRoutines() {
 
 void Pdp1Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder) {
     genOperandPair(lhs, rhs, RhsXform::None, "__dm_b");
-    code_ << "   dac __dm_a\n";
+    emitRaw("   dac __dm_a");
     callDivMod(lhs.type.isUnsigned);
-    if (wantRemainder) code_ << "   lac __dm_a\n";
+    if (wantRemainder) emitRaw("   lac __dm_a");
 }
 
 void Pdp1Codegen::callDivMod(bool isUnsigned) {
     if (isUnsigned) {
         needUDivMod_ = true;
-        code_ << "   jsp __udivmod\n";
+        emitRaw("   jsp __udivmod");
     } else {
         needDivMod_ = true;
-        code_ << "   jsp __divmod\n";
+        emitRaw("   jsp __divmod");
     }
 }
 
@@ -1157,7 +1213,7 @@ void Pdp1Codegen::callDivMod(bool isUnsigned) {
 void Pdp1Codegen::genBitwise(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string rhsCell = genOperandPair(lhs, rhs, RhsXform::None);
     const char *instr = op == "&" ? "and" : (op == "^" ? "xor" : "ior");
-    code_ << "   " << instr << " " << rhsCell << "\n";
+    emitRaw(cat("   ", instr, " ", rhsCell));
 }
 
 // A single bit of shift/rotate, purely as bit manipulation (see
@@ -1166,18 +1222,27 @@ void Pdp1Codegen::genBitwise(const std::string &op, const ir::Expr &lhs, const i
 // complement -0 concerns that apply elsewhere in this file apply here.
 void Pdp1Codegen::emitShiftOne(const std::string &op, bool isUnsigned) {
     if (op == "<<") {
-        code_ << "   ral\n   and __notbit0\n";
+        emitRaw("   ral");
+        emitRaw("   and __notbit0");
         return;
     }
     if (isUnsigned) {
-        code_ << "   rar\n   and __notsignbit\n";
+        emitRaw("   rar");
+        emitRaw("   and __notsignbit");
         return;
     }
     std::string Lneg = newLabel(), Lpos = newLabel(), Ldone = newLabel();
-    code_ << "   sma\n   jmp " << Lpos << "\n   jmp " << Lneg << "\n";
-    code_ << Lneg << ":\n   rar\n   ior __signbit\n   jmp " << Ldone << "\n";
-    code_ << Lpos << ":\n   rar\n   and __notsignbit\n";
-    code_ << Ldone << ":\n";
+    emitRaw("   sma");
+    emitRaw(cat("   jmp ", Lpos));
+    emitRaw(cat("   jmp ", Lneg));
+    emitLabel(Lneg);
+    emitRaw("   rar");
+    emitRaw("   ior __signbit");
+    emitRaw(cat("   jmp ", Ldone));
+    emitLabel(Lpos);
+    emitRaw("   rar");
+    emitRaw("   and __notsignbit");
+    emitLabel(Ldone);
 }
 
 void Pdp1Codegen::emitConstantShift(const std::string &op, long count, bool isUnsigned) {
@@ -1199,21 +1264,24 @@ void Pdp1Codegen::genShift(const std::string &op, const ir::Expr &lhs, const ir:
     genOperandPair(lhs, rhs, RhsXform::None, N);
     std::string V = allocTemp();
     declareTemp(V);
-    code_ << "   dac " << V << "\n";
+    emitRaw(cat("   dac ", V));
     std::string Lstart = newLabel(), Lbody = newLabel(), Lend = newLabel();
-    code_ << Lstart << ":\n";
-    code_ << "   lac " << N << "\n";
-    code_ << "   sza\n   jmp " << Lbody << "\n   jmp " << Lend << "\n";
-    code_ << Lbody << ":\n";
-    code_ << "   lac " << V << "\n";
+    emitLabel(Lstart);
+    emitRaw(cat("   lac ", N));
+    emitRaw("   sza");
+    emitRaw(cat("   jmp ", Lbody));
+    emitRaw(cat("   jmp ", Lend));
+    emitLabel(Lbody);
+    emitRaw(cat("   lac ", V));
     emitShiftOne(op, lhs.type.isUnsigned);
-    code_ << "   dac " << V << "\n";
-    code_ << "   lac " << N << "\n   sub __one\n";
+    emitRaw(cat("   dac ", V));
+    emitRaw(cat("   lac ", N));
+    emitRaw("   sub __one");
     normalizeNegZero();
-    code_ << "   dac " << N << "\n";
-    code_ << "   jmp " << Lstart << "\n";
-    code_ << Lend << ":\n";
-    code_ << "   lac " << V << "\n";
+    emitRaw(cat("   dac ", N));
+    emitRaw(cat("   jmp ", Lstart));
+    emitLabel(Lend);
+    emitRaw(cat("   lac ", V));
 }
 
 std::optional<std::string> Pdp1Codegen::assembleInProcess(const std::string &asmText,

@@ -55,7 +55,7 @@ namespace rcc {
 // 0/1 boolean needs no branch at all - just `MOV r0,#0` followed by one
 // conditionally executed `MOV r0,#1` (`MOVEQ`/`MOVNE`/...). See
 // genCompare() for which condition each operator becomes.
-class ArmCodegen : public Backend {
+class ArmCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "armv7a"; }
@@ -204,7 +204,9 @@ class ArmCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat()
+    // and `code_` itself come from TextCodegenBase (see Codegen.h) -
+    // shared by every line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

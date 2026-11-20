@@ -52,12 +52,16 @@ std::string Pdp10Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    movei 15," << kInitialSp << "\n";
-        code_ << "    pushj 15," << label(mainFn) << "\n";
-        code_ << "halt:\n    halt\n    jrst 0,halt\n\n";
+        emitLabel("_start");
+        emit("movei", cat("15,", kInitialSp));
+        emit("pushj", cat("15,", label(mainFn)));
+        emitLabel("halt");
+        emit("halt");
+        emit("jrst", "0,halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -94,14 +98,14 @@ std::map<std::string, std::string> Pdp10Codegen::perFileAsm() const { return per
 // `POP P,AC16` restores the caller's frame pointer, `POPJ P,` returns - see this class's own
 // header comment for why every sign here is the mirror of Pdp11Codegen.cpp's.
 void Pdp10Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    push 15,14\n";
-    code_ << "    move 14,15\n";
-    if (fn.func->frameSize > 0) code_ << "    addi 15," << fn.func->frameSize << "\n";
+    emitLabel(label(fn.func));
+    emit("push", "15,14");
+    emit("move", "14,15");
+    if (fn.func->frameSize > 0) emit("addi", cat("15,", fn.func->frameSize));
     genStmt(*fn.body);
-    code_ << "    move 15,14\n";
-    code_ << "    pop 15,14\n";
-    code_ << "    popj 15,0\n\n";
+    emit("move", "15,14");
+    emit("pop", "15,14");
+    emit("popj", "15,0");
 }
 
 void Pdp10Codegen::genStmt(const ir::Stmt &s) {
@@ -115,40 +119,40 @@ void Pdp10Codegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    jumpe 1," << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("jumpe", cat("1,", (s.elseStmt ? Lelse : Ldone)));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jrst 0," << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jrst", cat("0,", Ldone));
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    jumpe 1," << Lend << "\n";
+            emit("jumpe", cat("1,", Lend));
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jrst 0," << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jrst", cat("0,", Lstart));
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jrst 0," << loopLabels_.back().second << "\n";
+            emit("jrst", cat("0,", loopLabels_.back().second));
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jrst 0," << loopLabels_.back().first << "\n";
+            emit("jrst", cat("0,", loopLabels_.back().first));
             return;
         }
         case ir::StmtKind::Return: {
@@ -159,9 +163,9 @@ void Pdp10Codegen::genStmt(const ir::Stmt &s) {
                     for (int i = 0; i < words; i++) popReg(i + 1);
                 }
             }
-            code_ << "    move 15,14\n";
-            code_ << "    pop 15,14\n";
-            code_ << "    popj 15,0\n";
+            emit("move", "15,14");
+            emit("pop", "15,14");
+            emit("popj", "15,0");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -184,16 +188,15 @@ void Pdp10Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jrst 0," << irLabel(s.labelId) << "\n";
+            emit("jrst", cat("0,", irLabel(s.labelId)));
             return;
         }
     }
@@ -217,11 +220,11 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
             }
             uint64_t v = trunc36(e.intValue);
             if (v <= 0777777ULL) {
-                code_ << "    movei 1," << v << "\n";
+                emit("movei", cat("1,", v));
             } else {
                 std::string lbl = allocTempCell();
                 trailer_.back() = lbl + ": dw " + std::to_string(v);
-                code_ << "    move 1," << lbl << "\n";
+                emit("move", cat("1,", lbl));
             }
             return;
         }
@@ -243,7 +246,7 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
                 pushReg(3);
                 genExpr(*e.rhs);
                 popReg(3);
-                code_ << "    movem 1,[3+0]\n";
+                emit("movem", "1,[3+0]");
                 return;
             }
             if (isWide(e.slot->type)) {
@@ -259,10 +262,10 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
                 int words = wordCountOf(e.slot->type);
                 genExpr(*e.rhs);
                 for (int i = 0; i < words; i++) {
-                    code_ << "    move 1,[15-" << i << "]\n";
-                    code_ << "    movem 1," << wideWordOperand(e.slot, i) << "\n";
+                    emit("move", cat("1,[15-", i, "]"));
+                    emit("movem", cat("1,", wideWordOperand(e.slot, i)));
                 }
-                code_ << "    subi 15," << words << "\n";
+                emit("subi", cat("15,", words));
                 return;
             }
             genExpr(*e.rhs);
@@ -271,7 +274,7 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // AC1 = pointer value
-            code_ << "    move 3,1\n";
+            emit("move", "3,1");
             pushReg(3);
             genExpr(*e.rhs);
             storeIndirect(e.type);
@@ -285,7 +288,7 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
             }
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // AC1 = rhs
-            code_ << "    move 2,1\n";
+            emit("move", "2,1");
             loadOperand(mem, e.type);  // AC1 = old
             if (e.yieldOld) pushReg(1);
             genCompoundOp(e.op, e.type);
@@ -296,7 +299,7 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // AC1 = pointer value
-            code_ << "    move 3,1\n";
+            emit("move", "3,1");
             genCompoundThroughAC3(e);
             return;
         }
@@ -305,12 +308,12 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jumpe 1," << Lelse << "\n";
+            emit("jumpe", cat("1,", Lelse));
             genExpr(*e.rhs);
-            code_ << "    jrst 0," << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jrst", cat("0,", Ldone));
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -319,24 +322,24 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genWideNegate(wordCountOf(e.rhs->type));
                 } else {
-                    code_ << "    movn 1,1\n";
+                    emit("movn", "1,1");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // AC1 = pointer value
-                code_ << "    move 3,1\n";
+                emit("move", "3,1");
                 loadIndirect("3", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
                 if (isWide(e.rhs->type)) {
                     int words = wordCountOf(e.rhs->type);
                     for (int i = 0; i < words; i++) {
-                        code_ << "    setcm 1,[15-" << i << "]\n";
-                        code_ << "    movem 1,[15-" << i << "]\n";
+                        emit("setcm", cat("1,[15-", i, "]"));
+                        emit("movem", cat("1,[15-", i, "]"));
                     }
                 } else {
-                    code_ << "    setcm 1,1\n";
+                    emit("setcm", "1,1");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -354,8 +357,8 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
                     totalWords += 1;
                 }
             }
-            code_ << "    pushj 15," << label(e.func) << "\n";
-            if (totalWords > 0) code_ << "    subi 15," << totalWords << "\n";
+            emit("pushj", cat("15,", label(e.func)));
+            if (totalWords > 0) emit("subi", cat("15,", totalWords));
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
                 for (int i = words - 1; i >= 0; i--) pushReg(i + 1);
@@ -369,8 +372,8 @@ void Pdp10Codegen::genExpr(const ir::Expr &e) {
             // resolution already folds in the index register's value before the jump, so no
             // separate indirect-addressing bit is needed here).
             genExpr(*e.lhs);  // AC1 = the callee's own entry address
-            code_ << "    move 3,1\n";
-            code_ << "    pushj 15,[3+0]\n";
+            emit("move", "3,1");
+            emit("pushj", "15,[3+0]");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -411,31 +414,32 @@ void Pdp10Codegen::narrowAC1To(Type to) {
     if (to.base != BaseType::Char) return;
     // 255/128/256 decimal (0377/0200/0400 octal) - this dialect's assembler always parses a
     // bare number as decimal, never octal, regardless of a leading zero (see Pdp10Assembler.h).
-    code_ << "    andi 1,255\n";
+    emit("andi", "1,255");
     if (to.isUnsigned) return;
     std::string Ldone = newLabel();
-    code_ << "    move 2,1\n    andi 2,128\n";
-    code_ << "    jumpe 2," << Ldone << "\n";
-    code_ << "    subi 1,256\n";
-    code_ << Ldone << ":\n";
+    emit("move", "2,1");
+    emit("andi", "2,128");
+    emit("jumpe", cat("2,", Ldone));
+    emit("subi", "1,256");
+    emitLabel(Ldone);
 }
 
 void Pdp10Codegen::loadOperand(const std::string &mem, Type type) {
-    code_ << "    move 1," << mem << "\n";
+    emit("move", cat("1,", mem));
     narrowAC1To(type);
 }
 
-void Pdp10Codegen::storeOperand(const std::string &mem, Type) { code_ << "    movem 1," << mem << "\n"; }
+void Pdp10Codegen::storeOperand(const std::string &mem, Type) { emit("movem", "1," + mem); }
 
 void Pdp10Codegen::loadIndirect(const std::string &addrReg, Type type) {
     if (!isWide(type)) {
-        code_ << "    move 1,[" << addrReg << "+0]\n";
+        emit("move", cat("1,[", addrReg, "+0]"));
         narrowAC1To(type);
         return;
     }
     int words = wordCountOf(type);
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    move 1,[" << addrReg << "+" << i << "]\n";
+        emit("move", cat("1,[", addrReg, "+", i, "]"));
         pushReg(1);
     }
 }
@@ -443,19 +447,19 @@ void Pdp10Codegen::loadIndirect(const std::string &addrReg, Type type) {
 void Pdp10Codegen::storeIndirect(Type type) {
     if (!isWide(type)) {
         popReg(3);
-        code_ << "    movem 1,[3+0]\n";
+        emit("movem", "1,[3+0]");
         return;
     }
     int words = wordCountOf(type);
     static const int tempRegs[] = {4, 5, 6, 7};
     for (int i = 0; i < words; i++) popReg(tempRegs[i]);
     popReg(3);
-    for (int i = 0; i < words; i++) code_ << "    movem " << tempRegs[i] << ",[3+" << i << "]\n";
+    for (int i = 0; i < words; i++) emit("movem", cat(tempRegs[i], ",[3+", i, "]"));
 }
 
 void Pdp10Codegen::genWideLoad(const ir::Slot *slot, int words) {
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    move 1," << wideWordOperand(slot, i) << "\n";
+        emit("move", cat("1,", wideWordOperand(slot, i)));
         pushReg(1);
     }
 }
@@ -474,11 +478,11 @@ void Pdp10Codegen::genWideLoadLiteral(long value, int words) {
         long shifted = (shiftBits >= 64) ? (value < 0 ? -1 : 0) : (value >> shiftBits);
         uint64_t word = static_cast<uint64_t>(shifted) & kMask36;
         if (word <= 0777777ULL) {
-            code_ << "    movei 1," << word << "\n";
+            emit("movei", cat("1,", word));
         } else {
             std::string lbl = allocTempCell();
             trailer_.back() = lbl + ": dw " + std::to_string(word);
-            code_ << "    move 1," << lbl << "\n";
+            emit("move", cat("1,", lbl));
         }
         pushReg(1);
     }
@@ -487,26 +491,36 @@ void Pdp10Codegen::genWideLoadLiteral(long value, int words) {
 void Pdp10Codegen::genWideStore(const ir::Slot *slot, int words) {
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << wideWordOperand(slot, i) << "\n";
+        emit("movem", cat("1,", wideWordOperand(slot, i)));
     }
 }
 
 void Pdp10Codegen::emitUnsignedLess(const std::string &a, const std::string &b) {
     std::string LaNeg = newLabel(), LaPos = newLabel(), Lsame = newLabel(), Ltrue = newLabel(), Lfalse = newLabel(),
                 Ldone = newLabel();
-    code_ << "    move 1," << a << "\n    jumpl 1," << LaNeg << "\n    jrst 0," << LaPos << "\n";
-    code_ << LaPos << ":\n";  // sign(a) clear
-    code_ << "    move 2," << b << "\n    jumpl 2," << Ltrue << "\n";   // sign(b) set -> a(small) < b(large)
-    code_ << "    jrst 0," << Lsame << "\n";
-    code_ << LaNeg << ":\n";  // sign(a) set
-    code_ << "    move 2," << b << "\n    jumpl 2," << Lsame << "\n";  // sign(b) also set -> same sign
-    code_ << "    jrst 0," << Lfalse << "\n";                          // sign(b) clear -> a(large) >= b(small)
-    code_ << Lsame << ":\n";
-    code_ << "    move 1," << a << "\n    move 2," << b << "\n    sub 1,2\n";  // safe: same sign, no overflow
-    code_ << "    jumpl 1," << Ltrue << "\n    jrst 0," << Lfalse << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n    jrst 0," << Ldone << "\n";
-    code_ << Lfalse << ":\n    movei 1,0\n";
-    code_ << Ldone << ":\n";
+    emit("move", cat("1,", a));
+    emit("jumpl", cat("1,", LaNeg));
+    emit("jrst", cat("0,", LaPos));
+    emitLabel(LaPos);  // sign(a) clear
+    emit("move", cat("2,", b));
+    emit("jumpl", cat("2,", Ltrue));  // sign(b) set -> a(small) < b(large)
+    emit("jrst", cat("0,", Lsame));
+    emitLabel(LaNeg);  // sign(a) set
+    emit("move", cat("2,", b));
+    emit("jumpl", cat("2,", Lsame));  // sign(b) also set -> same sign
+    emit("jrst", cat("0,", Lfalse));  // sign(b) clear -> a(large) >= b(small)
+    emitLabel(Lsame);
+    emit("move", cat("1,", a));
+    emit("move", cat("2,", b));
+    emit("sub", "1,2");  // safe: same sign, no overflow
+    emit("jumpl", cat("1,", Ltrue));
+    emit("jrst", cat("0,", Lfalse));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emitLabel(Ldone);
 }
 
 // dest = a + b + carryCell; updates carryCell to this word's own carry-out, captured as two
@@ -518,15 +532,21 @@ void Pdp10Codegen::emitWideAddWithCarry(const std::string &dest, const std::stri
     std::string t = allocTempCell();
     std::string carry1 = allocTempCell(), carry2 = allocTempCell();
 
-    code_ << "    move 1," << a << "\n    add 1," << b << "\n    movem 1," << t << "\n";
+    emit("move", cat("1,", a));
+    emit("add", cat("1,", b));
+    emit("movem", cat("1,", t));
     emitUnsignedLess(t, a);
-    code_ << "    movem 1," << carry1 << "\n";
+    emit("movem", cat("1,", carry1));
 
-    code_ << "    move 1," << t << "\n    add 1," << carryCell << "\n    movem 1," << dest << "\n";
+    emit("move", cat("1,", t));
+    emit("add", cat("1,", carryCell));
+    emit("movem", cat("1,", dest));
     emitUnsignedLess(dest, t);
-    code_ << "    movem 1," << carry2 << "\n";
+    emit("movem", cat("1,", carry2));
 
-    code_ << "    move 1," << carry1 << "\n    ior 1," << carry2 << "\n    movem 1," << carryCell << "\n";
+    emit("move", cat("1,", carry1));
+    emit("ior", cat("1,", carry2));
+    emit("movem", cat("1,", carryCell));
 }
 
 void Pdp10Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd, int words) {
@@ -538,28 +558,31 @@ void Pdp10Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
     for (auto &t : resT) t = allocTempCell();
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << rhsT[i] << "\n";
+        emit("movem", cat("1,", rhsT[i]));
     }
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << lhsT[i] << "\n";
+        emit("movem", cat("1,", lhsT[i]));
     }
 
     std::string carry = allocTempCell();
     std::string zero = allocTempCell();  // stays 0 - used as the "+0" addend when negating rhs
 
     if (!isAdd) {
-        code_ << "    movei 1,1\n    movem 1," << carry << "\n";
+        emit("movei", "1,1");
+        emit("movem", cat("1,", carry));
         for (int i = 0; i < words; i++) {
-            code_ << "    setcm 1," << rhsT[i] << "\n    movem 1," << rhsT[i] << "\n";
+            emit("setcm", cat("1,", rhsT[i]));
+            emit("movem", cat("1,", rhsT[i]));
             emitWideAddWithCarry(rhsT[i], rhsT[i], zero, carry);
         }
     }
 
-    code_ << "    movei 1,0\n    movem 1," << carry << "\n";
+    emit("movei", "1,0");
+    emit("movem", cat("1,", carry));
     for (int i = 0; i < words; i++) emitWideAddWithCarry(resT[i], lhsT[i], rhsT[i], carry);
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    move 1," << resT[i] << "\n";
+        emit("move", cat("1,", resT[i]));
         pushReg(1);
     }
 }
@@ -569,14 +592,16 @@ void Pdp10Codegen::genWideNegate(int words) {
     for (auto &x : t) x = allocTempCell();
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    setcm 1,1\n    movem 1," << t[i] << "\n";
+        emit("setcm", "1,1");
+        emit("movem", cat("1,", t[i]));
     }
     std::string carry = allocTempCell();
     std::string zero = allocTempCell();
-    code_ << "    movei 1,1\n    movem 1," << carry << "\n";
+    emit("movei", "1,1");
+    emit("movem", cat("1,", carry));
     for (int i = 0; i < words; i++) emitWideAddWithCarry(t[i], t[i], zero, carry);
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    move 1," << t[i] << "\n";
+        emit("move", cat("1,", t[i]));
         pushReg(1);
     }
 }
@@ -589,15 +614,16 @@ void Pdp10Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, cons
     for (auto &t : lhsT) t = allocTempCell();
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << rhsT[i] << "\n";
+        emit("movem", cat("1,", rhsT[i]));
     }
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << lhsT[i] << "\n";
+        emit("movem", cat("1,", lhsT[i]));
     }
     const char *mnem = op == "&" ? "and" : op == "|" ? "ior" : "xor";
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    move 1," << lhsT[i] << "\n    " << mnem << " 1," << rhsT[i] << "\n";
+        emit("move", cat("1,", lhsT[i]));
+        emit(mnem, cat("1,", rhsT[i]));
         pushReg(1);
     }
 }
@@ -611,50 +637,56 @@ void Pdp10Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, co
     for (auto &t : lhsT) t = allocTempCell();
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << rhsT[i] << "\n";
+        emit("movem", cat("1,", rhsT[i]));
     }
     for (int i = 0; i < words; i++) {
         popReg(1);
-        code_ << "    movem 1," << lhsT[i] << "\n";
+        emit("movem", cat("1,", lhsT[i]));
     }
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         for (int i = words - 1; i >= 0; i--) {
             std::string Lcontinue = newLabel();
-            code_ << "    move 1," << lhsT[i] << "\n    sub 1," << rhsT[i] << "\n";
-            code_ << "    jumpe 1," << Lcontinue << "\n";
-            code_ << "    jrst 0," << (op == "==" ? Lfalse : Ltrue) << "\n";
-            code_ << Lcontinue << ":\n";
+            emit("move", cat("1,", lhsT[i]));
+            emit("sub", cat("1,", rhsT[i]));
+            emit("jumpe", cat("1,", Lcontinue));
+            emit("jrst", cat("0,", (op == "==" ? Lfalse : Ltrue)));
+            emitLabel(Lcontinue);
         }
-        code_ << "    jrst 0," << (op == "==" ? Ltrue : Lfalse) << "\n";
+        emit("jrst", cat("0,", (op == "==" ? Ltrue : Lfalse)));
     } else {
         for (int i = words - 1; i >= 0; i--) {
             std::string Lcontinue = newLabel(), Ldiffer = newLabel();
-            code_ << "    move 1," << lhsT[i] << "\n    sub 1," << rhsT[i] << "\n";
-            code_ << "    jumpe 1," << Lcontinue << "\n    jrst 0," << Ldiffer << "\n";
-            code_ << Ldiffer << ":\n";
+            emit("move", cat("1,", lhsT[i]));
+            emit("sub", cat("1,", rhsT[i]));
+            emit("jumpe", cat("1,", Lcontinue));
+            emit("jrst", cat("0,", Ldiffer));
+            emitLabel(Ldiffer);
             bool topWordUnsigned = (i == words - 1) && isUnsigned;
             bool lowerWordAlwaysUnsigned = (i != words - 1);
             if (topWordUnsigned || lowerWordAlwaysUnsigned) {
                 emitUnsignedLess(lhsT[i], rhsT[i]);
                 std::string Llt = newLabel();
-                code_ << "    jumpn 1," << Llt << "\n";
+                emit("jumpn", cat("1,", Llt));
                 // lhs word >= rhs word (and they differ, so strictly greater)
-                code_ << "    jrst 0," << ((op == "<" || op == "<=") ? Lfalse : Ltrue) << "\n";
-                code_ << Llt << ":\n";
-                code_ << "    jrst 0," << ((op == "<" || op == "<=") ? Ltrue : Lfalse) << "\n";
+                emit("jrst", cat("0,", ((op == "<" || op == "<=") ? Lfalse : Ltrue)));
+                emitLabel(Llt);
+                emit("jrst", cat("0,", ((op == "<" || op == "<=") ? Ltrue : Lfalse)));
             } else {
                 std::string signedBranch = (op == "<" || op == "<=") ? "jumpl" : "jumpg";
-                code_ << "    " << signedBranch << " 1," << Ltrue << "\n";
-                code_ << "    jrst 0," << Lfalse << "\n";
+                emit(signedBranch, cat("1,", Ltrue));
+                emit("jrst", cat("0,", Lfalse));
             }
-            code_ << Lcontinue << ":\n";
+            emitLabel(Lcontinue);
         }
-        code_ << "    jrst 0," << Lfalse << "\n";
+        emit("jrst", cat("0,", Lfalse));
     }
-    code_ << Lfalse << ":\n    movei 1,0\n    jrst 0," << Ldone << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emitLabel(Ldone);
 }
 
 // `long`/`long long` multiply/divide need a software multi-word routine this target has no
@@ -677,32 +709,44 @@ void Pdp10Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool i
     genExpr(lhs);
     pushReg(2);  // reserve a stack slot for the shift count, mirroring the words' own layout
     genExpr(rhs);
-    code_ << "    movem 1,[15+0]\n";  // stash the count where the reserved slot is (top of stack)
+    emit("movem", "1,[15+0]");  // stash the count where the reserved slot is (top of stack)
     std::vector<std::string> carry(words);
     for (auto &c : carry) c = allocTempCell();
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    move 1,[15+0]\n    jumpe 1," << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("move", "1,[15+0]");
+    emit("jumpe", cat("1,", Ldone));
     for (int step = 0; step < words; step++) {
         int i = isLeft ? step : (words - 1 - step);
         std::string w = "[15-" + std::to_string(1 + i) + "]";
         if (isLeft) {
-            code_ << "    move 2," << w << "\n    lsh 2,-35\n    movem 2," << carry[step] << "\n";
-            code_ << "    move 2," << w << "\n    lsh 2,1\n";
-            if (step > 0) code_ << "    ior 2," << carry[step - 1] << "\n";
-            code_ << "    movem 2," << w << "\n";
+            emit("move", cat("2,", w));
+            emit("lsh", "2,-35");
+            emit("movem", cat("2,", carry[step]));
+            emit("move", cat("2,", w));
+            emit("lsh", "2,1");
+            if (step > 0) emit("ior", cat("2,", carry[step - 1]));
+            emit("movem", cat("2,", w));
         } else {
             bool signedTop = (step == 0) && !isUnsigned;  // step 0 = the most significant word
-            code_ << "    move 2," << w << "\n    andi 2,1\n    movem 2," << carry[step] << "\n";
-            code_ << "    move 2," << w << "\n    " << (signedTop ? "ash" : "lsh") << " 2,-1\n";
+            emit("move", cat("2,", w));
+            emit("andi", "2,1");
+            emit("movem", cat("2,", carry[step]));
+            emit("move", cat("2,", w));
+            emit(signedTop ? "ash" : "lsh", "2,-1");
             if (step > 0) {
-                code_ << "    move 3," << carry[step - 1] << "\n    lsh 3,35\n    ior 2,3\n";
+                emit("move", cat("3,", carry[step - 1]));
+                emit("lsh", "3,35");
+                emit("ior", "2,3");
             }
-            code_ << "    movem 2," << w << "\n";
+            emit("movem", cat("2,", w));
         }
     }
-    code_ << "    move 1,[15+0]\n    subi 1,1\n    movem 1,[15+0]\n";
-    code_ << "    jrst 0," << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("move", "1,[15+0]");
+    emit("subi", "1,1");
+    emit("movem", "1,[15+0]");
+    emit("jrst", cat("0,", Lloop));
+    emitLabel(Ldone);
     popReg(2);  // discard the shift-count slot; the `words`-word result stays on top
 }
 
@@ -719,7 +763,7 @@ void Pdp10Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
-        code_ << "    move 1,[15+0]\n";
+        emit("move", "1,[15+0]");
         for (int i = 0; i < words; i++) popReg(2);
         narrowAC1To(to);
         return;
@@ -727,15 +771,15 @@ void Pdp10Codegen::genConvert(const ir::Expr &e) {
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);
-        code_ << "    move 2,1\n";
+        emit("move", "2,1");
         if (from.isUnsigned) {
-            code_ << "    movei 1,0\n";
+            emit("movei", "1,0");
         } else {
             // Sign-extend AC1's own current (narrow) value into AC1: a negative value's top
             // bit is already set (every narrow type is a full word here), so replicating it
             // is just "all-ones if negative, else 0" - computed via an arithmetic right shift
             // of a copy by 35, which fills every bit with the sign bit.
-            code_ << "    ash 1,-35\n";
+            emit("ash", "1,-35");
         }
         for (int i = 1; i < toWords; i++) pushReg(1);
         pushReg(2);
@@ -745,7 +789,8 @@ void Pdp10Codegen::genConvert(const ir::Expr &e) {
     int toWords = wordCountOf(to);
     genExpr(*e.lhs);
     if (toWords > fromWords) {
-        code_ << "    move 1,[15-" << (fromWords - 1) << "]\n    ash 1,-35\n";
+        emit("move", cat("1,[15-", (fromWords - 1), "]"));
+        emit("ash", "1,-35");
         static const int tempRegs[] = {2, 4, 5, 6};
         for (int i = 0; i < fromWords; i++) popReg(tempRegs[i]);
         for (int i = 0; i < toWords - fromWords; i++) pushReg(1);
@@ -756,7 +801,7 @@ void Pdp10Codegen::genConvert(const ir::Expr &e) {
         // kept words must be lifted off, the gap below them closed, then put back.
         static const int tempRegs[] = {2, 4, 5, 6};
         for (int i = 0; i < toWords; i++) popReg(tempRegs[i]);
-        code_ << "    subi 15," << (fromWords - toWords) << "\n";
+        emit("subi", cat("15,", (fromWords - toWords)));
         for (int i = toWords - 1; i >= 0; i--) pushReg(tempRegs[i]);
     }
 }
@@ -779,34 +824,35 @@ void Pdp10Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     // element can be several words, so the index is scaled by the element's own width before use.
     int elemW = widthOfType(slot->type);
     if (elemW != 1) {
-        code_ << "    movei 2," << elemW << "\n";
-        code_ << "    mul 1,2\n    move 1,2\n";
+        emit("movei", cat("2,", elemW));
+        emit("mul", "1,2");
+        emit("move", "1,2");
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    movei 3," << label(slot) << "\n";
+            emit("movei", cat("3,", label(slot)));
         } else {
             // A Local array's lowest address is AC16 + localArrayBase(slot) (see addr()'s own
             // Local formula with localOffsetDescendingWide() - an array uses localLowOffset()
             // directly, the same value).
-            code_ << "    move 3,14\n";
+            emit("move", "3,14");
             int off = localArrayBase(slot);
             if (off >= 0) {
-                code_ << "    addi 3," << off << "\n";
+                emit("addi", cat("3,", off));
             } else {
-                code_ << "    subi 3," << (-off) << "\n";
+                emit("subi", cat("3,", (-off)));
             }
         }
-        code_ << "    add 3,1\n";
+        emit("add", "3,1");
         return;
     }
-    code_ << "    move 3," << operandOf(slot) << "\n";
-    code_ << "    add 3,1\n";
+    emit("move", cat("3,", operandOf(slot)));
+    emit("add", "3,1");
 }
 
 void Pdp10Codegen::genIndex(const ir::Expr &e) {
     genIndexAddr(e.slot, *e.lhs);
-    code_ << "    move 1,[3+0]\n";
+    emit("move", "1,[3+0]");
     narrowAC1To(e.slot->type);
 }
 
@@ -815,48 +861,48 @@ void Pdp10Codegen::genLocalArrayInit(const ir::Slot *slot) {
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
         const ir::ArrayInitElem &elem = slot->arrayInit[i];
         if (elem.isSymbol) {
-            code_ << "    movei 1," << (elem.slot ? label(elem.slot) : label(elem.func)) << "\n";
+            emit("movei", cat("1,", (elem.slot ? label(elem.slot) : label(elem.func))));
         } else {
             uint64_t v = trunc36(elem.value);
             if (v <= 0777777ULL) {
-                code_ << "    movei 1," << v << "\n";
+                emit("movei", cat("1,", v));
             } else {
                 std::string lbl = allocTempCell();
                 trailer_.back() = lbl + ": dw " + std::to_string(v);
-                code_ << "    move 1," << lbl << "\n";
+                emit("move", cat("1,", lbl));
             }
         }
-        code_ << "    movem 1,[14+" << (base + static_cast<int>(i)) << "]\n";
+        emit("movem", cat("1,[14+", (base + static_cast<int>(i)), "]"));
     }
 }
 
 void Pdp10Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    movei 1," << label(operand.slot) << "\n";
+            emit("movei", cat("1,", label(operand.slot)));
             return;
         }
-        code_ << "    move 1,14\n";
+        emit("move", "1,14");
         if (operand.slot->kind == ir::SlotKind::Param) {
-            code_ << "    subi 1," << operand.slot->frameOffset << "\n";
+            emit("subi", cat("1,", operand.slot->frameOffset));
         } else if (operand.slot->type.base == BaseType::Struct) {
             // See addr()'s own comment: a struct Local's base is
             // frameOffset directly, the same as localArrayBase() uses
             // for an array, not localOffsetDescendingWide()'s
             // downward-growing-frame formula.
-            code_ << "    addi 1," << operand.slot->frameOffset << "\n";
+            emit("addi", cat("1,", operand.slot->frameOffset));
         } else {
-            code_ << "    addi 1," << ir::localOffsetDescendingWide(*operand.slot, typeWidths()) << "\n";
+            emit("addi", cat("1,", ir::localOffsetDescendingWide(*operand.slot, typeWidths())));
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    move 1,3\n";
+        emit("move", "1,3");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    movei 1," << label(operand.func) << "\n";
+        emit("movei", cat("1,", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -867,19 +913,21 @@ void Pdp10Codegen::genAddrOf(const ir::Expr &operand) {
 // commutative, so each computes old-op-rhs with `old` already in AC1.
 void Pdp10Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add 1,2\n"; return; }
-    if (op == "-") { code_ << "    sub 1,2\n"; return; }
-    if (op == "*") { code_ << "    mul 1,2\n    move 1,2\n"; return; }
-    if (op == "&") { code_ << "    and 1,2\n"; return; }
-    if (op == "|") { code_ << "    ior 1,2\n"; return; }
-    if (op == "^") { code_ << "    xor 1,2\n"; return; }
+    if (op == "+") { emit("add", "1,2"); return; }
+    if (op == "-") { emit("sub", "1,2"); return; }
+    if (op == "*") { emit("mul", "1,2"); emit("move", "1,2"); return; }
+    if (op == "&") { emit("and", "1,2"); return; }
+    if (op == "|") { emit("ior", "1,2"); return; }
+    if (op == "^") { emit("xor", "1,2"); return; }
     if (op == "<<" || op == ">>") {
         if (op == "<<") {
-            code_ << "    lsh 1,[2+0]\n";
+            emit("lsh", "1,[2+0]");
         } else if (isUnsigned) {
-            code_ << "    movn 2,2\n    lsh 1,[2+0]\n";
+            emit("movn", "2,2");
+            emit("lsh", "1,[2+0]");
         } else {
-            code_ << "    movn 2,2\n    ash 1,[2+0]\n";
+            emit("movn", "2,2");
+            emit("ash", "1,[2+0]");
         }
         return;
     }
@@ -887,9 +935,10 @@ void Pdp10Codegen::genCompoundOp(const std::string &op, Type type) {
     if (isUnsigned) {
         emitUnsignedDiv();
     } else {
-        code_ << "    move 3,2\n    idiv 1,3\n";
+        emit("move", "3,2");
+        emit("idiv", "1,3");
     }
-    if (op == "%") code_ << "    move 1,2\n";
+    if (op == "%") emit("move", "1,2");
 }
 
 void Pdp10Codegen::genCompoundThroughAC3(const ir::Expr &e) {
@@ -898,7 +947,7 @@ void Pdp10Codegen::genCompoundThroughAC3(const ir::Expr &e) {
     pushReg(1);
     popReg(2);
     popReg(3);
-    code_ << "    move 1,[3+0]\n";
+    emit("move", "1,[3+0]");
     pushReg(3);
     if (e.yieldOld) pushReg(1);
     genCompoundOp(e.op, e.type);
@@ -906,11 +955,11 @@ void Pdp10Codegen::genCompoundThroughAC3(const ir::Expr &e) {
     if (e.yieldOld) {
         popReg(4);  // AC4 = old (pre-op) value, stashed above
         popReg(3);
-        code_ << "    movem 1,[3+0]\n";
-        code_ << "    move 1,4\n";
+        emit("movem", "1,[3+0]");
+        emit("move", "1,4");
     } else {
         popReg(3);
-        code_ << "    movem 1,[3+0]\n";
+        emit("movem", "1,[3+0]");
     }
 }
 
@@ -930,9 +979,11 @@ void Pdp10Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.rhs);
         popReg(2);
         if (op == "+") {
-            code_ << "    add 1,2\n";
+            emit("add", "1,2");
         } else {
-            code_ << "    move 3,1\n    move 1,2\n    sub 1,3\n";
+            emit("move", "3,1");
+            emit("move", "1,2");
+            emit("sub", "1,3");
         }
         return;
     }
@@ -962,7 +1013,7 @@ void Pdp10Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.rhs);
         popReg(2);
         const char *mnem = op == "&" ? "and" : op == "|" ? "ior" : "xor";
-        code_ << "    " << mnem << " 1,2\n";
+        emit(mnem, "1,2");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -995,13 +1046,13 @@ void Pdp10Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLef
     genExpr(lhs);
     pushReg(1);
     genExpr(rhs);
-    code_ << "    move 2,1\n";
+    emit("move", "2,1");
     popReg(1);
     if (isLeft) {
-        code_ << "    lsh 1,[2+0]\n";
+        emit("lsh", "1,[2+0]");
     } else {
-        code_ << "    movn 2,2\n";
-        code_ << "    " << (isUnsigned ? "lsh" : "ash") << " 1,[2+0]\n";
+        emit("movn", "2,2");
+        emit(isUnsigned ? "lsh" : "ash", "1,[2+0]");
     }
 }
 
@@ -1013,8 +1064,8 @@ void Pdp10Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     pushReg(1);
     genExpr(rhs);
     popReg(2);
-    code_ << "    mul 1,2\n";  // AC1 = high word, AC2 = low (truncated) word
-    code_ << "    move 1,2\n";
+    emit("mul", "1,2");  // AC1 = high word, AC2 = low (truncated) word
+    emit("move", "1,2");
 }
 
 // `IDIV AC,E`: confirmed directly against the simulator to be single-length (unlike pdp11's
@@ -1023,15 +1074,15 @@ void Pdp10Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool want
     genExpr(lhs);
     pushReg(1);
     genExpr(rhs);
-    code_ << "    move 3,1\n";  // AC3 = divisor
+    emit("move", "3,1");  // AC3 = divisor
     popReg(1);                  // AC1 = dividend
     if (isUnsigned) {
-        code_ << "    move 2,3\n";
+        emit("move", "2,3");
         emitUnsignedDiv();
     } else {
-        code_ << "    idiv 1,3\n";
+        emit("idiv", "1,3");
     }
-    if (wantRemainder) code_ << "    move 1,2\n";
+    if (wantRemainder) emit("move", "1,2");
 }
 
 // A classic restoring shift-subtract binary long division, 36 bits at a time: confirmed
@@ -1048,29 +1099,51 @@ void Pdp10Codegen::emitUnsignedDiv() {
     // the cells below; result: AC1 = quotient, AC2 = remainder.
     std::string uCell = allocTempCell(), vCell = allocTempCell(), rCell = allocTempCell(),
                 qCell = allocTempCell(), bitCell = allocTempCell(), counter = allocTempCell();
-    code_ << "    movem 1," << uCell << "\n    movem 2," << vCell << "\n";
-    code_ << "    movei 1,0\n    movem 1," << rCell << "\n    movem 1," << qCell << "\n";
-    code_ << "    movei 1," << typeWidths().unitBits << "\n    movem 1," << counter << "\n";
+    emit("movem", cat("1,", uCell));
+    emit("movem", cat("2,", vCell));
+    emit("movei", "1,0");
+    emit("movem", cat("1,", rCell));
+    emit("movem", cat("1,", qCell));
+    emit("movei", cat("1,", typeWidths().unitBits));
+    emit("movem", cat("1,", counter));
 
     std::string Lloop = newLabel(), Lskip = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    move 1," << counter << "\n    jumpe 1," << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("move", cat("1,", counter));
+    emit("jumpe", cat("1,", Ldone));
     // bit = U's own top bit; U <<= 1 (the bit shifted out is already captured, so it's fine
     // to lose it).
-    code_ << "    move 1," << uCell << "\n    lsh 1,-35\n    movem 1," << bitCell << "\n";
-    code_ << "    move 1," << uCell << "\n    lsh 1,1\n    movem 1," << uCell << "\n";
+    emit("move", cat("1,", uCell));
+    emit("lsh", "1,-35");
+    emit("movem", cat("1,", bitCell));
+    emit("move", cat("1,", uCell));
+    emit("lsh", "1,1");
+    emit("movem", cat("1,", uCell));
     // R = (R << 1) | bit; Q <<= 1 (a 0 bit shifted in by default).
-    code_ << "    move 1," << rCell << "\n    lsh 1,1\n    ior 1," << bitCell << "\n    movem 1," << rCell << "\n";
-    code_ << "    move 1," << qCell << "\n    lsh 1,1\n    movem 1," << qCell << "\n";
+    emit("move", cat("1,", rCell));
+    emit("lsh", "1,1");
+    emit("ior", cat("1,", bitCell));
+    emit("movem", cat("1,", rCell));
+    emit("move", cat("1,", qCell));
+    emit("lsh", "1,1");
+    emit("movem", cat("1,", qCell));
     // If R >= V: R -= V, and set Q's own low bit (just shifted in as 0 above).
     emitUnsignedLess(rCell, vCell);  // AC1 = (R < V) ? 1 : 0
-    code_ << "    jumpn 1," << Lskip << "\n";
-    code_ << "    move 1," << rCell << "\n    sub 1," << vCell << "\n    movem 1," << rCell << "\n";
-    code_ << "    move 1," << qCell << "\n    iori 1,1\n    movem 1," << qCell << "\n";
-    code_ << Lskip << ":\n";
-    code_ << "    move 1," << counter << "\n    subi 1,1\n    movem 1," << counter << "\n";
-    code_ << "    jrst 0," << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    code_ << "    move 1," << qCell << "\n    move 2," << rCell << "\n";
+    emit("jumpn", cat("1,", Lskip));
+    emit("move", cat("1,", rCell));
+    emit("sub", cat("1,", vCell));
+    emit("movem", cat("1,", rCell));
+    emit("move", cat("1,", qCell));
+    emit("iori", "1,1");
+    emit("movem", cat("1,", qCell));
+    emitLabel(Lskip);
+    emit("move", cat("1,", counter));
+    emit("subi", "1,1");
+    emit("movem", cat("1,", counter));
+    emit("jrst", cat("0,", Lloop));
+    emitLabel(Ldone);
+    emit("move", cat("1,", qCell));
+    emit("move", cat("2,", rCell));
 }
 
 void Pdp10Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
@@ -1095,27 +1168,31 @@ void Pdp10Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const s
     pushReg(1);
     genExpr(rhs);
     popReg(2);
-    code_ << "    move 3,1\n    move 1,2\n";  // AC3 = rhs, AC1 = lhs
+    emit("move", "3,1");
+    emit("move", "1,2");  // AC3 = rhs, AC1 = lhs
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (isUnsigned) {
         // emitUnsignedLess() uses AC1/AC2 as its own scratch, so the operands handed to it
         // must live somewhere else first - AC4 (a stable copy of lhs; AC3 already holds rhs).
-        code_ << "    move 4,1\n";
+        emit("move", "4,1");
         bool wantLess = (jumpIfTrue == "jumpl" || jumpIfTrue == "jumpge");  // "<" or ">=" (negated)
         bool negate = (jumpIfTrue == "jumple" || jumpIfTrue == "jumpge");  // "<=" or ">=" negate the raw test
         const char *a = wantLess ? "4" : "3";
         const char *b = wantLess ? "3" : "4";
         emitUnsignedLess(a, b);
-        code_ << "    " << (negate ? "jumpe" : "jumpn") << " 1," << Ltrue << "\n";
-        code_ << "    jrst 0," << Lfalse << "\n";
+        emit(negate ? "jumpe" : "jumpn", cat("1,", Ltrue));
+        emit("jrst", cat("0,", Lfalse));
     } else {
-        code_ << "    sub 1,3\n";  // AC1 = lhs - rhs
-        code_ << "    " << jumpIfTrue << " 1," << Ltrue << "\n";
-        code_ << "    jrst 0," << Lfalse << "\n";
+        emit("sub", "1,3");  // AC1 = lhs - rhs
+        emit(jumpIfTrue, cat("1,", Ltrue));
+        emit("jrst", cat("0,", Lfalse));
     }
-    code_ << Lfalse << ":\n    movei 1,0\n    jrst 0," << Ldone << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emitLabel(Ldone);
 }
 
 void Pdp10Codegen::testTruthy(const ir::Expr &e) {
@@ -1124,7 +1201,7 @@ void Pdp10Codegen::testTruthy(const ir::Expr &e) {
     popReg(1);
     for (int i = 1; i < words; i++) {
         popReg(2);
-        code_ << "    ior 1,2\n";
+        emit("ior", "1,2");
     }
 }
 
@@ -1132,39 +1209,48 @@ void Pdp10Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    jumpe 1," << Lfalse << "\n";
+    emit("jumpe", cat("1,", Lfalse));
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jumpe 1," << Lfalse << "\n";
-    code_ << "    jrst 0," << Ltrue << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n    jrst 0," << Ldone << "\n";
-    code_ << Lfalse << ":\n    movei 1,0\n";
-    code_ << Ldone << ":\n";
+    emit("jumpe", cat("1,", Lfalse));
+    emit("jrst", cat("0,", Ltrue));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emitLabel(Ldone);
 }
 
 void Pdp10Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    jumpn 1," << Ltrue << "\n";
+    emit("jumpn", cat("1,", Ltrue));
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jumpn 1," << Ltrue << "\n";
-    code_ << "    jrst 0," << Lfalse << "\n";
-    code_ << Lfalse << ":\n    movei 1,0\n    jrst 0," << Ldone << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n";
-    code_ << Ldone << ":\n";
+    emit("jumpn", cat("1,", Ltrue));
+    emit("jrst", cat("0,", Lfalse));
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emitLabel(Ldone);
 }
 
 void Pdp10Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    jumpe 1," << Ltrue << "\n";
-    code_ << "    jrst 0," << Lfalse << "\n";
-    code_ << Lfalse << ":\n    movei 1,0\n    jrst 0," << Ldone << "\n";
-    code_ << Ltrue << ":\n    movei 1,1\n";
-    code_ << Ldone << ":\n";
+    emit("jumpe", cat("1,", Ltrue));
+    emit("jrst", cat("0,", Lfalse));
+    emitLabel(Lfalse);
+    emit("movei", "1,0");
+    emit("jrst", cat("0,", Ldone));
+    emitLabel(Ltrue);
+    emit("movei", "1,1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> Pdp10Codegen::assembleInProcess(const std::string &asmText,

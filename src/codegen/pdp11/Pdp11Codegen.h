@@ -41,7 +41,7 @@ namespace rcc {
 // Every branch here is a short branch to an immediately-following label plus a full-range
 // `JMP` (see `safeBranch()`), since the PDP-11's branch instructions can only reach ±128
 // words from the next instruction.
-class Pdp11Codegen : public Backend {
+class Pdp11Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp11"; }
@@ -200,7 +200,6 @@ class Pdp11Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

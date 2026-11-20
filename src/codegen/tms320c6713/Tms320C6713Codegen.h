@@ -79,7 +79,7 @@ namespace rcc {
 // product, gotten via a 32-iteration shift-and-add loop (genMulFull32()) rather than trying to
 // extend the sign-extending MPY family to an unsigned 64-bit partial product no instruction
 // here actually computes.
-class Tms320C6713Codegen : public Backend {
+class Tms320C6713Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "tms320c6713"; }
@@ -204,7 +204,9 @@ class Tms320C6713Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

@@ -71,7 +71,7 @@ namespace rcc {
 // and jump targets, plus a fixed set of "__"-prefixed global cells (`__sp`,
 // `__fp`, `__stmp`, `__stmp2`, `__addr`, `__retval`, `__retaddr`) shared by
 // every function, same convention as pdp7.
-class Pdp1Codegen : public Backend {
+class Pdp1Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp1"; }
@@ -205,7 +205,9 @@ class Pdp1Codegen : public Backend {
     std::string popAddressIntoScratch();
     void computeElementAddress(const ir::Slot *slot, const ir::Expr &idxExpr);
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat()
+    // and `code_` itself come from TextCodegenBase (see Codegen.h) -
+    // shared by every line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

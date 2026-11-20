@@ -54,7 +54,7 @@ namespace rcc {
 // J/JAL/JR/BEQ/BNE all have a real hardware branch-delay slot (the
 // following instruction always executes before the transfer takes
 // effect); this backend always emits a NOP right after, unfilled.
-class MipsCodegen : public Backend {
+class MipsCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "r10000"; }
@@ -159,7 +159,6 @@ class MipsCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

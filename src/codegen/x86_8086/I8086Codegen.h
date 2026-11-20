@@ -30,7 +30,7 @@ namespace rcc {
 // instruction this backend ever emits is identical either way - only the entry/exit
 // sequence and base address differ - so this one Codegen class covers both rather than
 // a separate one the way `mc68328`'s own real hardware differences do.
-class I8086Codegen : public Backend {
+class I8086Codegen : public Backend, protected TextCodegenBase {
    public:
     explicit I8086Codegen(bool dosAbi = false) : dosAbi_(dosAbi) {}
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
@@ -194,7 +194,6 @@ class I8086Codegen : public Backend {
     int wideScopeDepth_ = 0;
     int maxWideScopeDepth_ = 0;
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

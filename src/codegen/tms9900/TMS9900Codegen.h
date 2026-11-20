@@ -43,7 +43,7 @@ namespace rcc {
 // `long`/`long long` (wide) arithmetic - every wide-value code path throws a clear "not
 // supported" error instead of emitting wrong code. This is the one explicit scope cut on top
 // of a complete TMS9900Assembler.cpp (every real instruction, not just what this file emits).
-class TMS9900Codegen : public Backend {
+class TMS9900Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "tms9900"; }
@@ -123,12 +123,21 @@ class TMS9900Codegen : public Backend {
     // Loads/stores r0 through the address already in r4.
     void loadIndirect(Type type);
     void storeIndirect(Type type);
-    void pushR0() { code_ << "    dect r15\n    mov r0,[r15]\n"; }
-    void popR0() { code_ << "    mov [ir15],r0\n"; }
-    void pushR1() { code_ << "    dect r15\n    mov r1,[r15]\n"; }
-    void popR1() { code_ << "    mov [ir15],r1\n"; }
-    void pushR4() { code_ << "    dect r15\n    mov r4,[r15]\n"; }
-    void popR4() { code_ << "    mov [ir15],r4\n"; }
+    void pushR0() {
+        emit("dect", "r15");
+        emit("mov", "r0,[r15]");
+    }
+    void popR0() { emit("mov", "[ir15],r0"); }
+    void pushR1() {
+        emit("dect", "r15");
+        emit("mov", "r1,[r15]");
+    }
+    void popR1() { emit("mov", "[ir15],r1"); }
+    void pushR4() {
+        emit("dect", "r15");
+        emit("mov", "r4,[r15]");
+    }
+    void popR4() { emit("mov", "[ir15],r4"); }
 
     static std::string label(const ir::Slot *slot) { return "g_" + slot->sourceName; }
     static std::string label(const ir::Function *fn) { return "fn_" + fn->sourceName; }
@@ -177,7 +186,6 @@ class TMS9900Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

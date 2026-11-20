@@ -152,7 +152,7 @@ namespace rcc {
 // own check_vex() reads exactly that register back out via the interpreter's own `-d` dump
 // flag. A program that wants a specific process exit status still can - DEO to port 0x00
 // explicitly, same as any other reference-device write (see src/rt/vex/vex.h).
-class VexCodegen : public Backend {
+class VexCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "vex"; }
@@ -182,13 +182,13 @@ class VexCodegen : public Backend {
     // `R0`.."R7" text for register `n` - every emitter below goes through this rather than
     // spelling "r" + digit inline, so the register-naming convention lives in one place.
     static std::string reg(int n) { return "r" + std::to_string(n); }
-    void ldi(int rd, const std::string &imm) { code_ << "    ldi " << reg(rd) << ", " << imm << "\n"; }
+    void ldi(int rd, const std::string &imm) { emit("ldi", cat(reg(rd), ", ", imm)); }
     void ldiNum(int rd, uint32_t v);
-    void mov(int rd, int ra) { code_ << "    mov " << reg(rd) << ", " << reg(ra) << "\n"; }
-    void ld(int rd, int ra) { code_ << "    ld " << reg(rd) << ", " << reg(ra) << "\n"; }
-    void st(int ra, int rb) { code_ << "    st " << reg(ra) << ", " << reg(rb) << "\n"; }
+    void mov(int rd, int ra) { emit("mov", cat(reg(rd), ", ", reg(ra))); }
+    void ld(int rd, int ra) { emit("ld", cat(reg(rd), ", ", reg(ra))); }
+    void st(int ra, int rb) { emit("st", cat(reg(ra), ", ", reg(rb))); }
     void alu3(const std::string &op, int rd, int ra, int rb) {
-        code_ << "    " << op << " " << reg(rd) << ", " << reg(ra) << ", " << reg(rb) << "\n";
+        emit(op, cat(reg(rd), ", ", reg(ra), ", ", reg(rb)));
     }
     // Branches/calls always need their target already in a register - every one of these loads
     // `label` into `rtarget` first, so call sites never forget the LDI half.
@@ -268,7 +268,6 @@ class VexCodegen : public Backend {
     bool needSDivMod_ = false;
     bool needVarShift_ = false;
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // global data declarations, emitted after code
     std::map<std::string, std::string> perFileAsm_;
 

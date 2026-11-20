@@ -41,7 +41,7 @@ namespace rcc {
 //
 // Signed `<`/`<=`/`>`/`>=` flip the top bit of each operand's high byte
 // (sign-bit bias trick), then do a plain unsigned CPW+jrult/jruge.
-class STM8Codegen : public Backend {
+class STM8Codegen : public Backend, protected TextCodegenBase {
    public:
     static std::string wideScratch(const char *role, int i) { return std::string("w") + role + std::to_string(i); }
 
@@ -214,7 +214,9 @@ class STM8Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

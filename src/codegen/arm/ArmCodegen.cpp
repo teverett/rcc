@@ -59,25 +59,25 @@ void ArmCodegen::declareArray(const std::string &lbl, const std::vector<ir::Arra
 }
 
 void ArmCodegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    movw " << reg << "," << lbl << "\n";
-    code_ << "    movt " << reg << "," << lbl << "\n";
+    emit("movw", cat(reg, ",", lbl));
+    emit("movt", cat(reg, ",", lbl));
 }
 
 void ArmCodegen::emitFrameOffset(const std::string &reg, int offsetBytes, bool isAdd) {
     if (offsetBytes == 0) return;
     if (offsetBytes <= 255) {
-        code_ << "    " << (isAdd ? "add" : "sub") << " " << reg << "," << reg << "," << offsetBytes << "\n";
+        emit((isAdd ? "add" : "sub"), cat("", reg, ",", reg, ",", offsetBytes));
         return;
     }
     std::string scratch = (reg == "r1") ? "r3" : "r1";
     uint32_t uv = static_cast<uint32_t>(offsetBytes);
-    code_ << "    movw " << scratch << "," << static_cast<int32_t>(uv & 0xFFFFu) << "\n";
-    if ((uv >> 16) != 0) code_ << "    movt " << scratch << "," << static_cast<int32_t>((uv >> 16) & 0xFFFFu) << "\n";
-    code_ << "    " << (isAdd ? "add" : "sub") << " " << reg << "," << reg << "," << scratch << "\n";
+    emit("movw", cat(scratch, ",", static_cast<int32_t>(uv & 0xFFFFu)));
+    if ((uv >> 16) != 0) emit("movt", cat(scratch, ",", static_cast<int32_t>((uv >> 16) & 0xFFFFu)));
+    emit((isAdd ? "add" : "sub"), cat("", reg, ",", reg, ",", scratch));
 }
 
 void ArmCodegen::loadFrameAddr(const std::string &reg, const ir::Slot *slot, int elemIndex) {
-    code_ << "    mov " << reg << ",fp\n";
+    emit("mov", cat(reg, ",fp"));
     // `frameOffset` is already a byte offset (from the slot's declared
     // type's width); `elemIndex` is scaled by the array's element width.
     if (slot->kind == ir::SlotKind::Param) {
@@ -106,8 +106,8 @@ void ArmCodegen::loadArrayInitElem(const std::string &reg, const ir::ArrayInitEl
         return;
     }
     uint32_t uv = static_cast<uint32_t>(e.value);
-    code_ << "    movw " << reg << "," << static_cast<int32_t>(uv & 0xFFFFu) << "\n";
-    if ((uv >> 16) != 0) code_ << "    movt " << reg << "," << static_cast<int32_t>((uv >> 16) & 0xFFFFu) << "\n";
+    emit("movw", cat(reg, ",", static_cast<int32_t>(uv & 0xFFFFu)));
+    if ((uv >> 16) != 0) emit("movt", cat(reg, ",", static_cast<int32_t>((uv >> 16) & 0xFFFFu)));
 }
 
 void ArmCodegen::genLocalArrayInit(const ir::Slot *slot) {
@@ -121,8 +121,8 @@ void ArmCodegen::genLocalArrayInit(const ir::Slot *slot) {
             // is always a native-int-width address, so stays single-word.
             auto v = static_cast<uint64_t>(e.value);
             uint32_t hi = static_cast<uint32_t>(v >> 32);
-            code_ << "    movw r1," << static_cast<int32_t>(hi & 0xFFFFu) << "\n";
-            if ((hi >> 16) != 0) code_ << "    movt r1," << static_cast<int32_t>((hi >> 16) & 0xFFFFu) << "\n";
+            emit("movw", cat("r1,", static_cast<int32_t>(hi & 0xFFFFu)));
+            if ((hi >> 16) != 0) emit("movt", cat("r1,", static_cast<int32_t>((hi >> 16) & 0xFFFFu)));
         }
         loadFrameAddr("r2", slot, static_cast<int>(i));
         storeOperand("r2", slot->type);
@@ -135,11 +135,11 @@ void ArmCodegen::narrowR0To(Type to) {
     // back in - zero-fill (`lsr`) for unsigned, sign-fill (`asr`) for
     // signed. ARM has no dedicated sign/zero-extend instruction here.
     if (w == 1) {
-        code_ << "    lsl r0,r0,24\n";
-        code_ << "    " << (to.isUnsigned ? "lsr" : "asr") << " r0,r0,24\n";
+        emit("lsl", "r0,r0,24");
+        emit((to.isUnsigned ? "lsr" : "asr"), "r0,r0,24");
     } else if (w == 2) {
-        code_ << "    lsl r0,r0,16\n";
-        code_ << "    " << (to.isUnsigned ? "lsr" : "asr") << " r0,r0,16\n";
+        emit("lsl", "r0,r0,16");
+        emit((to.isUnsigned ? "lsr" : "asr"), "r0,r0,16");
     }
 }
 
@@ -148,32 +148,45 @@ void ArmCodegen::narrowR0To(Type to) {
 // holds the running byte address (`addrReg` is read, never written), `r4`
 // the byte just transferred; `destReg` is assembled one OR per byte.
 void ArmCodegen::loadWordUnaligned(const std::string &addrReg, const std::string &destReg) {
-    code_ << "    ldindb " << addrReg << ",r4\n";
-    code_ << "    mov " << destReg << ",r4\n";
+    emit("ldindb", cat(addrReg, ",r4"));
+    emit("mov", cat(destReg, ",r4"));
     for (int byteIdx = 1; byteIdx < 4; byteIdx++) {
-        code_ << "    mov r3," << addrReg << "\n    add r3,r3," << byteIdx << "\n    ldindb r3,r4\n";
-        code_ << "    lsl r4,r4," << (byteIdx * 8) << "\n    orr " << destReg << "," << destReg << ",r4\n";
+        emit("mov", cat("r3,", addrReg));
+        emit("add", cat("r3,r3,", byteIdx));
+        emit("ldindb", "r3,r4");
+        emit("lsl", cat("r4,r4,", (byteIdx * 8)));
+        emit("orr", cat(destReg, ",", destReg, ",r4"));
     }
 }
 void ArmCodegen::storeWordUnaligned(const std::string &addrReg, const std::string &srcReg) {
-    code_ << "    stindb " << addrReg << "," << srcReg << "\n";
+    emit("stindb", cat(addrReg, ",", srcReg));
     for (int byteIdx = 1; byteIdx < 4; byteIdx++) {
-        code_ << "    mov r4," << srcReg << "\n    lsr r4,r4," << (byteIdx * 8) << "\n";
-        code_ << "    mov r3," << addrReg << "\n    add r3,r3," << byteIdx << "\n    stindb r3,r4\n";
+        emit("mov", cat("r4,", srcReg));
+        emit("lsr", cat("r4,r4,", (byteIdx * 8)));
+        emit("mov", cat("r3,", addrReg));
+        emit("add", cat("r3,r3,", byteIdx));
+        emit("stindb", "r3,r4");
     }
 }
 void ArmCodegen::loadHalfUnaligned(const std::string &addrReg, const std::string &destReg, bool isUnsigned) {
-    code_ << "    ldindb " << addrReg << "," << destReg << "\n";
-    code_ << "    mov r3," << addrReg << "\n    add r3,r3,1\n    ldindb r3,r4\n";
-    code_ << "    lsl r4,r4,8\n    orr " << destReg << "," << destReg << ",r4\n";
+    emit("ldindb", cat(addrReg, ",", destReg));
+    emit("mov", cat("r3,", addrReg));
+    emit("add", "r3,r3,1");
+    emit("ldindb", "r3,r4");
+    emit("lsl", "r4,r4,8");
+    emit("orr", cat(destReg, ",", destReg, ",r4"));
     if (!isUnsigned) {
-        code_ << "    lsl " << destReg << "," << destReg << ",16\n    asr " << destReg << "," << destReg << ",16\n";
+        emit("lsl", cat(destReg, ",", destReg, ",16"));
+        emit("asr", cat(destReg, ",", destReg, ",16"));
     }
 }
 void ArmCodegen::storeHalfUnaligned(const std::string &addrReg, const std::string &srcReg) {
-    code_ << "    stindb " << addrReg << "," << srcReg << "\n";
-    code_ << "    mov r4," << srcReg << "\n    lsr r4,r4,8\n";
-    code_ << "    mov r3," << addrReg << "\n    add r3,r3,1\n    stindb r3,r4\n";
+    emit("stindb", cat(addrReg, ",", srcReg));
+    emit("mov", cat("r4,", srcReg));
+    emit("lsr", "r4,r4,8");
+    emit("mov", cat("r3,", addrReg));
+    emit("add", "r3,r3,1");
+    emit("stindb", "r3,r4");
 }
 
 // `addrReg` holds the already-computed effective address (r2, by
@@ -182,58 +195,58 @@ void ArmCodegen::storeHalfUnaligned(const std::string &addrReg, const std::strin
 void ArmCodegen::loadOperand(const std::string &addrReg, Type type, bool mayBeUnaligned) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "ldindb " : "ldindsb ") << addrReg << ",r0\n";
+        emit((type.isUnsigned ? "ldindb " : "ldindsb "), cat(addrReg, ",r0"));
     } else if (w == 2) {
         if (mayBeUnaligned) {
             loadHalfUnaligned(addrReg, "r0", type.isUnsigned);
         } else {
-            code_ << "    " << (type.isUnsigned ? "ldindh " : "ldindsh ") << addrReg << ",r0\n";
+            emit((type.isUnsigned ? "ldindh " : "ldindsh "), cat(addrReg, ",r0"));
         }
     } else if (w == 4) {
         if (mayBeUnaligned) {
             loadWordUnaligned(addrReg, "r0");
         } else {
-            code_ << "    ldind " << addrReg << ",r0\n";
+            emit("ldind", cat(addrReg, ",r0"));
         }
     } else if (mayBeUnaligned) {
         loadWordUnaligned(addrReg, "r0");
-        code_ << "    add " << addrReg << "," << addrReg << ",4\n";
+        emit("add", cat(addrReg, ",", addrReg, ",4"));
         loadWordUnaligned(addrReg, "r1");
-        code_ << "    sub " << addrReg << "," << addrReg << ",4\n";
+        emit("sub", cat(addrReg, ",", addrReg, ",4"));
     } else {
-        code_ << "    ldind " << addrReg << ",r0\n";
-        code_ << "    add " << addrReg << "," << addrReg << ",4\n";
-        code_ << "    ldind " << addrReg << ",r1\n";
-        code_ << "    sub " << addrReg << "," << addrReg << ",4\n";
+        emit("ldind", cat(addrReg, ",r0"));
+        emit("add", cat(addrReg, ",", addrReg, ",4"));
+        emit("ldind", cat(addrReg, ",r1"));
+        emit("sub", cat(addrReg, ",", addrReg, ",4"));
     }
 }
 
 void ArmCodegen::storeOperand(const std::string &addrReg, Type type, bool mayBeUnaligned) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb " << addrReg << ",r0\n";
+        emit("stindb", cat(addrReg, ",r0"));
     } else if (w == 2) {
         if (mayBeUnaligned) {
             storeHalfUnaligned(addrReg, "r0");
         } else {
-            code_ << "    stindh " << addrReg << ",r0\n";
+            emit("stindh", cat(addrReg, ",r0"));
         }
     } else if (w == 4) {
         if (mayBeUnaligned) {
             storeWordUnaligned(addrReg, "r0");
         } else {
-            code_ << "    stind " << addrReg << ",r0\n";
+            emit("stind", cat(addrReg, ",r0"));
         }
     } else if (mayBeUnaligned) {
         storeWordUnaligned(addrReg, "r0");
-        code_ << "    add " << addrReg << "," << addrReg << ",4\n";
+        emit("add", cat(addrReg, ",", addrReg, ",4"));
         storeWordUnaligned(addrReg, "r1");
-        code_ << "    sub " << addrReg << "," << addrReg << ",4\n";
+        emit("sub", cat(addrReg, ",", addrReg, ",4"));
     } else {
-        code_ << "    stind " << addrReg << ",r0\n";
-        code_ << "    add " << addrReg << "," << addrReg << ",4\n";
-        code_ << "    stind " << addrReg << ",r1\n";
-        code_ << "    sub " << addrReg << "," << addrReg << ",4\n";
+        emit("stind", cat(addrReg, ",r0"));
+        emit("add", cat(addrReg, ",", addrReg, ",4"));
+        emit("stind", cat(addrReg, ",r1"));
+        emit("sub", cat(addrReg, ",", addrReg, ",4"));
     }
 }
 
@@ -250,7 +263,11 @@ void ArmCodegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         narrowR0To(to);  // r1 is simply discarded
     } else if (!fromWide && toWide) {
-        code_ << "    " << (from.isUnsigned ? "mov r1,0\n" : "asr r1,r0,31\n");
+        if (from.isUnsigned) {
+            emit("mov", "r1,0");
+        } else {
+            emit("asr", "r1,r0,31");
+        }
     } else if (!fromWide && !toWide) {
         narrowR0To(to);
     }
@@ -261,8 +278,10 @@ void ArmCodegen::genConvert(const ir::Expr &e) {
 void ArmCodegen::genNegate64() {
     // Two's complement negate of r0:r1 in place - `adc`'s immediate-0
     // operand2 reads the carry out of the preceding `adds`.
-    code_ << "    mvn r0,r0\n    mvn r1,r1\n";
-    code_ << "    adds r0,r0,1\n    adc r1,r1,0\n";
+    emit("mvn", "r0,r0");
+    emit("mvn", "r1,r1");
+    emit("adds", "r0,r0,1");
+    emit("adc", "r1,r1,0");
 }
 
 // `long long` add/sub (lhs OP rhs) - evaluate both into r0:r1, stashing
@@ -270,16 +289,23 @@ void ArmCodegen::genNegate64() {
 // carry/borrow across the word pair with adc/sbc.
 void ArmCodegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";  // stack (top->bottom): lhs_lo, lhs_hi
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r1");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");  // stack (top->bottom): lhs_lo, lhs_hi
     genExpr(rhs);
-    code_ << "    mov r4,r0\n    mov r5,r1\n";  // r4=rhs_lo, r5=rhs_hi
-    code_ << "    ldind sp,r0\n    add sp,sp,4\n";
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r0:r1 = lhs restored
+    emit("mov", "r4,r0");
+    emit("mov", "r5,r1");  // r4=rhs_lo, r5=rhs_hi
+    emit("ldind", "sp,r0");
+    emit("add", "sp,sp,4");
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r0:r1 = lhs restored
     if (isAdd) {
-        code_ << "    adds r0,r0,r4\n    adc r1,r1,r5\n";
+        emit("adds", "r0,r0,r4");
+        emit("adc", "r1,r1,r5");
     } else {
-        code_ << "    subs r0,r0,r4\n    sbc r1,r1,r5\n";
+        emit("subs", "r0,r0,r4");
+        emit("sbc", "r1,r1,r5");
     }
 }
 
@@ -291,16 +317,22 @@ void ArmCodegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd
 // result is exactly right for them.
 void ArmCodegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r1");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    mov r6,r0\n    mov r7,r1\n";      // r6=rhs_lo, r7=rhs_hi
-    code_ << "    ldind sp,r4\n    add sp,sp,4\n";  // r4 = lhs_lo
-    code_ << "    ldind sp,r5\n    add sp,sp,4\n";  // r5 = lhs_hi
-    code_ << "    mul r8,r4,r7\n";                   // r8 = lhs_lo*rhs_hi
-    code_ << "    mul r9,r5,r6\n";                   // r9 = lhs_hi*rhs_lo
-    code_ << "    umull r0,r1,r4,r6\n";               // r0:r1 = lhs_lo*rhs_lo (full 64-bit)
-    code_ << "    add r1,r1,r8\n    add r1,r1,r9\n";
+    emit("mov", "r6,r0");
+    emit("mov", "r7,r1");      // r6=rhs_lo, r7=rhs_hi
+    emit("ldind", "sp,r4");
+    emit("add", "sp,sp,4");  // r4 = lhs_lo
+    emit("ldind", "sp,r5");
+    emit("add", "sp,sp,4");  // r5 = lhs_hi
+    emit("mul", "r8,r4,r7");                   // r8 = lhs_lo*rhs_hi
+    emit("mul", "r9,r5,r6");                   // r9 = lhs_hi*rhs_lo
+    emit("umull", "r0,r1,r4,r6");               // r0:r1 = lhs_lo*rhs_lo (full 64-bit)
+    emit("add", "r1,r1,r8");
+    emit("add", "r1,r1,r9");
 }
 
 // Bit-serial shift/compare/subtract long division (no A32 instruction is
@@ -312,80 +344,128 @@ void ArmCodegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // restored on the result afterward per C's truncating-division rule.
 void ArmCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r1");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    mov r2,r0\n    mov r3,r1\n";      // r2:r3 = divisor
-    code_ << "    ldind sp,r0\n    add sp,sp,4\n";
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r0:r1 = dividend
+    emit("mov", "r2,r0");
+    emit("mov", "r3,r1");      // r2:r3 = divisor
+    emit("ldind", "sp,r0");
+    emit("add", "sp,sp,4");
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r0:r1 = dividend
 
     std::string LskipNegN, LskipNegD;
     if (!isUnsigned) {
-        code_ << "    lsr r9,r1,31\n";   // r9 = dividend's own sign
-        code_ << "    lsr r10,r3,31\n";  // r10 = divisor's own sign
-        code_ << "    sub sp,sp,4\n    stind sp,r9\n";
-        code_ << "    sub sp,sp,4\n    stind sp,r10\n";  // stack (top->bottom): divisorSign, dividendSign
+        emit("lsr", "r9,r1,31");   // r9 = dividend's own sign
+        emit("lsr", "r10,r3,31");  // r10 = divisor's own sign
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r9");
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r10");  // stack (top->bottom): divisorSign, dividendSign
         LskipNegN = newLabel();
-        code_ << "    cmp r9,0\n    beq " << LskipNegN << "\n";
-        code_ << "    mvn r0,r0\n    mvn r1,r1\n    adds r0,r0,1\n    adc r1,r1,0\n";
-        code_ << LskipNegN << ":\n";
+        emit("cmp", "r9,0");
+        emit("beq", LskipNegN);
+        emit("mvn", "r0,r0");
+        emit("mvn", "r1,r1");
+        emit("adds", "r0,r0,1");
+        emit("adc", "r1,r1,0");
+        emitLabel(LskipNegN);
         LskipNegD = newLabel();
-        code_ << "    cmp r10,0\n    beq " << LskipNegD << "\n";
-        code_ << "    mvn r2,r2\n    mvn r3,r3\n    adds r2,r2,1\n    adc r3,r3,0\n";
-        code_ << LskipNegD << ":\n";
+        emit("cmp", "r10,0");
+        emit("beq", LskipNegD);
+        emit("mvn", "r2,r2");
+        emit("mvn", "r3,r3");
+        emit("adds", "r2,r2,1");
+        emit("adc", "r3,r3,0");
+        emitLabel(LskipNegD);
     }
 
-    code_ << "    mov r4,0\n    mov r5,0\n    mov r6,0\n    mov r7,0\n    mov r8,64\n";
+    emit("mov", "r4,0");
+    emit("mov", "r5,0");
+    emit("mov", "r6,0");
+    emit("mov", "r7,0");
+    emit("mov", "r8,64");
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), LshiftQ = newLabel();
-    code_ << Lloop << ":\n    cmp r8,0\n    beq " << Ldone << "\n    sub r8,r8,1\n";
+    emitLabel(Lloop);
+    emit("cmp", "r8,0");
+    emit("beq", Ldone);
+    emit("sub", "r8,r8,1");
 
     // dividend <<= 1 (0-filled), capturing its own old top bit (r9).
-    code_ << "    lsr r9,r1,31\n";
-    code_ << "    lsr r10,r0,31\n";
-    code_ << "    lsl r0,r0,1\n";
-    code_ << "    lsl r1,r1,1\n    orr r1,r1,r10\n";
+    emit("lsr", "r9,r1,31");
+    emit("lsr", "r10,r0,31");
+    emit("lsl", "r0,r0,1");
+    emit("lsl", "r1,r1,1");
+    emit("orr", "r1,r1,r10");
 
     // remainder = (remainder << 1) | (dividend's old top bit, r9).
-    code_ << "    lsr r10,r4,31\n";
-    code_ << "    lsl r4,r4,1\n    orr r4,r4,r9\n";
-    code_ << "    lsl r5,r5,1\n    orr r5,r5,r10\n";
+    emit("lsr", "r10,r4,31");
+    emit("lsl", "r4,r4,1");
+    emit("orr", "r4,r4,r9");
+    emit("lsl", "r5,r5,1");
+    emit("orr", "r5,r5,r10");
 
     // if (remainder >= divisor) { remainder -= divisor; quotient bit = 1 } else quotient bit = 0
     // (always an unsigned magnitude compare - both operands were
     // already negated to non-negative above for the signed case).
-    code_ << "    cmp r5,r3\n    bne " << LhiDiff << "\n";
-    code_ << "    cmp r4,r2\n    bhs " << LsubYes << "\n    b " << LsubNo << "\n";
-    code_ << LhiDiff << ":\n    bhs " << LsubYes << "\n    b " << LsubNo << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    subs r4,r4,r2\n    sbc r5,r5,r3\n";
-    code_ << "    mov r12,1\n    b " << LshiftQ << "\n";
-    code_ << LsubNo << ":\n    mov r12,0\n";
-    code_ << LshiftQ << ":\n";
+    emit("cmp", "r5,r3");
+    emit("bne", LhiDiff);
+    emit("cmp", "r4,r2");
+    emit("bhs", LsubYes);
+    emit("b", LsubNo);
+    emitLabel(LhiDiff);
+    emit("bhs", LsubYes);
+    emit("b", LsubNo);
+    emitLabel(LsubYes);
+    emit("subs", "r4,r4,r2");
+    emit("sbc", "r5,r5,r3");
+    emit("mov", "r12,1");
+    emit("b", LshiftQ);
+    emitLabel(LsubNo);
+    emit("mov", "r12,0");
+    emitLabel(LshiftQ);
 
     // quotient = (quotient << 1) | quotient bit (r12).
-    code_ << "    lsr r10,r6,31\n";
-    code_ << "    lsl r6,r6,1\n    orr r6,r6,r12\n";
-    code_ << "    lsl r7,r7,1\n    orr r7,r7,r10\n";
-    code_ << "    b " << Lloop << "\n";
+    emit("lsr", "r10,r6,31");
+    emit("lsl", "r6,r6,1");
+    emit("orr", "r6,r6,r12");
+    emit("lsl", "r7,r7,1");
+    emit("orr", "r7,r7,r10");
+    emit("b", Lloop);
 
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
     if (!isUnsigned) {
-        code_ << "    ldind sp,r10\n    add sp,sp,4\n";  // r10 = divisorSign
-        code_ << "    ldind sp,r9\n    add sp,sp,4\n";   // r9 = dividendSign
+        emit("ldind", "sp,r10");
+        emit("add", "sp,sp,4");  // r10 = divisorSign
+        emit("ldind", "sp,r9");
+        emit("add", "sp,sp,4");   // r9 = dividendSign
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    eor r12,r9,r10\n    cmp r12,0\n    beq " << LskipNegQ << "\n";
-        code_ << "    mvn r6,r6\n    mvn r7,r7\n    adds r6,r6,1\n    adc r7,r7,0\n";
-        code_ << LskipNegQ << ":\n";
-        code_ << "    cmp r9,0\n    beq " << LskipNegR << "\n";
-        code_ << "    mvn r4,r4\n    mvn r5,r5\n    adds r4,r4,1\n    adc r5,r5,0\n";
-        code_ << LskipNegR << ":\n";
+        emit("eor", "r12,r9,r10");
+        emit("cmp", "r12,0");
+        emit("beq", LskipNegQ);
+        emit("mvn", "r6,r6");
+        emit("mvn", "r7,r7");
+        emit("adds", "r6,r6,1");
+        emit("adc", "r7,r7,0");
+        emitLabel(LskipNegQ);
+        emit("cmp", "r9,0");
+        emit("beq", LskipNegR);
+        emit("mvn", "r4,r4");
+        emit("mvn", "r5,r5");
+        emit("adds", "r4,r4,1");
+        emit("adc", "r5,r5,0");
+        emitLabel(LskipNegR);
     }
     if (wantRemainder) {
-        code_ << "    mov r0,r4\n    mov r1,r5\n";
+        emit("mov", "r0,r4");
+        emit("mov", "r1,r5");
     } else {
-        code_ << "    mov r0,r6\n    mov r1,r7\n";
+        emit("mov", "r0,r6");
+        emit("mov", "r1,r7");
     }
 }
 
@@ -396,24 +476,34 @@ void ArmCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wa
 // `asr` (sign-preserving) or `lsr` (zero-filling) accordingly.
 void ArmCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r1");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);  // r0 = shift count (already promoted to a plain int)
-    code_ << "    mov r4,r0\n";
-    code_ << "    ldind sp,r0\n    add sp,sp,4\n";
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r0:r1 restored = the value being shifted
+    emit("mov", "r4,r0");
+    emit("ldind", "sp,r0");
+    emit("add", "sp,sp,4");
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r0:r1 restored = the value being shifted
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    cmp r4,0\n    beq " << Ldone << "\n    sub r4,r4,1\n";
+    emitLabel(Lloop);
+    emit("cmp", "r4,0");
+    emit("beq", Ldone);
+    emit("sub", "r4,r4,1");
     if (isLeft) {
-        code_ << "    lsr r5,r0,31\n";  // r5 = r0's old top bit, carries into r1
-        code_ << "    lsl r0,r0,1\n    lsl r1,r1,1\n    orr r1,r1,r5\n";
+        emit("lsr", "r5,r0,31");  // r5 = r0's old top bit, carries into r1
+        emit("lsl", "r0,r0,1");
+        emit("lsl", "r1,r1,1");
+        emit("orr", "r1,r1,r5");
     } else {
-        code_ << "    lsl r5,r1,31\n";  // r5 = (r1&1)<<31, carries into r0's top
-        code_ << "    lsr r0,r0,1\n    orr r0,r0,r5\n";
-        code_ << "    " << (isUnsigned ? "lsr" : "asr") << " r1,r1,1\n";
+        emit("lsl", "r5,r1,31");  // r5 = (r1&1)<<31, carries into r0's top
+        emit("lsr", "r0,r0,1");
+        emit("orr", "r0,r0,r5");
+        emit((isUnsigned ? "lsr" : "asr"), "r1,r1,1");
     }
-    code_ << "    b " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("b", Lloop);
+    emitLabel(Ldone);
 }
 
 // A `long long` comparison - compare the high words first (signed or
@@ -422,33 +512,50 @@ void ArmCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isL
 // always unsigned regardless of the overall type's signedness.
 void ArmCodegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r1");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    mov r4,r0\n    mov r5,r1\n";      // r4:r5 = rhs
-    code_ << "    ldind sp,r0\n    add sp,sp,4\n";
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r0:r1 = lhs
+    emit("mov", "r4,r0");
+    emit("mov", "r5,r1");      // r4:r5 = rhs
+    emit("ldind", "sp,r0");
+    emit("add", "sp,sp,4");
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r0:r1 = lhs
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    cmp r0,r4\n    bne " << Lfalse << "\n";
-        code_ << "    cmp r1,r5\n    bne " << Lfalse << "\n";
-        code_ << "    mov r0," << onEqual << "\n    b " << Ldone << "\n";
-        code_ << Lfalse << ":\n    mov r0," << onDiffer << "\n";
-        code_ << Ldone << ":\n";
+        emit("cmp", "r0,r4");
+        emit("bne", Lfalse);
+        emit("cmp", "r1,r5");
+        emit("bne", Lfalse);
+        emit("mov", cat("r0,", onEqual));
+        emit("b", Ldone);
+        emitLabel(Lfalse);
+        emit("mov", cat("r0,", onDiffer));
+        emitLabel(Ldone);
         return;
     }
     std::string signedCC = op == "<" ? "lt" : op == "<=" ? "le" : op == ">" ? "gt" : "ge";
     std::string unsignedCC = op == "<" ? "lo" : op == "<=" ? "ls" : op == ">" ? "hi" : "hs";
     std::string hiCC = isUnsigned ? unsignedCC : signedCC;
     std::string LhiDiff = newLabel();
-    code_ << "    cmp r1,r5\n    bne " << LhiDiff << "\n";
-    code_ << "    cmp r0,r4\n    b" << unsignedCC << " " << Ltrue << "\n    b " << Lfalse << "\n";
-    code_ << LhiDiff << ":\n    b" << hiCC << " " << Ltrue << "\n    b " << Lfalse << "\n";
-    code_ << Lfalse << ":\n    mov r0,0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", "r1,r5");
+    emit("bne", LhiDiff);
+    emit("cmp", "r0,r4");
+    emit(cat("b", unsignedCC), Ltrue);
+    emit("b", Lfalse);
+    emitLabel(LhiDiff);
+    emit(cat("b", hiCC), Ltrue);
+    emit("b", Lfalse);
+    emitLabel(Lfalse);
+    emit("mov", "r0,0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "r0,1");
+    emitLabel(Ldone);
 }
 
 std::string ArmCodegen::generate(const ir::Program &prog, bool objectMode) {
@@ -461,14 +568,17 @@ std::string ArmCodegen::generate(const ir::Program &prog, bool objectMode) {
     // ArmLinkerFactory.cpp synthesizes one once every object is merged
     // and `main`'s linked address is resolvable. An object file's base is
     // `org 0`; placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    movw sp," << static_cast<int32_t>(kInitialSP & 0xFFFFu) << "\n";
-        code_ << "    movt sp," << static_cast<int32_t>((kInitialSP >> 16) & 0xFFFFu) << "\n";
-        code_ << "    bl " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("movw", cat("sp,", static_cast<int32_t>(kInitialSP & 0xFFFFu)));
+        emit("movt", cat("sp,", static_cast<int32_t>((kInitialSP >> 16) & 0xFFFFu)));
+        emit("bl", label(mainFn));
         // The result sits in r0 the moment execution reaches `halt`.
-        code_ << "halt:\n    b halt\n\n";
+        emitLabel("halt");
+        emit("b", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -544,18 +654,23 @@ std::map<std::string, std::string> ArmCodegen::perFileAsm() const { return perFi
 // resulting address layout). This makes direct or indirect recursion
 // safe: every activation gets its own `fp` and reserved Local words.
 void ArmCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    sub sp,sp,4\n    stind sp,lr\n";
-    code_ << "    sub sp,sp,4\n    stind sp,fp\n";
-    code_ << "    mov fp,sp\n";
+    emitLabel(label(fn.func));
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,lr");
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,fp");
+    emit("mov", "fp,sp");
     if (fn.func->frameSize > 0) emitFrameOffset("sp", fn.func->frameSize, /*isAdd=*/false);
 
     genStmt(*fn.body);
 
-    code_ << "    mov sp,fp\n";
-    code_ << "    ldind sp,fp\n    add sp,sp,4\n";
-    code_ << "    ldind sp,lr\n    add sp,sp,4\n";
-    code_ << "    bx lr\n\n";
+    emit("mov", "sp,fp");
+    emit("ldind", "sp,fp");
+    emit("add", "sp,sp,4");
+    emit("ldind", "sp,lr");
+    emit("add", "sp,sp,4");
+    emit("bx", "lr");
+    emitRaw("");
 }
 
 void ArmCodegen::genStmt(const ir::Stmt &s) {
@@ -566,54 +681,58 @@ void ArmCodegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    orr r0,r0,r1\n";
+            if (isWide(s.cond->type)) emit("orr", "r0,r0,r1");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp r0,0\n    beq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("cmp", "r0,0");
+            emit("beq", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    b " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("b", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    orr r0,r0,r1\n";
-            code_ << "    cmp r0,0\n    beq " << Lend << "\n";
+            if (isWide(s.cond->type)) emit("orr", "r0,r0,r1");
+            emit("cmp", "r0,0");
+            emit("beq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    b " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("b", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    b " << loopLabels_.back().second << "\n";
+            emit("b", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    b " << loopLabels_.back().first << "\n";
+            emit("b", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
             // An early return bypasses genFunction()'s fall-through
             // epilogue, so it needs this same frame teardown inline.
-            code_ << "    mov sp,fp\n";
-            code_ << "    ldind sp,fp\n    add sp,sp,4\n";
-            code_ << "    ldind sp,lr\n    add sp,sp,4\n";
-            code_ << "    bx lr\n";
+            emit("mov", "sp,fp");
+            emit("ldind", "sp,fp");
+            emit("add", "sp,sp,4");
+            emit("ldind", "sp,lr");
+            emit("add", "sp,sp,4");
+            emit("bx", "lr");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -622,7 +741,7 @@ void ArmCodegen::genStmt(const ir::Stmt &s) {
             } else if (s.initOrReturnOrExpr) {
                 genExpr(*s.initOrReturnOrExpr);
                 loadSlotAddr("r2", s.declSlot);
-                code_ << "    stind r2,r0\n";
+                emit("stind", "r2,r0");
             }
             return;
         }
@@ -633,16 +752,15 @@ void ArmCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    b " << irLabel(s.labelId) << "\n";
+            emit("b", irLabel(s.labelId));
             return;
         }
     }
@@ -656,16 +774,16 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
             if (isWide(e.type)) {
                 auto v = static_cast<uint64_t>(e.intValue);
                 uint32_t lo = static_cast<uint32_t>(v), hi = static_cast<uint32_t>(v >> 32);
-                code_ << "    movw r0," << static_cast<int32_t>(lo & 0xFFFFu) << "\n";
-                if ((lo >> 16) != 0) code_ << "    movt r0," << static_cast<int32_t>((lo >> 16) & 0xFFFFu) << "\n";
-                code_ << "    movw r1," << static_cast<int32_t>(hi & 0xFFFFu) << "\n";
-                if ((hi >> 16) != 0) code_ << "    movt r1," << static_cast<int32_t>((hi >> 16) & 0xFFFFu) << "\n";
+                emit("movw", cat("r0,", static_cast<int32_t>(lo & 0xFFFFu)));
+                if ((lo >> 16) != 0) emit("movt", cat("r0,", static_cast<int32_t>((lo >> 16) & 0xFFFFu)));
+                emit("movw", cat("r1,", static_cast<int32_t>(hi & 0xFFFFu)));
+                if ((hi >> 16) != 0) emit("movt", cat("r1,", static_cast<int32_t>((hi >> 16) & 0xFFFFu)));
                 return;
             }
             uint32_t uv = static_cast<uint32_t>(e.intValue);
-            code_ << "    movw r0," << static_cast<int32_t>(uv & 0xFFFFu) << "\n";
+            emit("movw", cat("r0,", static_cast<int32_t>(uv & 0xFFFFu)));
             if ((uv >> 16) != 0) {
-                code_ << "    movt r0," << static_cast<int32_t>((uv >> 16) & 0xFFFFu) << "\n";
+                emit("movt", cat("r0,", static_cast<int32_t>((uv >> 16) & 0xFFFFu)));
             }
             return;
         }
@@ -681,9 +799,11 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // r2 = target address
-                code_ << "    sub sp,sp,4\n    stind sp,r2\n";
+                emit("sub", "sp,sp,4");
+                emit("stind", "sp,r2");
                 genExpr(*e.rhs);
-                code_ << "    ldind sp,r2\n    add sp,sp,4\n";
+                emit("ldind", "sp,r2");
+                emit("add", "sp,sp,4");
                 storeOperand("r2", e.slot->type, /*mayBeUnaligned=*/e.slot->arraySize == 0);
                 return;
             }
@@ -707,7 +827,7 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    mov r2,r0\n";  // r2 = address
+            emit("mov", "r2,r0");  // r2 = address
             genCompoundThroughR2(e, /*mayBeUnaligned=*/true);
             return;
         }
@@ -715,24 +835,27 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             // The condition's type can still be wide, so this reuses
             // If/While's wide-OR-then-compare idiom, not a bare r0 test.
-            if (isWide(e.lhs->type)) code_ << "    orr r0,r0,r1\n";
+            if (isWide(e.lhs->type)) emit("orr", "r0,r0,r1");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp r0,0\n    beq " << Lelse << "\n";
+            emit("cmp", "r0,0");
+            emit("beq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    b " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("b", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             // Stores at e.type's width/signedness - the pointee type of a
             // typed pointer, or native-int-width for untyped-int-as-address.
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+            emit("sub", "sp,sp,4");
+            emit("stind", "sp,r0");
             genExpr(*e.rhs);  // r0, or r0:r1 if wide
-            code_ << "    ldind sp,r2\n    add sp,sp,4\n";
+            emit("ldind", "sp,r2");
+            emit("add", "sp,sp,4");
             storeOperand("r2", e.type, /*mayBeUnaligned=*/true);
             return;
         }
@@ -742,19 +865,19 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    rsb r0,r0,0\n";
+                    emit("rsb", "r0,r0,0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 // Loads at e.type's width/signedness - see DerefAssign above.
                 genExpr(*e.rhs);  // r0 = pointer value
-                code_ << "    mov r2,r0\n";
+                emit("mov", "r2,r0");
                 loadOperand("r2", e.type, /*mayBeUnaligned=*/true);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    mvn r0,r0\n";
-                if (isWide(e.rhs->type)) code_ << "    mvn r1,r1\n";
+                emit("mvn", "r0,r0");
+                if (isWide(e.rhs->type)) emit("mvn", "r1,r1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -773,15 +896,18 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-                    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+                    emit("sub", "sp,sp,4");
+                    emit("stind", "sp,r1");
+                    emit("sub", "sp,sp,4");
+                    emit("stind", "sp,r0");
                     totalBytes += 8;
                 } else {
-                    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+                    emit("sub", "sp,sp,4");
+                    emit("stind", "sp,r0");
                     totalBytes += 4;
                 }
             }
-            code_ << "    bl " << label(e.func) << "\n";
+            emit("bl", label(e.func));
             if (totalBytes > 0) emitFrameOffset("sp", totalBytes, /*isAdd=*/true);
             return;
         }
@@ -791,8 +917,8 @@ void ArmCodegen::genExpr(const ir::Expr &e) {
             // compile time. `blx r2` is a near call through whatever
             // address r2 holds, setting `lr` like `bl` does.
             genExpr(*e.lhs);  // r0 = the callee's entry address
-            code_ << "    mov r2,r0\n";
-            code_ << "    blx r2\n";
+            emit("mov", "r2,r0");
+            emit("blx", "r2");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -823,20 +949,20 @@ void ArmCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // r0 = index
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    lsl r0,r0," << shift << "\n";  // r0 *= the element type's own width
+        emit("lsl", cat("r0,r0,", shift));  // r0 *= the element type's own width
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): `mul` is register-only (no
         // immediate operand), so the width has to be loaded into a register first.
-        code_ << "    mov r3," << widthOfType(slot->type) << "\n";
-        code_ << "    mul r0,r0,r3\n";
+        emit("mov", cat("r3,", widthOfType(slot->type)));
+        emit("mul", "r0,r0,r3");
     }
     if (slot->arraySize > 0) {
         loadSlotAddr("r2", slot);
-        code_ << "    add r2,r2,r0\n";
+        emit("add", "r2,r2,r0");
     } else {
         loadSlotAddr("r1", slot);
-        code_ << "    ldind r1,r1\n";  // r1 = the pointer variable's own stored value
-        code_ << "    add r2,r1,r0\n";
+        emit("ldind", "r1,r1");  // r1 = the pointer variable's own stored value
+        emit("add", "r2,r1,r0");
     }
 }
 
@@ -848,17 +974,17 @@ void ArmCodegen::genIndex(const ir::Expr &e) {
 void ArmCodegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr("r2", operand.slot);
-        code_ << "    mov r0,r2\n";
+        emit("mov", "r0,r2");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    mov r0,r2\n";
+        emit("mov", "r0,r2");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress("r2", label(operand.func));
-        code_ << "    mov r0,r2\n";
+        emit("mov", "r0,r2");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -867,26 +993,26 @@ void ArmCodegen::genAddrOf(const ir::Expr &operand) {
 // Entry: r0 = old, r1 = rhs (both already at `type`'s width/signedness).
 void ArmCodegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add r0,r0,r1\n"; return; }
-    if (op == "-") { code_ << "    sub r0,r0,r1\n"; return; }
-    if (op == "*") { code_ << "    mul r0,r0,r1\n"; return; }
-    if (op == "&") { code_ << "    and r0,r0,r1\n"; return; }
-    if (op == "|") { code_ << "    orr r0,r0,r1\n"; return; }
-    if (op == "^") { code_ << "    eor r0,r0,r1\n"; return; }
+    if (op == "+") { emit("add", "r0,r0,r1"); return; }
+    if (op == "-") { emit("sub", "r0,r0,r1"); return; }
+    if (op == "*") { emit("mul", "r0,r0,r1"); return; }
+    if (op == "&") { emit("and", "r0,r0,r1"); return; }
+    if (op == "|") { emit("orr", "r0,r0,r1"); return; }
+    if (op == "^") { emit("eor", "r0,r0,r1"); return; }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "lsl" : (isUnsigned ? "lsr" : "asr");
-        code_ << "    " << insn << " r0,r0,r1\n";
+        emit(insn, "r0,r0,r1");
         return;
     }
     // "/" or "%" - r3 (genDivMod()'s own quotient-holding scratch) is
     // free to reuse here: by this point e.rhs has already fully
     // evaluated, so nothing still needs whatever r3 held during that
     // evaluation.
-    code_ << "    " << (isUnsigned ? "udiv" : "sdiv") << " r3,r0,r1\n";
+    emit((isUnsigned ? "udiv" : "sdiv"), "r3,r0,r1");
     if (op == "%") {
-        code_ << "    mls r0,r3,r1,r0\n";  // r0 = r0 - r3*r1 = old - quotient*rhs
+        emit("mls", "r0,r3,r1,r0");  // r0 = r0 - r3*r1 = old - quotient*rhs
     } else {
-        code_ << "    mov r0,r3\n";
+        emit("mov", "r0,r3");
     }
 }
 
@@ -895,21 +1021,27 @@ void ArmCodegen::genCompoundOp(const std::string &op, Type type) {
 // arbitrary nested codegen using r0 through r5) and never recomputed, so
 // an indexed/pointer target's address sub-expression is evaluated exactly once.
 void ArmCodegen::genCompoundThroughR2(const ir::Expr &e, bool mayBeUnaligned) {
-    code_ << "    sub sp,sp,4\n    stind sp,r2\n";  // stash address
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r2");  // stash address
     genExpr(*e.rhs);                                  // r0 = rhs
-    code_ << "    mov r1,r0\n";                        // r1 = rhs
-    code_ << "    ldind sp,r2\n    add sp,sp,4\n";      // r2 = address (restored)
+    emit("mov", "r1,r0");                        // r1 = rhs
+    emit("ldind", "sp,r2");
+    emit("add", "sp,sp,4");      // r2 = address (restored)
     loadOperand("r2", e.type, mayBeUnaligned);            // r0 = old
-    if (e.yieldOld) code_ << "    sub sp,sp,4\n    stind sp,r0\n";  // stash old
+    if (e.yieldOld) {
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r0");
+    }  // stash old
     genCompoundOp(e.op, e.type);                           // r0 = new (raw)
     narrowR0To(e.type);
     if (e.yieldOld) {
-        code_ << "    mov r3,r0\n";                          // r3 = new
-        code_ << "    ldind sp,r0\n    add sp,sp,4\n";         // r0 = old
-        code_ << "    mov r1,r0\n";                             // r1 = old, preserved across the store below
-        code_ << "    mov r0,r3\n";                              // r0 = new - storeOperand always stores from r0
+        emit("mov", "r3,r0");                          // r3 = new
+        emit("ldind", "sp,r0");
+        emit("add", "sp,sp,4");         // r0 = old
+        emit("mov", "r1,r0");                             // r1 = old, preserved across the store below
+        emit("mov", "r0,r3");                              // r0 = new - storeOperand always stores from r0
         storeOperand("r2", e.type, mayBeUnaligned);
-        code_ << "    mov r0,r1\n";                               // r0 = old (final result)
+        emit("mov", "r0,r1");                               // r0 = old (final result)
     } else {
         storeOperand("r2", e.type, mayBeUnaligned);  // r0 already = new
     }
@@ -929,13 +1061,15 @@ void ArmCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r0");
         genExpr(*e.rhs);
-        code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r1 = lhs, r0 = rhs
+        emit("ldind", "sp,r1");
+        emit("add", "sp,sp,4");  // r1 = lhs, r0 = rhs
         if (op == "+") {
-            code_ << "    add r0,r1,r0\n";  // r0 = lhs + rhs
+            emit("add", "r0,r1,r0");  // r0 = lhs + rhs
         } else {
-            code_ << "    sub r0,r1,r0\n";  // r0 = lhs - rhs
+            emit("sub", "r0,r1,r0");  // r0 = lhs - rhs
         }
         return;
     }
@@ -959,20 +1093,28 @@ void ArmCodegen::genBinary(const ir::Expr &e) {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "orr" : "eor";
         if (wide) {
             genExpr(*e.lhs);
-            code_ << "    sub sp,sp,4\n    stind sp,r1\n";
-            code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+            emit("sub", "sp,sp,4");
+            emit("stind", "sp,r1");
+            emit("sub", "sp,sp,4");
+            emit("stind", "sp,r0");
             genExpr(*e.rhs);
-            code_ << "    mov r4,r0\n    mov r5,r1\n";
-            code_ << "    ldind sp,r0\n    add sp,sp,4\n";
-            code_ << "    ldind sp,r1\n    add sp,sp,4\n";
-            code_ << "    " << insn << " r0,r0,r4\n    " << insn << " r1,r1,r5\n";
+            emit("mov", "r4,r0");
+            emit("mov", "r5,r1");
+            emit("ldind", "sp,r0");
+            emit("add", "sp,sp,4");
+            emit("ldind", "sp,r1");
+            emit("add", "sp,sp,4");
+            emit(insn, "r0,r0,r4");
+            emit(insn, "r1,r1,r5");
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r0");
         genExpr(*e.rhs);
-        code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r1 = lhs, r0 = rhs
-        code_ << "    " << insn << " r0,r1,r0\n";
+        emit("ldind", "sp,r1");
+        emit("add", "sp,sp,4");  // r1 = lhs, r0 = rhs
+        emit(insn, "r0,r1,r0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -981,12 +1123,14 @@ void ArmCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+        emit("sub", "sp,sp,4");
+        emit("stind", "sp,r0");
         genExpr(*e.rhs);                                  // r0 = shift count
-        code_ << "    mov r1,r0\n";                        // r1 = shift count
-        code_ << "    ldind sp,r0\n    add sp,sp,4\n";     // r0 = value to shift
+        emit("mov", "r1,r0");                        // r1 = shift count
+        emit("ldind", "sp,r0");
+        emit("add", "sp,sp,4");     // r0 = value to shift
         const char *insn = op == "<<" ? "lsl" : (isUnsigned ? "lsr" : "asr");
-        code_ << "    " << insn << " r0,r0,r1\n";
+        emit(insn, "r0,r0,r1");
         return;
     }
     if (op == "&&") {
@@ -1005,10 +1149,12 @@ void ArmCodegen::genBinary(const ir::Expr &e) {
 // `MULT`+`MFLO` needs.
 void ArmCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r1 = lhs, r0 = rhs
-    code_ << "    mul r0,r1,r0\n";
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r1 = lhs, r0 = rhs
+    emit("mul", "r0,r1,r0");
 }
 
 // Real hardware divide (`SDIV`/`UDIV`) - a full 32-bit quotient directly.
@@ -1018,16 +1164,18 @@ void ArmCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // UNPREDICTABLE for multiply-family instructions.
 void ArmCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r1 = lhs (dividend), r0 = rhs (divisor)
-    code_ << "    " << (isUnsigned ? "udiv" : "sdiv") << " r3,r1,r0\n";  // r3 = quotient
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r1 = lhs (dividend), r0 = rhs (divisor)
+    emit((isUnsigned ? "udiv" : "sdiv"), "r3,r1,r0");  // r3 = quotient
     if (!wantRemainder) {
-        code_ << "    mov r0,r3\n";
+        emit("mov", "r0,r3");
         return;
     }
-    code_ << "    mov r2,r0\n";          // r2 = divisor copy
-    code_ << "    mls r0,r3,r2,r1\n";    // r0 = r1 - r3*r2 = remainder
+    emit("mov", "r2,r0");          // r2 = divisor copy
+    emit("mls", "r0,r3,r2,r1");    // r0 = r1 - r3*r2 = remainder
 }
 
 // Every ARM data-processing instruction is conditionally executed per its
@@ -1042,23 +1190,25 @@ void ArmCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir
     }
     bool isUnsigned = lhs.type.isUnsigned;
     genExpr(lhs);
-    code_ << "    sub sp,sp,4\n    stind sp,r0\n";
+    emit("sub", "sp,sp,4");
+    emit("stind", "sp,r0");
     genExpr(rhs);
-    code_ << "    ldind sp,r1\n    add sp,sp,4\n";  // r1 = lhs, r0 = rhs
-    code_ << "    cmp r1,r0\n";                      // flags = lhs - rhs
-    code_ << "    mov r0,0\n";
+    emit("ldind", "sp,r1");
+    emit("add", "sp,sp,4");  // r1 = lhs, r0 = rhs
+    emit("cmp", "r1,r0");                      // flags = lhs - rhs
+    emit("mov", "r0,0");
     if (op == "<") {
-        code_ << "    mov" << (isUnsigned ? "lo" : "lt") << " r0,1\n";
+        emit(cat("mov", (isUnsigned ? "lo" : "lt")), "r0,1");
     } else if (op == ">") {
-        code_ << "    mov" << (isUnsigned ? "hi" : "gt") << " r0,1\n";
+        emit(cat("mov", (isUnsigned ? "hi" : "gt")), "r0,1");
     } else if (op == "<=") {
-        code_ << "    mov" << (isUnsigned ? "ls" : "le") << " r0,1\n";
+        emit(cat("mov", (isUnsigned ? "ls" : "le")), "r0,1");
     } else if (op == ">=") {
-        code_ << "    mov" << (isUnsigned ? "hs" : "ge") << " r0,1\n";
+        emit(cat("mov", (isUnsigned ? "hs" : "ge")), "r0,1");
     } else if (op == "==") {
-        code_ << "    moveq r0,1\n";
+        emit("moveq", "r0,1");
     } else if (op == "!=") {
-        code_ << "    movne r0,1\n";
+        emit("movne", "r0,1");
     } else {
         err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
     }
@@ -1068,39 +1218,49 @@ void ArmCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir
 // r0,r0,r1` folds them together before the usual "cmp r0,0".
 void ArmCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    orr r0,r0,r1\n";
+    if (isWide(lhs.type)) emit("orr", "r0,r0,r1");
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp r0,0\n    beq " << Lfalse << "\n";
+    emit("cmp", "r0,0");
+    emit("beq", Lfalse);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orr r0,r0,r1\n";
-    code_ << "    cmp r0,0\n    beq " << Lfalse << "\n";
-    code_ << "    b " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    mov r0,0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov r0,1\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("orr", "r0,r0,r1");
+    emit("cmp", "r0,0");
+    emit("beq", Lfalse);
+    emit("b", Ltrue);
+    emitLabel(Lfalse);
+    emit("mov", "r0,0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "r0,1");
+    emitLabel(Ldone);
 }
 
 void ArmCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    orr r0,r0,r1\n";
+    if (isWide(lhs.type)) emit("orr", "r0,r0,r1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmp r0,0\n    bne " << Ltrue << "\n";
+    emit("cmp", "r0,0");
+    emit("bne", Ltrue);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orr r0,r0,r1\n";
-    code_ << "    cmp r0,0\n    bne " << Ltrue << "\n";
-    code_ << "    b " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    mov r0,1\n    b " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mov r0,0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("orr", "r0,r0,r1");
+    emit("cmp", "r0,0");
+    emit("bne", Ltrue);
+    emit("b", Lfalse);
+    emitLabel(Ltrue);
+    emit("mov", "r0,1");
+    emit("b", Ldone);
+    emitLabel(Lfalse);
+    emit("mov", "r0,0");
+    emitLabel(Ldone);
 }
 
 // `!x` is exactly "x == 0" - one `CMP`+conditional-`MOV` pair.
 void ArmCodegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orr r0,r0,r1\n";
-    code_ << "    cmp r0,0\n";
-    code_ << "    mov r0,0\n";
-    code_ << "    moveq r0,1\n";
+    if (isWide(rhs.type)) emit("orr", "r0,r0,r1");
+    emit("cmp", "r0,0");
+    emit("mov", "r0,0");
+    emit("moveq", "r0,1");
 }
 
 std::optional<std::string> ArmCodegen::assembleInProcess(const std::string &asmText,

@@ -23,7 +23,7 @@ namespace rcc {
 // synthesizes the one real entry object once every user object is merged.
 // Linux hosted mode uses ELF/i386 symbols; Windows hosted mode uses COFF symbols and the i386
 // Windows C calling convention.
-class I386Codegen : public Backend {
+class I386Codegen : public Backend, protected TextCodegenBase {
    public:
     void setHostedAbi(bool enabled) { hostedAbi_ = enabled; }
      void setWindowsAbi(bool enabled) { windowsAbi_ = enabled; }
@@ -217,7 +217,6 @@ class I386Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dd v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

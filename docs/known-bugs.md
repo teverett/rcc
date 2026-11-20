@@ -560,21 +560,24 @@ resolve `$arg` to an absolute path (e.g. `RCC="$(cd "$(dirname "$arg")"
 way `ROOT_DIR`/`SCRIPT_DIR` already resolve themselves a few lines
 above.
 
-## `tests/multidecl_array.c`/`tests/multidecl_scalar.c` fail on `--target=stm32`/`i386`
+## `tests/multidecl_array.c`/`tests/multidecl_scalar.c` fail on `--target=stm32`/`i386`/`cortex-m3`
 
-Affects `src/codegen/stm32/STM32Codegen.cpp` and `src/codegen/i386/I386Codegen.cpp`,
-discovered running `make test` after merging in the comma-separated-declarator-list feature
-(`grammar/c/CParser.g4`/`src/ast/BuildAst.cpp`/`src/ir/IRBuilder.cpp` - see these two tests' own
-header comments). Every other target exercised (`6502`-family, `pdp1`/`pdp7`, `68000`,
-`mc68328`, `8080`, `z80`, `8051`) passes both tests cleanly; only these two fail, and not with a
+Affects `src/codegen/stm32/STM32Codegen.cpp`, `src/codegen/i386/I386Codegen.cpp`, and
+`src/codegen/armm/ArmMCodegen.cpp` (`cortex-m3`), discovered running `make test` after merging
+in the comma-separated-declarator-list feature (`grammar/c/CParser.g4`/`src/ast/BuildAst.cpp`/
+`src/ir/IRBuilder.cpp` - see these two tests' own header comments). Every other target exercised
+(`6502`-family, `pdp1`/`pdp7`, `68000`, `mc68328`, `8080`, `z80`, `8051`, `r32c`/`m32c`,
+`riscv32`, `z8000`, `6809`) passes both tests cleanly; only these three fail, and not with a
 crash - `multidecl_array.c` returns 340 instead of 339 on `stm32` (one of the uninitialized
-locals, `mid` or `s2`, comes back as 1 rather than 0), and `multidecl_scalar.c` returns
-unrelated large garbage values on both (28801/28497 rather than 35), suggesting an uninitialized
-local or a frame-layout issue specific to how these two backends place a comma-separated
-declarator list's own several locals, rather than anything about the shared parser/AST/IR
-change itself (which neither test exercises per-target logic for). Not yet root-caused -
-excluded via `is_known_unsupported()` in the meantime rather than left as an unexplained
-failure.
+locals, `mid` or `s2`, comes back as 1 rather than 0; `cortex-m3` returns a different garbage
+value, 1048915), and `multidecl_scalar.c` returns unrelated large garbage values on all three
+(28801/28497/1048611 rather than 35), suggesting an uninitialized local or a frame-layout issue
+specific to how these backends place a comma-separated declarator list's own several locals,
+rather than anything about the shared parser/AST/IR change itself (which neither test exercises
+per-target logic for) - and, per `cortex-m3`'s own 2026-11-20 confirmation (identical generated
+assembly before and after an unrelated `emit()`-API codegen refactor), not something introduced
+by any later per-backend change either. Not yet root-caused - excluded via
+`is_known_unsupported()` in the meantime rather than left as an unexplained failure.
 
 ## `src/rt/bbc/`'s runtime has no OSARGS, no OSGBPB disc-title/directory functions, and no OSBYTE/OSWORD call whose own result returns in X or Y
 
@@ -716,3 +719,73 @@ Not fixed. Worked around in `BasicFrontend.cpp`: `GOSUB`/`RETURN`'s dispatch no 
 see that file's `appendGosubDispatch` for the `if`/`goto` chain used instead. Revisit with a
 from-scratch 6502-only minimal repro (no runtime library, hand-written globals) and a
 relocation-table dump of the linked object if this needs root-causing for real.
+
+## `tests/local_cse_convert.c` fails on `powerpc` even without `--optimize`
+
+Discovered 2026-11-20 while independently re-verifying `tests/run_tests.sh --target=powerpc`
+after an unrelated change (the `emit()`-API codegen refactor, which this bug predates and is
+unrelated to - confirmed by reproducing the identical failure on the pre-refactor `powerpc`
+backend via `git stash`). `local_cse_convert.c` (`// EXPECT: 1`) returns 0 instead. Despite the
+test's own name/comment (written to exercise `LocalCSE` hoisting a repeated `(int)c + 1` into a
+shared temp), the failure is NOT about `LocalCSE`: `tests/run_tests.sh`'s default invocation
+(no `--optimize`) never runs `LocalCSE` at all (it's gated behind `--optimize` in
+`src/main.cpp`'s `compileOneFile`), so whatever's wrong is in plain, unoptimized `PowerPCCodegen`
+handling of an `ir::ExprKind::Convert` from `char` to `int` - not an optimizer-pass interaction.
+
+Not root-caused yet. Not in `tests/run_tests.sh`'s `is_known_unsupported()` skip-list (unlike
+`powerpc`'s three documented `long`/`long long` entries nearby in that function, which are a
+different, already-triaged issue) - this one slipped through untracked until now. Revisit by
+building down from the test's two back-to-back `(int)c + 1` conversions to the single-conversion
+case and checking `PowerPCCodegen::genConvert`'s char-to-int sign-extension path under qemu.
+
+## `parrotvm` local array initialization emits garbled/invalid PIR for a literal or symbol element
+
+Discovered 2026-11-20 while converting `ParrotVmCodegen.cpp`'s instruction emission to the
+shared `emit()` API (the same mechanical refactor every other text-emitting backend has gone
+through) and noticing the mechanical conversion would have silently fixed this as a side effect
+- reverted that one spot back to the original broken form specifically so this refactor stays a
+pure mechanical one, with the real fix tracked here separately instead.
+
+`genStmt()`'s `StmtKind::LocalDecl` array-initializer case, for element 0 specifically (`offset
+== 0`) and separately for a symbol-reference element (`elem.slot`), builds its line as
+`code_ << "   " << addr << " = " << slotAddress(...) << "\n";` (and the symbol-reference
+equivalent) - `slotAddress()` has its own `code_`-emission side effects (it emits a real
+instruction computing the address, then returns the register holding it), and it's used as a
+*late operand* of the same `<<` chain that's already written this line's own unterminated
+prefix (`"   $I0 = "`) directly into `code_`. C++17 guarantees left-to-right evaluation of
+chained `operator<<`, but that's exactly what causes the bug: by the time `slotAddress()` is
+evaluated as the chain's 4th operand, the first three have already been flushed into `code_`
+unterminated, so `slotAddress()`'s own complete, newline-terminated instruction line gets
+spliced into the middle of this still-open line, and the chain's remaining operand (the register
+name `slotAddress()` returns) and final `"\n"` land on their own dangling, indentless, invalid
+line right after. E.g. for `int a[3] = {1,2,3};`, this produces:
+```
+   $I0 =    $I1 = $I_fp
+$I1
+```
+instead of the intended
+```
+   $I1 = $I_fp
+   $I0 = $I1
+```
+Reproduced with `tests/arrays.c`-equivalent BAC source (any local array initializer with a
+literal/symbol element, not just a struct/dispatch-table case) - likely emits unparseable PIR on
+real Parrot for this shape today. Not fixed. Needs `slotAddress()`'s result captured into a
+local `std::string` *before* building the line that uses it (the same fix this refactor's
+`emit()`/`cat()` already gives every other converted call site in this file - `cat("= ",
+slotAddress(...))` fully evaluates `slotAddress()`'s own side effects before building the
+returned string, which is what naturally avoids this exact interleaving everywhere else in
+`ParrotVmCodegen.cpp`), applied as its own standalone fix with its own tests, not bundled into
+the mechanical refactor.
+
+## `tests/struct_nonpow2_array_stride.c` fails on `avr`
+
+Discovered 2026-11-20 while verifying the `emit()`-API conversion of `AVRCodegen.cpp` - confirmed
+pre-existing and unrelated to that refactor (the generated assembly is byte-for-byte identical
+before and after the conversion; `tests/run_tests.sh --target=avr` fails it the same way on the
+unconverted original). `// EXPECT: 33`, gets 33 via `r16=58 r17=00` misread (wrong value entirely,
+not just a wrong address read back consistently - see the test's own header comment on why it
+checks the real pointer stride directly for exactly this reason). Likely the same family of
+non-power-of-two (`sizeof(struct Three) == 3`) element-stride index-scaling issue other targets
+have hit, but not yet confirmed to be the identical root cause - not root-caused for `avr`
+specifically. Not in `tests/run_tests.sh`'s `is_known_unsupported()` skip-list yet.

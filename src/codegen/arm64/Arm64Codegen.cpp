@@ -39,24 +39,24 @@ std::string reg(int n, bool wide) { return (wide ? "x" : "w") + std::to_string(n
 void Arm64Codegen::loadImm32(const std::string &reg, uint32_t uv) {
     std::string w = "w" + reg.substr(1);  // the same physical register's own 32-bit ("w") view
     if (uv <= 0xFFFFu) {
-        code_ << "    movz " << w << "," << static_cast<int32_t>(uv) << "\n";
+        emit("movz", cat(w, ",", static_cast<int32_t>(uv)));
     } else {
-        code_ << "    movz " << w << "," << static_cast<int32_t>(uv & 0xFFFFu) << "\n";
-        code_ << "    movk " << w << "," << static_cast<int32_t>((uv >> 16) & 0xFFFFu) << "\n";
+        emit("movz", cat(w, ",", static_cast<int32_t>(uv & 0xFFFFu)));
+        emit("movk", cat(w, ",", static_cast<int32_t>((uv >> 16) & 0xFFFFu)));
     }
 }
 
 void Arm64Codegen::loadImm64(const std::string &dstReg, uint64_t uv) {
-    code_ << "    movz " << dstReg << "," << static_cast<int32_t>(uv & 0xFFFFu) << "\n";
+    emit("movz", cat(dstReg, ",", static_cast<int32_t>(uv & 0xFFFFu)));
     uint16_t c1 = static_cast<uint16_t>((uv >> 16) & 0xFFFFu);
     uint16_t c2 = static_cast<uint16_t>((uv >> 32) & 0xFFFFu);
     uint16_t c3 = static_cast<uint16_t>((uv >> 48) & 0xFFFFu);
     bool any = (uv & 0xFFFFu) != 0;
     if (c1 != 0 || (any && (c2 != 0 || c3 != 0))) {
-        code_ << "    movk " << dstReg << "," << static_cast<int32_t>(c1) << "\n";
+        emit("movk", cat(dstReg, ",", static_cast<int32_t>(c1)));
     }
-    if (c2 != 0) code_ << "    movk2 " << dstReg << "," << static_cast<int32_t>(c2) << "\n";
-    if (c3 != 0) code_ << "    movk3 " << dstReg << "," << static_cast<int32_t>(c3) << "\n";
+    if (c2 != 0) emit("movk2", cat(dstReg, ",", static_cast<int32_t>(c2)));
+    if (c3 != 0) emit("movk3", cat(dstReg, ",", static_cast<int32_t>(c3)));
 }
 
 void Arm64Codegen::narrowW0To(Type to) {
@@ -65,11 +65,11 @@ void Arm64Codegen::narrowW0To(Type to) {
     // back in (immediate `lsl`/`lsr`/`asr` - zero-fill for unsigned,
     // sign-fill for signed).
     if (w == 1) {
-        code_ << "    lsl w0,w0,24\n";
-        code_ << "    " << (to.isUnsigned ? "lsr" : "asr") << " w0,w0,24\n";
+        emit("lsl", "w0,w0,24");
+        emit((to.isUnsigned ? "lsr" : "asr"), "w0,w0,24");
     } else if (w == 2) {
-        code_ << "    lsl w0,w0,16\n";
-        code_ << "    " << (to.isUnsigned ? "lsr" : "asr") << " w0,w0,16\n";
+        emit("lsl", "w0,w0,16");
+        emit((to.isUnsigned ? "lsr" : "asr"), "w0,w0,16");
     }
 }
 
@@ -79,21 +79,20 @@ void Arm64Codegen::narrowW0To(Type to) {
 // the other operand needs.
 void Arm64Codegen::loadIntUnaligned(const std::string &addrReg, const std::string &destReg, int nBytes) {
     std::string byteReg = nBytes > 4 ? "x4" : "w4";
-    code_ << "    ldindb " << addrReg << "," << byteReg << "\n";
-    code_ << "    mov " << destReg << "," << byteReg << "\n";
+    emit("ldindb", cat(addrReg, ",", byteReg));
+    emit("mov", cat(destReg, ",", byteReg));
     for (int byteIdx = 1; byteIdx < nBytes; byteIdx++) {
-        code_ << "    mov x3," << addrReg << "\n    add x3,x3," << byteIdx << "\n    ldindb x3," << byteReg << "\n";
-        code_ << "    lsl " << byteReg << "," << byteReg << "," << (byteIdx * 8) << "\n";
-        code_ << "    orr " << destReg << "," << destReg << "," << byteReg << "\n";
+        { emit("mov", cat("x3,", addrReg)); emit("add", cat("x3,x3,", byteIdx)); emit("ldindb", cat("x3,", byteReg)); }
+        emit("lsl", cat(byteReg, ",", byteReg, ",", (byteIdx * 8)));
+        emit("orr", cat(destReg, ",", destReg, ",", byteReg));
     }
 }
 void Arm64Codegen::storeIntUnaligned(const std::string &addrReg, const std::string &srcReg, int nBytes) {
     std::string byteReg = nBytes > 4 ? "x4" : "w4";
-    code_ << "    stindb " << addrReg << "," << srcReg << "\n";
+    emit("stindb", cat(addrReg, ",", srcReg));
     for (int byteIdx = 1; byteIdx < nBytes; byteIdx++) {
-        code_ << "    mov " << byteReg << "," << srcReg << "\n    lsr " << byteReg << "," << byteReg << ","
-              << (byteIdx * 8) << "\n";
-        code_ << "    mov x3," << addrReg << "\n    add x3,x3," << byteIdx << "\n    stindb x3," << byteReg << "\n";
+        { emit("mov", cat(byteReg, ",", srcReg)); emit("lsr", cat(byteReg, ",", byteReg, ",", (byteIdx * 8))); }
+        { emit("mov", cat("x3,", addrReg)); emit("add", cat("x3,x3,", byteIdx)); emit("stindb", cat("x3,", byteReg)); }
     }
 }
 
@@ -103,47 +102,47 @@ void Arm64Codegen::storeIntUnaligned(const std::string &addrReg, const std::stri
 void Arm64Codegen::loadOperand(const std::string &addrReg, Type type, bool mayBeUnaligned) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "ldindb " : "ldindsb ") << addrReg << ",w0\n";
+        emit(cat((type.isUnsigned ? "ldindb " : "ldindsb "), addrReg, ",w0"));
     } else if (w == 2) {
         if (mayBeUnaligned) {
             loadIntUnaligned(addrReg, "w0", 2);
-            if (!type.isUnsigned) code_ << "    lsl w0,w0,16\n    asr w0,w0,16\n";
+            if (!type.isUnsigned) { emit("lsl", "w0,w0,16"); emit("asr", "w0,w0,16"); }
         } else {
-            code_ << "    " << (type.isUnsigned ? "ldindh " : "ldindsh ") << addrReg << ",w0\n";
+            emit(cat((type.isUnsigned ? "ldindh " : "ldindsh "), addrReg, ",w0"));
         }
     } else if (w == 4) {
         if (mayBeUnaligned) {
             loadIntUnaligned(addrReg, "w0", 4);
         } else {
-            code_ << "    ldind " << addrReg << ",w0\n";
+            emit("ldind", cat(addrReg, ",w0"));
         }
     } else if (mayBeUnaligned) {
         loadIntUnaligned(addrReg, "x0", 8);
     } else {
-        code_ << "    ldind " << addrReg << ",x0\n";
+        emit("ldind", cat(addrReg, ",x0"));
     }
 }
 
 void Arm64Codegen::storeOperand(const std::string &addrReg, Type type, bool mayBeUnaligned) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb " << addrReg << ",w0\n";
+        emit("stindb", cat(addrReg, ",w0"));
     } else if (w == 2) {
         if (mayBeUnaligned) {
             storeIntUnaligned(addrReg, "w0", 2);
         } else {
-            code_ << "    stindh " << addrReg << ",w0\n";
+            emit("stindh", cat(addrReg, ",w0"));
         }
     } else if (w == 4) {
         if (mayBeUnaligned) {
             storeIntUnaligned(addrReg, "w0", 4);
         } else {
-            code_ << "    stind " << addrReg << ",w0\n";
+            emit("stind", cat(addrReg, ",w0"));
         }
     } else if (mayBeUnaligned) {
         storeIntUnaligned(addrReg, "x0", 8);
     } else {
-        code_ << "    stind " << addrReg << ",x0\n";
+        emit("stind", cat(addrReg, ",x0"));
     }
 }
 
@@ -167,7 +166,7 @@ void Arm64Codegen::genConvert(const ir::Expr &e) {
             // Sign-extend w0 into x0: shift its value up into the
             // x-register's top half, then shift back down arithmetically,
             // sign-filling from what is now bit63 (w0's original sign bit).
-            code_ << "    lsl x0,x0,32\n    asr x0,x0,32\n";
+            { emit("lsl", "x0,x0,32"); emit("asr", "x0,x0,32"); }
         }
     } else if (!fromWide && !toWide) {
         narrowW0To(to);
@@ -181,10 +180,9 @@ void Arm64Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
         loadAddress(reg, label(slot));
         return;
     }
-    code_ << "    mov " << reg << ",x29\n";
+    emit("mov", cat(reg, ",x29"));
     if (darwinHosted_ && slot->kind == ir::SlotKind::Param) {
-        code_ << "    sub " << reg << "," << reg << "," << (currentParamBase_ + (slot->paramIndex + 1) * 8)
-              << "\n";
+        emit("sub", cat(reg, ",", reg, ",", (currentParamBase_ + (slot->paramIndex + 1) * 8)));
         return;
     }
     // `frameOffset` is a byte offset from IRBuilder, which reserves a
@@ -195,9 +193,9 @@ void Arm64Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
     // Param's address lands on the caller's pushed argument.
     constexpr int kParamExtra = 32 - 8;
     if (slot->kind == ir::SlotKind::Param) {
-        code_ << "    add " << reg << "," << reg << "," << (slot->frameOffset + kParamExtra) << "\n";
+        emit("add", cat(reg, ",", reg, ",", (slot->frameOffset + kParamExtra)));
     } else {
-        code_ << "    sub " << reg << "," << reg << "," << ir::localLowOffset(*slot, typeWidths()) << "\n";
+        emit("sub", cat(reg, ",", reg, ",", ir::localLowOffset(*slot, typeWidths())));
     }
 }
 
@@ -239,12 +237,12 @@ void Arm64Codegen::declareArray(const std::string &lbl, const std::vector<ir::Ar
 
 void Arm64Codegen::loadAddress(const std::string &reg, const std::string &lbl) {
     if (darwinHosted_) {
-        code_ << "    adrp " << reg << "," << lbl << "\n";
-        code_ << "    addlo " << reg << "," << reg << "," << lbl << "\n";
+        emit("adrp", cat(reg, ",", lbl));
+        emit("addlo", cat(reg, ",", reg, ",", lbl));
         return;
     }
-    code_ << "    movz " << reg << "," << lbl << "\n";
-    code_ << "    movk " << reg << "," << lbl << "\n";
+    emit("movz", cat(reg, ",", lbl));
+    emit("movk", cat(reg, ",", lbl));
 }
 
 std::string Arm64Codegen::generate(const ir::Program &prog, bool objectMode) {
@@ -257,15 +255,15 @@ std::string Arm64Codegen::generate(const ir::Program &prog, bool objectMode) {
     // Arm64LinkerFactory.cpp synthesizes one once every object is merged
     // and `main`'s linked address is resolvable. An object file's base is
     // `org 0`; placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    { emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress))); emitRaw(""); }
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    movz x9," << static_cast<int32_t>(kInitialSP & 0xFFFFu) << "\n";
-        code_ << "    movk x9," << static_cast<int32_t>((kInitialSP >> 16) & 0xFFFFu) << "\n";
-        code_ << "    add sp,x9,0\n";
-        code_ << "    bl " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("movz", cat("x9,", static_cast<int32_t>(kInitialSP & 0xFFFFu)));
+        emit("movk", cat("x9,", static_cast<int32_t>((kInitialSP >> 16) & 0xFFFFu)));
+        emit("add", "sp,x9,0");
+        emit("bl", label(mainFn));
         // The result sits in w0 the moment execution reaches `halt`.
-        code_ << "halt:\n    b halt\n\n";
+        { emitLabel("halt"); emit("b", "halt"); emitRaw(""); }
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -347,39 +345,39 @@ std::map<std::string, std::string> Arm64Codegen::perFileAsm() const { return per
 // since an early return bypasses this fall-through epilogue) reverses
 // all of this in the opposite order.
 void Arm64Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     if (darwinHosted_) {
-        code_ << "    sub sp,sp,16\n    stind sp,x29\n";
-        code_ << "    add x9,sp,8\n    stind x9,x30\n";
-        code_ << "    add x29,sp,0\n";
+        { emit("sub", "sp,sp,16"); emit("stind", "sp,x29"); }
+        { emit("add", "x9,sp,8"); emit("stind", "x9,x30"); }
+        emit("add", "x29,sp,0");
         currentParamBase_ = alignUp8(fn.func->frameSize);
         currentFrameSize_ = alignUp16(currentParamBase_ + static_cast<int>(fn.func->params.size()) * 8);
-        if (currentFrameSize_ > 0) code_ << "    sub sp,sp," << currentFrameSize_ << "\n";
+        if (currentFrameSize_ > 0) emit("sub", cat("sp,sp,", currentFrameSize_));
         for (size_t i = 0; i < fn.func->params.size(); i++) {
             const ir::Slot *param = fn.func->params[i];
             std::string valueReg = (isWide(param->type) ? "x" : "w") + std::to_string(i < 8 ? i : 0);
             if (i >= 8) {
-                code_ << "    add x9,x29," << (16 + (i - 8) * 8) << "\n";
-                code_ << "    ldind x9," << valueReg << "\n";
+                emit("add", cat("x9,x29,", (16 + (i - 8) * 8)));
+                emit("ldind", cat("x9,", valueReg));
             }
             int offset = currentParamBase_ + static_cast<int>(i + 1) * 8;
-            code_ << "    sub x10,x29," << offset << "\n";
-            code_ << "    stind x10," << valueReg << "\n";
+            emit("sub", cat("x10,x29,", offset));
+            emit("stind", cat("x10,", valueReg));
         }
         genStmt(*fn.body);
-        if (currentFrameSize_ > 0) code_ << "    add sp,sp," << currentFrameSize_ << "\n";
-        code_ << "    ldind sp,x29\n    add x9,sp,8\n    ldind x9,x30\n    add sp,sp,16\n";
-        code_ << "    ret\n\n";
+        if (currentFrameSize_ > 0) emit("add", cat("sp,sp,", currentFrameSize_));
+        { emit("ldind", "sp,x29"); emit("add", "x9,sp,8"); emit("ldind", "x9,x30"); emit("add", "sp,sp,16"); }
+        { emit("ret"); emitRaw(""); }
         return;
     }
-    code_ << "    sub sp,sp,16\n    stind sp,w30\n";
-    code_ << "    sub sp,sp,16\n    stind sp,w29\n";
+    { emit("sub", "sp,sp,16"); emit("stind", "sp,w30"); }
+    { emit("sub", "sp,sp,16"); emit("stind", "sp,w29"); }
     // `add x29,sp,0`, not `mov x29,sp`: this dialect's `mov` alias is
     // `orr rd,<zr>,rn`, and a real ORR's register fields mean the zero
     // register for operand 31, never `sp` - `sp` is only addressable
     // through an instruction whose encoding gives register 31 that
     // meaning, e.g. `add`/`sub` immediate.
-    code_ << "    add x29,sp,0\n";
+    emit("add", "x29,sp,0");
     // IRBuilder's `frameSize` is only rounded up to the native `int`'s
     // width, fine for a Local's frameOffset, but `sp` itself must stay
     // 8-byte aligned at all times on this target (every access runs
@@ -388,13 +386,13 @@ void Arm64Codegen::genFunction(const ir::FunctionBody &fn) {
     // rounding this `sub`/`add sp` amount up to a multiple of 8 keeps
     // `sp` 8-aligned for the entire body.
     int spFrameSize = alignUp8(fn.func->frameSize);
-    if (spFrameSize > 0) code_ << "    sub sp,sp," << spFrameSize << "\n";
+    if (spFrameSize > 0) emit("sub", cat("sp,sp,", spFrameSize));
     currentFrameSize_ = spFrameSize;
     genStmt(*fn.body);
-    if (spFrameSize > 0) code_ << "    add sp,sp," << spFrameSize << "\n";
-    code_ << "    ldind sp,w29\n    add sp,sp,16\n";
-    code_ << "    ldind sp,w30\n    add sp,sp,16\n";
-    code_ << "    ret\n\n";
+    if (spFrameSize > 0) emit("add", cat("sp,sp,", spFrameSize));
+    { emit("ldind", "sp,w29"); emit("add", "sp,sp,16"); }
+    { emit("ldind", "sp,w30"); emit("add", "sp,sp,16"); }
+    { emit("ret"); emitRaw(""); }
 }
 
 void Arm64Codegen::genStmt(const ir::Stmt &s) {
@@ -407,40 +405,40 @@ void Arm64Codegen::genStmt(const ir::Stmt &s) {
             genExpr(*s.cond);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cbz " << reg(0, isWide(s.cond->type)) << "," << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("cbz", cat(reg(0, isWide(s.cond->type)), ",", (s.elseStmt ? Lelse : Ldone)));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    b " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("b", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            code_ << "    cbz " << reg(0, isWide(s.cond->type)) << "," << Lend << "\n";
+            emit("cbz", cat(reg(0, isWide(s.cond->type)), ",", Lend));
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    b " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("b", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    b " << loopLabels_.back().second << "\n";
+            emit("b", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    b " << loopLabels_.back().first << "\n";
+            emit("b", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -448,14 +446,14 @@ void Arm64Codegen::genStmt(const ir::Stmt &s) {
             // An early return bypasses genFunction()'s fall-through
             // epilogue, so it needs this same teardown inline, in the
             // opposite order from the prologue.
-            if (currentFrameSize_ > 0) code_ << "    add sp,sp," << currentFrameSize_ << "\n";
+            if (currentFrameSize_ > 0) emit("add", cat("sp,sp,", currentFrameSize_));
             if (darwinHosted_) {
-                code_ << "    ldind sp,x29\n    add x9,sp,8\n    ldind x9,x30\n    add sp,sp,16\n";
+                { emit("ldind", "sp,x29"); emit("add", "x9,sp,8"); emit("ldind", "x9,x30"); emit("add", "sp,sp,16"); }
             } else {
-                code_ << "    ldind sp,w29\n    add sp,sp,16\n";
-                code_ << "    ldind sp,w30\n    add sp,sp,16\n";
+                { emit("ldind", "sp,w29"); emit("add", "sp,sp,16"); }
+                { emit("ldind", "sp,w30"); emit("add", "sp,sp,16"); }
             }
-            code_ << "    ret\n";
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -475,16 +473,16 @@ void Arm64Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitRaw(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    b " << irLabel(s.labelId) << "\n";
+            emit("b", irLabel(s.labelId));
             return;
         }
     }
@@ -514,9 +512,9 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // x2 = target address
-                code_ << "    sub sp,sp,16\n    stind sp,x2\n";
+                { emit("sub", "sp,sp,16"); emit("stind", "sp,x2"); }
                 genExpr(*e.rhs);
-                code_ << "    ldind sp,x2\n    add sp,sp,16\n";
+                { emit("ldind", "sp,x2"); emit("add", "sp,sp,16"); }
                 storeOperand("x2", e.slot->type, /*mayBeUnaligned=*/e.slot->arraySize == 0);
                 return;
             }
@@ -540,7 +538,7 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // w0 = pointer value
-            code_ << "    mov x2,x0\n";  // x2 = address
+            emit("mov", "x2,x0");  // x2 = address
             genCompoundThroughX2(e, /*mayBeUnaligned=*/true);
             return;
         }
@@ -548,21 +546,21 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cbz " << reg(0, isWide(e.lhs->type)) << "," << Lelse << "\n";
+            emit("cbz", cat(reg(0, isWide(e.lhs->type)), ",", Lelse));
             genExpr(*e.rhs);
-            code_ << "    b " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("b", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             // Stores at e.type's width/signedness - the pointee type of a
             // typed pointer, or native-int-width for untyped-int-as-address.
             genExpr(*e.lhs);  // w0 = pointer value
-            code_ << "    sub sp,sp,16\n    stind sp,w0\n";
+            { emit("sub", "sp,sp,16"); emit("stind", "sp,w0"); }
             genExpr(*e.rhs);  // w0, or x0 if wide
-            code_ << "    ldind sp,w2\n    add sp,sp,16\n";
+            { emit("ldind", "sp,w2"); emit("add", "sp,sp,16"); }
             storeOperand("x2", e.type, /*mayBeUnaligned=*/true);
             return;
         }
@@ -570,17 +568,17 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
             bool wide = isWide(e.rhs->type);
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    sub " << reg(0, wide) << ",xzr," << reg(0, wide) << "\n";
+                emit("sub", cat(reg(0, wide), ",xzr,", reg(0, wide)));
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 // Loads at e.type's width/signedness - see DerefAssign above.
                 genExpr(*e.rhs);  // w0 = pointer value
-                code_ << "    mov x2,x0\n";
+                emit("mov", "x2,x0");
                 loadOperand("x2", e.type, /*mayBeUnaligned=*/true);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    mvn " << reg(0, wide) << "," << reg(0, wide) << "\n";
+                emit("mvn", cat(reg(0, wide), ",", reg(0, wide)));
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -591,19 +589,19 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
                 size_t registerArgs = std::min<size_t>(8, e.args.size());
                 size_t stackArgs = e.args.size() > 8 ? (e.args.size() - 8) * 8 : 0;
                 int callFrameSize = alignUp16(static_cast<int>(stackArgs + registerArgs * 8));
-                if (callFrameSize > 0) code_ << "    sub sp,sp," << callFrameSize << "\n";
+                if (callFrameSize > 0) emit("sub", cat("sp,sp,", callFrameSize));
                 for (size_t i = e.args.size(); i-- > 0;) {
                     genExpr(*e.args[i]);
                     size_t offset = i < 8 ? stackArgs + i * 8 : (i - 8) * 8;
-                    code_ << "    add x2,sp," << offset << "\n";
-                    code_ << "    stind x2," << (isWide(e.args[i]->type) ? "x0" : "w0") << "\n";
+                    emit("add", cat("x2,sp,", offset));
+                    emit("stind", cat("x2,", (isWide(e.args[i]->type) ? "x0" : "w0")));
                 }
                 for (size_t i = 0; i < registerArgs; i++) {
-                    code_ << "    add x9,sp," << (stackArgs + i * 8) << "\n";
-                    code_ << "    ldind x9," << (isWide(e.args[i]->type) ? "x" : "w") << i << "\n";
+                    emit("add", cat("x9,sp,", (stackArgs + i * 8)));
+                    emit("ldind", cat("x9,", (isWide(e.args[i]->type) ? "x" : "w"), i));
                 }
-                code_ << "    bl " << label(e.func) << "\n";
-                if (callFrameSize > 0) code_ << "    add sp,sp," << callFrameSize << "\n";
+                emit("bl", label(e.func));
+                if (callFrameSize > 0) emit("add", cat("sp,sp,", callFrameSize));
                 return;
             }
             // Pushes each argument right-to-left so arg 0 ends up closest
@@ -623,17 +621,17 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
             int totalBytes = 0;
             for (const auto &arg : e.args) totalBytes += isWide(arg->type) ? 8 : 4;
             int padding = (8 - totalBytes % 8) % 8;
-            if (padding > 0) code_ << "    sub sp,sp," << padding << "\n";
+            if (padding > 0) emit("sub", cat("sp,sp,", padding));
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    sub sp,sp,8\n    stind sp,x0\n";
+                    { emit("sub", "sp,sp,8"); emit("stind", "sp,x0"); }
                 } else {
-                    code_ << "    sub sp,sp,4\n    stind sp,w0\n";
+                    { emit("sub", "sp,sp,4"); emit("stind", "sp,w0"); }
                 }
             }
-            code_ << "    bl " << label(e.func) << "\n";
-            if (totalBytes + padding > 0) code_ << "    add sp,sp," << (totalBytes + padding) << "\n";
+            emit("bl", label(e.func));
+            if (totalBytes + padding > 0) emit("add", cat("sp,sp,", (totalBytes + padding)));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -642,8 +640,8 @@ void Arm64Codegen::genExpr(const ir::Expr &e) {
             // compile time. `blr x2` is a near call through whatever
             // address x2 holds, setting `x30` like `bl` does.
             genExpr(*e.lhs);  // w0 = the callee's entry address
-            code_ << "    mov x2,x0\n";
-            code_ << "    blr x2\n";
+            emit("mov", "x2,x0");
+            emit("blr", "x2");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -684,18 +682,18 @@ void Arm64Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
         // width (a struct's) - loaded directly, since this always goes through a real `mul`
         // regardless.
         int width = shift > 0 ? (1 << shift) : widthOfType(slot->type);
-        code_ << "    movz w1," << width << "\n    mul w0,w0,w1\n";  // w0 *= the element type's own width
+        { emit("movz", cat("w1,", width)); emit("mul", "w0,w0,w1"); }  // w0 *= the element type's own width
     }
     if (slot->arraySize > 0) {
         loadSlotAddr("x2", slot);
         // `x0`'s upper 32 bits are already zero (the `mul` above is a
         // 32-bit "W-form" op, an architectural guarantee), so `x0` is
         // already a valid 64-bit operand with no explicit extension.
-        code_ << "    add x2,x2,x0\n";
+        emit("add", "x2,x2,x0");
     } else {
         loadSlotAddr("x1", slot);
-        code_ << "    ldind x1,w1\n";  // w1 = the pointer variable's own stored value (x1 zero-extends too)
-        code_ << "    add x2,x1,x0\n";
+        emit("ldind", "x1,w1");  // w1 = the pointer variable's own stored value (x1 zero-extends too)
+        emit("add", "x2,x1,x0");
     }
 }
 
@@ -719,8 +717,7 @@ void Arm64Codegen::genLocalArrayInit(const ir::Slot *slot) {
         } else {
             loadImm32("x0", static_cast<uint32_t>(elem.value));
         }
-        code_ << "    mov x2,x29\n    sub x2,x2," << (ir::localLowOffset(*slot, typeWidths()) - static_cast<int>(i) * w)
-              << "\n";
+        { emit("mov", "x2,x29"); emit("sub", cat("x2,x2,", (ir::localLowOffset(*slot, typeWidths()) - static_cast<int>(i) * w))); }
         storeOperand("x2", slot->type);
     }
 }
@@ -728,17 +725,17 @@ void Arm64Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void Arm64Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr("x2", operand.slot);
-        code_ << "    mov x0,x2\n";
+        emit("mov", "x0,x2");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    mov x0,x2\n";
+        emit("mov", "x0,x2");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress("x2", label(operand.func));
-        code_ << "    mov x0,x2\n";
+        emit("mov", "x0,x2");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -747,25 +744,25 @@ void Arm64Codegen::genAddrOf(const ir::Expr &operand) {
 // Entry: w0 = old, w1 = rhs (both at `type`'s width/signedness; never wide).
 void Arm64Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add w0,w0,w1\n"; return; }
-    if (op == "-") { code_ << "    sub w0,w0,w1\n"; return; }
-    if (op == "*") { code_ << "    mul w0,w0,w1\n"; return; }
-    if (op == "&") { code_ << "    and w0,w0,w1\n"; return; }
-    if (op == "|") { code_ << "    orr w0,w0,w1\n"; return; }
-    if (op == "^") { code_ << "    eor w0,w0,w1\n"; return; }
+    if (op == "+") { emit("add", "w0,w0,w1"); return; }
+    if (op == "-") { emit("sub", "w0,w0,w1"); return; }
+    if (op == "*") { emit("mul", "w0,w0,w1"); return; }
+    if (op == "&") { emit("and", "w0,w0,w1"); return; }
+    if (op == "|") { emit("orr", "w0,w0,w1"); return; }
+    if (op == "^") { emit("eor", "w0,w0,w1"); return; }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "lslv" : (isUnsigned ? "lsrv" : "asrv");
-        code_ << "    " << insn << " w0,w0,w1\n";
+        emit(insn, "w0,w0,w1");
         return;
     }
     // "/" or "%" - w3 is the quotient scratch the remainder form needs,
     // since old and rhs both have to stay live in w0/w1 for msub.
     const char *divInsn = isUnsigned ? "udiv" : "sdiv";
     if (op == "%") {
-        code_ << "    " << divInsn << " w3,w0,w1\n";
-        code_ << "    msub w0,w3,w1,w0\n";  // w0 = w0 - w3*w1 = old - quotient*rhs
+        emit(divInsn, "w3,w0,w1");
+        emit("msub", "w0,w3,w1,w0");  // w0 = w0 - w3*w1 = old - quotient*rhs
     } else {
-        code_ << "    " << divInsn << " w0,w0,w1\n";
+        emit(divInsn, "w0,w0,w1");
     }
 }
 
@@ -774,21 +771,21 @@ void Arm64Codegen::genCompoundOp(const std::string &op, Type type) {
 // arbitrary nested codegen using w0/w1/w2/w3) and never recomputed, so
 // an indexed/pointer target's address sub-expression is evaluated exactly once.
 void Arm64Codegen::genCompoundThroughX2(const ir::Expr &e, bool mayBeUnaligned) {
-    code_ << "    sub sp,sp,16\n    stind sp,x2\n";  // stash address
+    { emit("sub", "sp,sp,16"); emit("stind", "sp,x2"); }  // stash address
     genExpr(*e.rhs);                                   // w0 = rhs
-    code_ << "    mov w1,w0\n";                          // w1 = rhs
-    code_ << "    ldind sp,x2\n    add sp,sp,16\n";       // x2 = address (restored)
+    emit("mov", "w1,w0");                          // w1 = rhs
+    { emit("ldind", "sp,x2"); emit("add", "sp,sp,16"); }       // x2 = address (restored)
     loadOperand("x2", e.type, mayBeUnaligned);              // w0 = old
-    if (e.yieldOld) code_ << "    sub sp,sp,16\n    stind sp,w0\n";  // stash old
+    if (e.yieldOld) { emit("sub", "sp,sp,16"); emit("stind", "sp,w0"); }  // stash old
     genCompoundOp(e.op, e.type);                              // w0 = new (raw)
     narrowW0To(e.type);
     if (e.yieldOld) {
-        code_ << "    mov w3,w0\n";                             // w3 = new
-        code_ << "    ldind sp,w0\n    add sp,sp,16\n";           // w0 = old
-        code_ << "    mov w1,w0\n";                                // w1 = old, preserved across the store below
-        code_ << "    mov w0,w3\n";                                 // w0 = new - storeOperand always stores from w0
+        emit("mov", "w3,w0");                             // w3 = new
+        { emit("ldind", "sp,w0"); emit("add", "sp,sp,16"); }           // w0 = old
+        emit("mov", "w1,w0");                                // w1 = old, preserved across the store below
+        emit("mov", "w0,w3");                                 // w0 = new - storeOperand always stores from w0
         storeOperand("x2", e.type, mayBeUnaligned);
-        code_ << "    mov w0,w1\n";                                  // w0 = old (final result)
+        emit("mov", "w0,w1");                                  // w0 = old (final result)
     } else {
         storeOperand("x2", e.type, mayBeUnaligned);  // w0 already = new
     }
@@ -806,11 +803,10 @@ void Arm64Codegen::genBinary(const ir::Expr &e) {
     bool isUnsigned = operandType.isUnsigned;
     if (op == "+" || op == "-") {
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+        { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
         genExpr(*e.rhs);
-        code_ << "    ldind sp," << reg(1, wide) << "\n    add sp,sp,16\n";  // r1 = lhs, r0 = rhs
-        code_ << "    " << (op == "+" ? "add " : "sub ") << reg(0, wide) << "," << reg(1, wide) << ","
-              << reg(0, wide) << "\n";
+        { emit("ldind", cat("sp,", reg(1, wide))); emit("add", "sp,sp,16"); }  // r1 = lhs, r0 = rhs
+        emit(cat((op == "+" ? "add " : "sub "), reg(0, wide), ",", reg(1, wide), ",", reg(0, wide)));
         return;
     }
     if (op == "*") {
@@ -824,20 +820,20 @@ void Arm64Codegen::genBinary(const ir::Expr &e) {
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "orr" : "eor";
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+        { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
         genExpr(*e.rhs);
-        code_ << "    ldind sp," << reg(1, wide) << "\n    add sp,sp,16\n";
-        code_ << "    " << insn << " " << reg(0, wide) << "," << reg(1, wide) << "," << reg(0, wide) << "\n";
+        { emit("ldind", cat("sp,", reg(1, wide))); emit("add", "sp,sp,16"); }
+        emit(insn, cat(reg(0, wide), ",", reg(1, wide), ",", reg(0, wide)));
         return;
     }
     if (op == "<<" || op == ">>") {
         genExpr(*e.lhs);
-        code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+        { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
         genExpr(*e.rhs);  // w0 = shift count (always plain int)
-        code_ << "    mov w1,w0\n";
-        code_ << "    ldind sp," << reg(0, wide) << "\n    add sp,sp,16\n";  // r0 = value to shift
+        emit("mov", "w1,w0");
+        { emit("ldind", cat("sp,", reg(0, wide))); emit("add", "sp,sp,16"); }  // r0 = value to shift
         const char *insn = op == "<<" ? "lslv" : (isUnsigned ? "lsrv" : "asrv");
-        code_ << "    " << insn << " " << reg(0, wide) << "," << reg(0, wide) << ",w1\n";
+        emit(insn, cat(reg(0, wide), ",", reg(0, wide), ",w1"));
         return;
     }
     if (op == "&&") {
@@ -855,10 +851,10 @@ void Arm64Codegen::genBinary(const ir::Expr &e) {
 void Arm64Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     bool wide = isWide(lhs.type);
     genExpr(lhs);
-    code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+    { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
     genExpr(rhs);
-    code_ << "    ldind sp," << reg(1, wide) << "\n    add sp,sp,16\n";  // r1 = lhs, r0 = rhs
-    code_ << "    mul " << reg(0, wide) << "," << reg(1, wide) << "," << reg(0, wide) << "\n";
+    { emit("ldind", cat("sp,", reg(1, wide))); emit("add", "sp,sp,16"); }  // r1 = lhs, r0 = rhs
+    emit("mul", cat(reg(0, wide), ",", reg(1, wide), ",", reg(0, wide)));
 }
 
 // Real hardware divide (`sdiv`/`udiv`) plus `msub` (`rd = ra - rn*rm`,
@@ -866,16 +862,15 @@ void Arm64Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 void Arm64Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     bool wide = isWide(lhs.type);
     genExpr(lhs);
-    code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+    { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
     genExpr(rhs);
-    code_ << "    ldind sp," << reg(1, wide) << "\n    add sp,sp,16\n";  // r1 = lhs (dividend), r0 = rhs (divisor)
+    { emit("ldind", cat("sp,", reg(1, wide))); emit("add", "sp,sp,16"); }  // r1 = lhs (dividend), r0 = rhs (divisor)
     const char *divInsn = isUnsigned ? "udiv" : "sdiv";
     if (wantRemainder) {
-        code_ << "    " << divInsn << " " << reg(2, wide) << "," << reg(1, wide) << "," << reg(0, wide) << "\n";
-        code_ << "    msub " << reg(0, wide) << "," << reg(2, wide) << "," << reg(0, wide) << "," << reg(1, wide)
-              << "\n";
+        emit(divInsn, cat(reg(2, wide), ",", reg(1, wide), ",", reg(0, wide)));
+        emit("msub", cat(reg(0, wide), ",", reg(2, wide), ",", reg(0, wide), ",", reg(1, wide)));
     } else {
-        code_ << "    " << divInsn << " " << reg(0, wide) << "," << reg(1, wide) << "," << reg(0, wide) << "\n";
+        emit(divInsn, cat(reg(0, wide), ",", reg(1, wide), ",", reg(0, wide)));
     }
 }
 
@@ -887,22 +882,22 @@ void Arm64Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
     bool wide = isWide(lhs.type);
     bool isUnsigned = lhs.type.isUnsigned;
     genExpr(lhs);
-    code_ << "    sub sp,sp,16\n    stind sp," << reg(0, wide) << "\n";
+    { emit("sub", "sp,sp,16"); emit("stind", cat("sp,", reg(0, wide))); }
     genExpr(rhs);
-    code_ << "    ldind sp," << reg(1, wide) << "\n    add sp,sp,16\n";  // r1 = lhs, r0 = rhs
-    code_ << "    cmp " << reg(1, wide) << "," << reg(0, wide) << "\n";  // flags = lhs - rhs
+    { emit("ldind", cat("sp,", reg(1, wide))); emit("add", "sp,sp,16"); }  // r1 = lhs, r0 = rhs
+    emit("cmp", cat(reg(1, wide), ",", reg(0, wide)));  // flags = lhs - rhs
     if (op == "<") {
-        code_ << "    " << (isUnsigned ? "csetlo" : "csetlt") << " w0\n";
+        emit((isUnsigned ? "csetlo" : "csetlt"), "w0");
     } else if (op == ">") {
-        code_ << "    " << (isUnsigned ? "csethi" : "csetgt") << " w0\n";
+        emit((isUnsigned ? "csethi" : "csetgt"), "w0");
     } else if (op == "<=") {
-        code_ << "    " << (isUnsigned ? "csetls" : "csetle") << " w0\n";
+        emit((isUnsigned ? "csetls" : "csetle"), "w0");
     } else if (op == ">=") {
-        code_ << "    " << (isUnsigned ? "cseths" : "csetge") << " w0\n";
+        emit((isUnsigned ? "cseths" : "csetge"), "w0");
     } else if (op == "==") {
-        code_ << "    cseteq w0\n";
+        emit("cseteq", "w0");
     } else if (op == "!=") {
-        code_ << "    csetne w0\n";
+        emit("csetne", "w0");
     } else {
         err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
     }
@@ -911,32 +906,32 @@ void Arm64Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 void Arm64Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cbz " << reg(0, isWide(lhs.type)) << "," << Lfalse << "\n";
+    emit("cbz", cat(reg(0, isWide(lhs.type)), ",", Lfalse));
     genExpr(rhs);
-    code_ << "    cbz " << reg(0, isWide(rhs.type)) << "," << Lfalse << "\n";
-    code_ << "    b " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    movz w0,0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movz w0,1\n";
-    code_ << Ldone << ":\n";
+    emit("cbz", cat(reg(0, isWide(rhs.type)), ",", Lfalse));
+    emit("b", Ltrue);
+    { emitLabel(Lfalse); emit("movz", "w0,0"); emit("b", Ldone); }
+    { emitLabel(Ltrue); emit("movz", "w0,1"); }
+    emitLabel(Ldone);
 }
 
 void Arm64Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cbnz " << reg(0, isWide(lhs.type)) << "," << Ltrue << "\n";
+    emit("cbnz", cat(reg(0, isWide(lhs.type)), ",", Ltrue));
     genExpr(rhs);
-    code_ << "    cbnz " << reg(0, isWide(rhs.type)) << "," << Ltrue << "\n";
-    code_ << "    b " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    movz w0,1\n    b " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movz w0,0\n";
-    code_ << Ldone << ":\n";
+    emit("cbnz", cat(reg(0, isWide(rhs.type)), ",", Ltrue));
+    emit("b", Lfalse);
+    { emitLabel(Ltrue); emit("movz", "w0,1"); emit("b", Ldone); }
+    { emitLabel(Lfalse); emit("movz", "w0,0"); }
+    emitLabel(Ldone);
 }
 
 // `cmp w0,wzr` + `cseteq` is exactly "w0 = (w0 == 0)" - no branch needed.
 void Arm64Codegen::genLogicalNot(const ir::Expr &rhs) {
     bool wide = isWide(rhs.type);
     genExpr(rhs);
-    code_ << "    cmp " << reg(0, wide) << "," << (wide ? "xzr" : "wzr") << "\n    cseteq w0\n";
+    { emit("cmp", cat(reg(0, wide), ",", (wide ? "xzr" : "wzr"))); emit("cseteq", "w0"); }
 }
 
 std::optional<std::string> Arm64Codegen::assembleInProcess(const std::string &asmText,

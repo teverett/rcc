@@ -98,7 +98,7 @@ namespace rcc {
 // A 16-bit AND/OR/XOR/ADD/SUB is two chained byte instructions (the second using `adc`/`sbc` for
 // +/-, a plain `and`/`or`/`eor` for the bitwise ops, no carry involved) - see combineBytes(),
 // shared with the wide (4/8-byte) case.
-class AVRCodegen : public Backend {
+class AVRCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "avr"; }
@@ -263,7 +263,14 @@ class AVRCodegen : public Backend {
     void safeBranchIfTrue(const std::string &branchMnemonic, const std::string &target);
     void safeBranchIfFalse(const std::string &branchMnemonic, const std::string &target);
 
-    std::ostringstream code_;
+    // Same line shape as TextCodegenBase's own emit(), but appended to `initCode_` instead of
+    // `code_` - that buffer is flushed into `code_` separately (see this file's own header
+    // comment), so it can't go through the shared emit() (which always targets `code_`).
+    void emitInit(const std::string &mnemonic) { initCode_ << indent() << mnemonic << "\n"; }
+    void emitInit(const std::string &mnemonic, const std::string &operands) {
+        initCode_ << indent() << mnemonic << " " << operands << "\n";
+    }
+
     std::ostringstream initCode_;  // Globals' initial-value `sts` writes - see this file's own header comment.
     std::vector<std::string> ramDecls_;  // "lbl: ram <count>" lines, emitted once, at the end.
     std::map<std::string, std::string> perFileAsm_;

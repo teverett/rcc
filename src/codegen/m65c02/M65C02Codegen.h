@@ -63,7 +63,7 @@ namespace rcc {
 // if/while bodies, so every branch here is a short branch to an
 // immediately-following label plus an unconditional full-range JMP (see
 // safeBranch()).
-class M65C02Codegen : public Backend {
+class M65C02Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "65c02"; }
@@ -255,7 +255,9 @@ class M65C02Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

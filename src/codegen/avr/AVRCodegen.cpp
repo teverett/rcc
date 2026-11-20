@@ -35,19 +35,19 @@ AVRCodegen::Place AVRCodegen::secondaryPlace(int width) const {
 
 void AVRCodegen::loadByte(const Place &p, int i, const std::string &reg) {
     if (p.isSram) {
-        code_ << "    lds " << reg << ", " << p.label << (i ? "+" + std::to_string(i) : "") << "\n";
+        emit("lds", cat(reg, ", ", p.label, (i ? "+" + std::to_string(i) : "")));
         return;
     }
     std::string src = regName(p.baseReg + i);
-    if (src != reg) code_ << "    mov " << reg << ", " << src << "\n";
+    if (src != reg) emit("mov", cat(reg, ", ", src));
 }
 void AVRCodegen::storeByte(const Place &p, int i, const std::string &reg) {
     if (p.isSram) {
-        code_ << "    sts " << p.label << (i ? "+" + std::to_string(i) : "") << ", " << reg << "\n";
+        emit("sts", cat(p.label, (i ? "+" + std::to_string(i) : ""), ", ", reg));
         return;
     }
     std::string dst = regName(p.baseReg + i);
-    if (dst != reg) code_ << "    mov " << dst << ", " << reg << "\n";
+    if (dst != reg) emit("mov", cat(dst, ", ", reg));
 }
 
 // Byte 0 (least significant) is pushed *last*, so it ends up at the lowest address (the real
@@ -58,12 +58,12 @@ void AVRCodegen::storeByte(const Place &p, int i, const std::string &reg) {
 void AVRCodegen::pushPlace(const Place &p, int width) {
     for (int i = width - 1; i >= 0; i--) {
         loadByte(p, i, kT0);
-        code_ << "    push " << kT0 << "\n";
+        emit("push", kT0);
     }
 }
 void AVRCodegen::popPlace(const Place &p, int width) {
     for (int i = 0; i < width; i++) {
-        code_ << "    pop " << kT0 << "\n";
+        emit("pop", kT0);
         storeByte(p, i, kT0);
     }
 }
@@ -81,30 +81,30 @@ void AVRCodegen::extendPlace(const Place &p, int fromWidth, int toWidth, bool is
         return;
     }
     loadByte(p, fromWidth - 1, kT0);
-    code_ << "    add " << kT0 << ", " << kT0 << "\n";  // lsl (no dedicated opcode - see MUL/ADD family)
-    code_ << "    ldi " << kT1 << ", 0\n";
+    emit("add", cat(kT0, ", ", kT0));  // lsl (no dedicated opcode - see MUL/ADD family)
+    emit("ldi", cat(kT1, ", 0"));
     std::string Lskip = newLabel();
     // Carry now holds the sign bit (see above): skip filling with 0xFF unless it's set.
     safeBranchIfFalse("brlo", Lskip);
-    code_ << "    ldi " << kT1 << ", 255\n";
-    code_ << Lskip << ":\n";
+    emit("ldi", cat(kT1, ", 255"));
+    emitLabel(Lskip);
     for (int i = fromWidth; i < toWidth; i++) storeByte(p, i, kT1);
 }
 
 void AVRCodegen::safeBranchIfTrue(const std::string &branchMnemonic, const std::string &target) {
     std::string Lnear = newLabel();
     std::string Lskip = newLabel();
-    code_ << "    " << branchMnemonic << " " << Lnear << "\n";
-    code_ << "    jmp " << Lskip << "\n";
-    code_ << Lnear << ":\n";
-    code_ << "    jmp " << target << "\n";
-    code_ << Lskip << ":\n";
+    emit(branchMnemonic, Lnear);
+    emit("jmp", Lskip);
+    emitLabel(Lnear);
+    emit("jmp", target);
+    emitLabel(Lskip);
 }
 void AVRCodegen::safeBranchIfFalse(const std::string &branchMnemonic, const std::string &target) {
     std::string Lnear = newLabel();
-    code_ << "    " << branchMnemonic << " " << Lnear << "\n";
-    code_ << "    jmp " << target << "\n";
-    code_ << Lnear << ":\n";
+    emit(branchMnemonic, Lnear);
+    emit("jmp", target);
+    emitLabel(Lnear);
 }
 
 void AVRCodegen::testCanonicalNonzero(int width) {
@@ -112,45 +112,47 @@ void AVRCodegen::testCanonicalNonzero(int width) {
     loadByte(c, 0, kT0);
     for (int i = 1; i < width; i++) {
         loadByte(c, i, kT1);
-        code_ << "    or " << kT0 << ", " << kT1 << "\n";
+        emit("or", cat(kT0, ", ", kT1));
     }
-    code_ << "    and " << kT0 << ", " << kT0 << "\n";
+    emit("and", cat(kT0, ", ", kT0));
 }
 
 void AVRCodegen::addConst16(int loReg, int32_t value) {
     if (value == 0) return;
     uint16_t v = static_cast<uint16_t>(value);
-    code_ << "    ldi " << kTmp << ", " << (v & 0xFF) << "\n";
-    code_ << "    ldi " << kTmp2 << ", " << ((v >> 8) & 0xFF) << "\n";
-    code_ << "    add " << regName(loReg) << ", " << kTmp << "\n";
-    code_ << "    adc " << regName(loReg + 1) << ", " << kTmp2 << "\n";
+    emit("ldi", cat(kTmp, ", ", (v & 0xFF)));
+    emit("ldi", cat(kTmp2, ", ", ((v >> 8) & 0xFF)));
+    emit("add", cat(regName(loReg), ", ", kTmp));
+    emit("adc", cat(regName(loReg + 1), ", ", kTmp2));
 }
 
 void AVRCodegen::adjustSP(int delta) {
     if (delta == 0) return;
-    code_ << "    in r30, 0x3d\n    in r31, 0x3e\n";
+    emit("in", "r30, 0x3d");
+    emit("in", "r31, 0x3e");
     addConst16(30, delta);
-    code_ << "    out 0x3e, r31\n    out 0x3d, r30\n";
+    emit("out", "0x3e, r31");
+    emit("out", "0x3d, r30");
 }
 
 void AVRCodegen::materializeAddr(const ir::Slot *slot, int byteOffset) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    ldiw r30, " << label(slot) << (byteOffset ? "+" + std::to_string(byteOffset) : "") << "\n";
+        emit("ldiw", cat("r30, ", label(slot), (byteOffset ? "+" + std::to_string(byteOffset) : "")));
         return;
     }
-    code_ << "    movw r30, r28\n";
+    emit("movw", "r30, r28");
     addConst16(30, frameDisplacement(slot) + byteOffset);
 }
 
 void AVRCodegen::negatePlace(const Place &place, int width) {
     for (int i = 0; i < width; i++) {
         loadByte(place, i, kT1);
-        code_ << "    com " << kT1 << "\n";
+        emit("com", kT1);
         storeByte(place, i, kT1);
     }
     for (int i = 0; i < width; i++) {
         loadByte(place, i, kT1);
-        code_ << "    " << (i == 0 ? "subi" : "sbci") << " " << kT1 << ", 255\n";
+        emit(i == 0 ? "subi" : "sbci", cat(kT1, ", 255"));
         storeByte(place, i, kT1);
     }
 }
@@ -168,7 +170,7 @@ int AVRCodegen::frameDisplacement(const ir::Slot *slot) const {
 void AVRCodegen::loadSlotInto(const ir::Slot *slot, const Place &place, int width) {
     if (slot->kind == ir::SlotKind::Global) {
         for (int i = 0; i < width; i++) {
-            code_ << "    lds " << kT0 << ", " << label(slot) << (i ? "+" + std::to_string(i) : "") << "\n";
+            emit("lds", cat(kT0, ", ", label(slot), (i ? "+" + std::to_string(i) : "")));
             storeByte(place, i, kT0);
         }
         return;
@@ -176,14 +178,14 @@ void AVRCodegen::loadSlotInto(const ir::Slot *slot, const Place &place, int widt
     int disp = frameDisplacement(slot);
     if (disp >= 0 && disp + width - 1 <= 63) {
         for (int i = 0; i < width; i++) {
-            code_ << "    ldd " << kT0 << ", " << (disp + i) << "(r28)\n";
+            emit("ldd", cat(kT0, ", ", disp + i, "(r28)"));
             storeByte(place, i, kT0);
         }
         return;
     }
     materializeAddr(slot, 0);
     for (int i = 0; i < width; i++) {
-        code_ << "    ld " << kT0 << ", ai (r30)\n";
+        emit("ld", cat(kT0, ", ai (r30)"));
         storeByte(place, i, kT0);
     }
 }
@@ -192,7 +194,7 @@ void AVRCodegen::storeSlotFrom(const ir::Slot *slot, const Place &place, int wid
     if (slot->kind == ir::SlotKind::Global) {
         for (int i = 0; i < width; i++) {
             loadByte(place, i, kT0);
-            code_ << "    sts " << label(slot) << (i ? "+" + std::to_string(i) : "") << ", " << kT0 << "\n";
+            emit("sts", cat(label(slot), (i ? "+" + std::to_string(i) : ""), ", ", kT0));
         }
         return;
     }
@@ -200,14 +202,14 @@ void AVRCodegen::storeSlotFrom(const ir::Slot *slot, const Place &place, int wid
     if (disp >= 0 && disp + width - 1 <= 63) {
         for (int i = 0; i < width; i++) {
             loadByte(place, i, kT0);
-            code_ << "    std " << (disp + i) << "(r28), " << kT0 << "\n";
+            emit("std", cat(disp + i, "(r28), ", kT0));
         }
         return;
     }
     materializeAddr(slot, 0);
     for (int i = 0; i < width; i++) {
         loadByte(place, i, kT0);
-        code_ << "    st ai (r30), " << kT0 << "\n";
+        emit("st", cat("ai (r30), ", kT0));
     }
 }
 
@@ -215,24 +217,24 @@ void AVRCodegen::loadImmediateInto(const Place &place, int width, uint64_t value
     for (int i = 0; i < width; i++) {
         int byteVal = static_cast<int>((value >> (8 * i)) & 0xFF);
         if (place.isSram) {
-            code_ << "    ldi " << kT0 << ", " << byteVal << "\n";
+            emit("ldi", cat(kT0, ", ", byteVal));
             storeByte(place, i, kT0);
         } else {
-            code_ << "    ldi " << regName(place.baseReg + i) << ", " << byteVal << "\n";
+            emit("ldi", cat(regName(place.baseReg + i), ", ", byteVal));
         }
     }
 }
 
 void AVRCodegen::loadFromX(const Place &place, int width) {
     for (int i = 0; i < width; i++) {
-        code_ << "    ld " << kT0 << ", ai (r26)\n";
+        emit("ld", cat(kT0, ", ai (r26)"));
         storeByte(place, i, kT0);
     }
 }
 void AVRCodegen::storeToX(const Place &place, int width) {
     for (int i = 0; i < width; i++) {
         loadByte(place, i, kT0);
-        code_ << "    st ai (r26), " << kT0 << "\n";
+        emit("st", cat("ai (r26), ", kT0));
     }
 }
 
@@ -244,13 +246,17 @@ void AVRCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     int shift = elemW == 1 ? 0 : elemW == 2 ? 1 : elemW == 4 ? 2 : 3;
     if (slot->arraySize > 0) {
         materializeAddr(slot, 0);
-        code_ << "    movw r26, r30\n";
+        emit("movw", "r26, r30");
     } else {
         loadSlotInto(slot, Place{false, 26, ""}, 2);
     }
     genExpr(idxExpr);  // -> canonicalPlace(2) = r16:r17
-    for (int k = 0; k < shift; k++) code_ << "    add r16, r16\n    adc r17, r17\n";
-    code_ << "    add r26, r16\n    adc r27, r17\n";
+    for (int k = 0; k < shift; k++) {
+        emit("add", "r16, r16");
+        emit("adc", "r17, r17");
+    }
+    emit("add", "r26, r16");
+    emit("adc", "r27, r17");
 }
 
 void AVRCodegen::genIndex(const ir::Expr &e) {
@@ -262,20 +268,20 @@ void AVRCodegen::genIndex(const ir::Expr &e) {
 void AVRCodegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    ldiw r16, " << label(operand.slot) << "\n";
+            emit("ldiw", cat("r16, ", label(operand.slot)));
         } else {
             materializeAddr(operand.slot, 0);
-            code_ << "    movw r16, r30\n";
+            emit("movw", "r16, r30");
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    movw r16, r26\n";
+        emit("movw", "r16, r26");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    ldiwc r16, " << label(operand.func) << "\n";
+        emit("ldiwc", cat("r16, ", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -290,7 +296,7 @@ void AVRCodegen::combineBytes(const std::string &op, int width, const Place &acc
                           : op == "&" ? "and"
                           : op == "|" ? "or"
                                       : "eor";
-        code_ << "    " << insn << " " << kT0 << ", " << kT1 << "\n";
+        emit(insn, cat(kT0, ", ", kT1));
         storeByte(acc, i, kT0);
     }
 }
@@ -326,15 +332,15 @@ void AVRCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir
     for (int i = 0; i < w; i++) {
         loadByte(a, i, kT0);
         loadByte(b, i, kT1);
-        code_ << "    " << (i == 0 ? "cp" : "cpc") << " " << kT0 << ", " << kT1 << "\n";
+        emit(i == 0 ? "cp" : "cpc", cat(kT0, ", ", kT1));
     }
     std::string Ltrue = newLabel(), Ldone = newLabel();
     safeBranchIfTrue(mnemonic, Ltrue);
     loadImmediateInto(canonicalPlace(2), 2, 0);
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n";
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
     loadImmediateInto(canonicalPlace(2), 2, 1);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void AVRCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -346,10 +352,10 @@ void AVRCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     testCanonicalNonzero(widthOfType(rhs.type));
     safeBranchIfTrue("breq", Lfalse);
     loadImmediateInto(canonicalPlace(2), 2, 1);
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n";
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
     loadImmediateInto(canonicalPlace(2), 2, 0);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void AVRCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -361,10 +367,10 @@ void AVRCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     testCanonicalNonzero(widthOfType(rhs.type));
     safeBranchIfTrue("brne", Ltrue);
     loadImmediateInto(canonicalPlace(2), 2, 0);
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n";
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
     loadImmediateInto(canonicalPlace(2), 2, 1);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void AVRCodegen::genLogicalNot(const ir::Expr &rhs) {
@@ -373,10 +379,10 @@ void AVRCodegen::genLogicalNot(const ir::Expr &rhs) {
     testCanonicalNonzero(widthOfType(rhs.type));
     safeBranchIfTrue("breq", Lzero);
     loadImmediateInto(canonicalPlace(2), 2, 0);
-    code_ << "    jmp " << Ldone << "\n";
-    code_ << Lzero << ":\n";
+    emit("jmp", Ldone);
+    emitLabel(Lzero);
     loadImmediateInto(canonicalPlace(2), 2, 1);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void AVRCodegen::genDivMod(int width, bool wantRemainder, bool isUnsigned) {
@@ -385,72 +391,72 @@ void AVRCodegen::genDivMod(int width, bool wantRemainder, bool isUnsigned) {
     const std::string kFlagDividendNeg = kTmp2;
     const std::string kFlagDivisorNeg = "r30";
     if (!isUnsigned) {
-        code_ << "    eor " << kFlagDividendNeg << ", " << kFlagDividendNeg << "\n";
-        code_ << "    eor " << kFlagDivisorNeg << ", " << kFlagDivisorNeg << "\n";
+        emit("eor", cat(kFlagDividendNeg, ", ", kFlagDividendNeg));
+        emit("eor", cat(kFlagDivisorNeg, ", ", kFlagDivisorNeg));
         std::string Lskip1 = newLabel();
         loadByte(sec, width - 1, kT0);
-        code_ << "    add " << kT0 << ", " << kT0 << "\n";
+        emit("add", cat(kT0, ", ", kT0));
         safeBranchIfFalse("brlo", Lskip1);
         negatePlace(sec, width);
-        code_ << "    ldi " << kFlagDividendNeg << ", 1\n";
-        code_ << Lskip1 << ":\n";
+        emit("ldi", cat(kFlagDividendNeg, ", 1"));
+        emitLabel(Lskip1);
         std::string Lskip2 = newLabel();
         loadByte(canon, width - 1, kT0);
-        code_ << "    add " << kT0 << ", " << kT0 << "\n";
+        emit("add", cat(kT0, ", ", kT0));
         safeBranchIfFalse("brlo", Lskip2);
         negatePlace(canon, width);
-        code_ << "    ldi " << kFlagDivisorNeg << ", 1\n";
-        code_ << Lskip2 << ":\n";
+        emit("ldi", cat(kFlagDivisorNeg, ", 1"));
+        emitLabel(Lskip2);
     }
     Place wc{true, 0, "__wc"}, wd{true, 0, "__wd"};
     copyPlace(wc, sec, width);
     for (int i = 0; i < width; i++) storeByte(wd, i, kZero);
-    code_ << "    ldi " << kTmp << ", " << (8 * width) << "\n";
+    emit("ldi", cat(kTmp, ", ", 8 * width));
     std::string Lbody = newLabel(), Lskip = newLabel();
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     for (int i = 0; i < width; i++) {
         loadByte(wc, i, kT0);
-        code_ << "    " << (i == 0 ? "add" : "adc") << " " << kT0 << ", " << kT0 << "\n";
+        emit(i == 0 ? "add" : "adc", cat(kT0, ", ", kT0));
         storeByte(wc, i, kT0);
     }
     for (int i = 0; i < width; i++) {
         loadByte(wd, i, kT0);
-        code_ << "    adc " << kT0 << ", " << kT0 << "\n";
+        emit("adc", cat(kT0, ", ", kT0));
         storeByte(wd, i, kT0);
     }
     for (int i = 0; i < width; i++) {
         loadByte(wd, i, kT0);
         loadByte(canon, i, kT1);
-        code_ << "    " << (i == 0 ? "cp" : "cpc") << " " << kT0 << ", " << kT1 << "\n";
+        emit(i == 0 ? "cp" : "cpc", cat(kT0, ", ", kT1));
     }
     safeBranchIfTrue("brlo", Lskip);
     for (int i = 0; i < width; i++) {
         loadByte(wd, i, kT0);
         loadByte(canon, i, kT1);
-        code_ << "    " << (i == 0 ? "sub" : "sbc") << " " << kT0 << ", " << kT1 << "\n";
+        emit(i == 0 ? "sub" : "sbc", cat(kT0, ", ", kT1));
         storeByte(wd, i, kT0);
     }
     loadByte(wc, 0, kT0);
-    code_ << "    ldi " << kT1 << ", 1\n";
-    code_ << "    or " << kT0 << ", " << kT1 << "\n";
+    emit("ldi", cat(kT1, ", 1"));
+    emit("or", cat(kT0, ", ", kT1));
     storeByte(wc, 0, kT0);
-    code_ << Lskip << ":\n";
-    code_ << "    dec " << kTmp << "\n";
+    emitLabel(Lskip);
+    emit("dec", kTmp);
     safeBranchIfTrue("brne", Lbody);
 
     if (!isUnsigned) {
         std::string Lskip3 = newLabel(), Lskip4 = newLabel();
-        code_ << "    mov " << kT0 << ", " << kFlagDividendNeg << "\n";
-        code_ << "    eor " << kT0 << ", " << kFlagDivisorNeg << "\n";
-        code_ << "    and " << kT0 << ", " << kT0 << "\n";
+        emit("mov", cat(kT0, ", ", kFlagDividendNeg));
+        emit("eor", cat(kT0, ", ", kFlagDivisorNeg));
+        emit("and", cat(kT0, ", ", kT0));
         safeBranchIfFalse("brne", Lskip3);
         negatePlace(wc, width);
-        code_ << Lskip3 << ":\n";
-        code_ << "    mov " << kT0 << ", " << kFlagDividendNeg << "\n";
-        code_ << "    and " << kT0 << ", " << kT0 << "\n";
+        emitLabel(Lskip3);
+        emit("mov", cat(kT0, ", ", kFlagDividendNeg));
+        emit("and", cat(kT0, ", ", kT0));
         safeBranchIfFalse("brne", Lskip4);
         negatePlace(wd, width);
-        code_ << Lskip4 << ":\n";
+        emitLabel(Lskip4);
     }
     copyPlace(canon, wantRemainder ? wd : wc, width);
 }
@@ -460,15 +466,15 @@ void AVRCodegen::genDivMod(int width, bool wantRemainder, bool isUnsigned) {
 // bytes are added in.
 void AVRCodegen::genNarrowMul() {
     // canonical (r16:r17) = rhs, secondary (r18:r19) = lhs.
-    code_ << "    mul r18, r16\n";
-    code_ << "    mov " << kT2 << ", r0\n";
-    code_ << "    mov " << kTmp << ", r1\n";
-    code_ << "    mul r19, r16\n";
-    code_ << "    add " << kTmp << ", r0\n";
-    code_ << "    mul r18, r17\n";
-    code_ << "    add " << kTmp << ", r0\n";
-    code_ << "    mov r16, " << kT2 << "\n";
-    code_ << "    mov r17, " << kTmp << "\n";
+    emit("mul", "r18, r16");
+    emit("mov", cat(kT2, ", r0"));
+    emit("mov", cat(kTmp, ", r1"));
+    emit("mul", "r19, r16");
+    emit("add", cat(kTmp, ", r0"));
+    emit("mul", "r18, r17");
+    emit("add", cat(kTmp, ", r0"));
+    emit("mov", cat("r16, ", kT2));
+    emit("mov", cat("r17, ", kTmp));
 }
 
 void AVRCodegen::genWideMul(int width) {
@@ -478,7 +484,7 @@ void AVRCodegen::genWideMul(int width) {
     auto propagateCarry = [&](int from) {
         for (int i = from; i < width; i++) {
             loadByte(wc, i, kT2);
-            code_ << "    adc " << kT2 << ", " << kZero << "\n";
+            emit("adc", cat(kT2, ", ", kZero));
             storeByte(wc, i, kT2);
         }
     };
@@ -488,14 +494,14 @@ void AVRCodegen::genWideMul(int width) {
             if (i >= width || j >= width) continue;
             loadByte(sec, i, kT0);
             loadByte(canon, j, kT1);
-            code_ << "    mul " << kT0 << ", " << kT1 << "\n";
+            emit("mul", cat(kT0, ", ", kT1));
             loadByte(wc, s, kT2);
-            code_ << "    add " << kT2 << ", r0\n";
+            emit("add", cat(kT2, ", r0"));
             storeByte(wc, s, kT2);
             propagateCarry(s + 1);
             if (s + 1 < width) {
                 loadByte(wc, s + 1, kT2);
-                code_ << "    add " << kT2 << ", r1\n";
+                emit("add", cat(kT2, ", r1"));
                 storeByte(wc, s + 1, kT2);
                 propagateCarry(s + 2);
             }
@@ -507,28 +513,28 @@ void AVRCodegen::genWideMul(int width) {
 void AVRCodegen::genShift(int width, bool isLeft, bool isUnsigned) {
     Place c = canonicalPlace(width);
     std::string Lbody = newLabel(), Ldone = newLabel();
-    code_ << "    and " << kTmp << ", " << kTmp << "\n";
+    emit("and", cat(kTmp, ", ", kTmp));
     safeBranchIfFalse("brne", Ldone);
-    code_ << Lbody << ":\n";
+    emitLabel(Lbody);
     if (isLeft) {
         for (int i = 0; i < width; i++) {
             loadByte(c, i, kT0);
-            code_ << "    " << (i == 0 ? "add" : "adc") << " " << kT0 << ", " << kT0 << "\n";
+            emit(i == 0 ? "add" : "adc", cat(kT0, ", ", kT0));
             storeByte(c, i, kT0);
         }
     } else {
         loadByte(c, width - 1, kT0);
-        code_ << "    " << (isUnsigned ? "lsr" : "asr") << " " << kT0 << "\n";
+        emit(isUnsigned ? "lsr" : "asr", kT0);
         storeByte(c, width - 1, kT0);
         for (int i = width - 2; i >= 0; i--) {
             loadByte(c, i, kT0);
-            code_ << "    ror " << kT0 << "\n";
+            emit("ror", kT0);
             storeByte(c, i, kT0);
         }
     }
-    code_ << "    dec " << kTmp << "\n";
+    emit("dec", kTmp);
     safeBranchIfTrue("brne", Lbody);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void AVRCodegen::genCompoundOp(const std::string &op, Type type) {
@@ -576,20 +582,24 @@ void AVRCodegen::genCompoundThroughX(const ir::Expr &e) {
     // They're pushed store-snapshot first so a yieldOld "old" value, pushed later in between, can
     // still be popped out from on top of it before the store snapshot is needed - genCompoundOp()
     // leaves `sec` (rhs, no longer needed once it's run) free to hold "old" across that pop.
-    code_ << "    push r27\n    push r26\n";  // for the store
-    code_ << "    push r27\n    push r26\n";  // for the old-value load
+    emit("push", "r27");
+    emit("push", "r26");  // for the store
+    emit("push", "r27");
+    emit("push", "r26");  // for the old-value load
     genExpr(*e.rhs);
     if (isShift) {
         loadByte(canonicalPlace(widthOfType(e.rhs->type)), 0, kTmp);
     } else {
         copyPlace(sec, canonicalPlace(w), w);
     }
-    code_ << "    pop r26\n    pop r27\n";
+    emit("pop", "r26");
+    emit("pop", "r27");
     loadFromX(canonicalPlace(w), w);  // canonical = old
     if (e.yieldOld) pushPlace(canonicalPlace(w), w);
     genCompoundOp(e.op, e.type);  // canonical = new; `sec` is free again
     if (e.yieldOld) popPlace(sec, w);
-    code_ << "    pop r26\n    pop r27\n";
+    emit("pop", "r26");
+    emit("pop", "r27");
     storeToX(canonicalPlace(w), w);
     if (e.yieldOld) copyPlace(canonicalPlace(w), sec, w);
 }
@@ -624,19 +634,19 @@ void AVRCodegen::genLocalArrayInit(const ir::Slot *slot) {
         if (elem.isSymbol) {
             const std::string target = elem.slot ? label(elem.slot) : label(elem.func);
             if (elem.func) {
-                code_ << "    ldiwc r16, " << target << "\n";
+                emit("ldiwc", cat("r16, ", target));
             } else {
-                code_ << "    ldiw r16, " << target << "\n";
+                emit("ldiw", cat("r16, ", target));
             }
-            code_ << "    st ai (r30), r16\n";
-            if (w > 1) code_ << "    st ai (r30), r17\n";
-            for (int i = 2; i < w; i++) code_ << "    st ai (r30), " << kZero << "\n";
+            emit("st", "ai (r30), r16");
+            if (w > 1) emit("st", "ai (r30), r17");
+            for (int i = 2; i < w; i++) emit("st", cat("ai (r30), ", kZero));
             continue;
         }
         auto v = static_cast<uint64_t>(elem.value);
         for (int i = 0; i < w; i++) {
-            code_ << "    ldi " << kT0 << ", " << static_cast<int>((v >> (8 * i)) & 0xFF) << "\n";
-            code_ << "    st ai (r30), " << kT0 << "\n";
+            emit("ldi", cat(kT0, ", ", static_cast<int>((v >> (8 * i)) & 0xFF)));
+            emit("st", cat("ai (r30), ", kT0));
         }
     }
 }
@@ -647,8 +657,8 @@ void AVRCodegen::declareGlobal(const ir::Slot *slot) {
     ramDecls_.push_back(lbl + ": ram " + std::to_string(w));
     auto v = static_cast<uint64_t>(slot->hasInit ? slot->initValue : 0);
     for (int i = 0; i < w; i++) {
-        initCode_ << "    ldi " << kT0 << ", " << static_cast<int>((v >> (8 * i)) & 0xFF) << "\n";
-        initCode_ << "    sts " << lbl << (i ? "+" + std::to_string(i) : "") << ", " << kT0 << "\n";
+        emitInit("ldi", cat(kT0, ", ", static_cast<int>((v >> (8 * i)) & 0xFF)));
+        emitInit("sts", cat(lbl, (i ? "+" + std::to_string(i) : ""), ", ", kT0));
     }
 }
 
@@ -656,19 +666,19 @@ void AVRCodegen::genArrayElementInit(const std::string &elemLabel, Type elemType
     int w = widthOfType(elemType);
     if (e.isSymbol) {
         if (e.func) {
-            initCode_ << "    ldiwc r16, " << label(e.func) << "\n";
+            emitInit("ldiwc", cat("r16, ", label(e.func)));
         } else {
-            initCode_ << "    ldiw r16, " << label(e.slot) << "\n";
+            emitInit("ldiw", cat("r16, ", label(e.slot)));
         }
-        initCode_ << "    sts " << elemLabel << ", r16\n";
-        if (w > 1) initCode_ << "    sts " << elemLabel << "+1, r17\n";
-        for (int i = 2; i < w; i++) initCode_ << "    sts " << elemLabel << "+" << i << ", " << kZero << "\n";
+        emitInit("sts", cat(elemLabel, ", r16"));
+        if (w > 1) emitInit("sts", cat(elemLabel, "+1, r17"));
+        for (int i = 2; i < w; i++) emitInit("sts", cat(elemLabel, "+", i, ", ", kZero));
         return;
     }
     auto v = static_cast<uint64_t>(e.value);
     for (int i = 0; i < w; i++) {
-        initCode_ << "    ldi " << kT0 << ", " << static_cast<int>((v >> (8 * i)) & 0xFF) << "\n";
-        initCode_ << "    sts " << elemLabel << (i ? "+" + std::to_string(i) : "") << ", " << kT0 << "\n";
+        emitInit("ldi", cat(kT0, ", ", static_cast<int>((v >> (8 * i)) & 0xFF)));
+        emitInit("sts", cat(elemLabel, (i ? "+" + std::to_string(i) : ""), ", ", kT0));
     }
 }
 
@@ -707,7 +717,7 @@ void AVRCodegen::genBinary(const ir::Expr &e) {
         genExpr(*e.lhs);
         pushPlace(c, w);
         genExpr(*e.rhs);  // -> canonicalPlace(2), the shift count
-        code_ << "    mov " << kTmp << ", r16\n";
+        emit("mov", cat(kTmp, ", r16"));
         popPlace(c, w);
         genShift(w, op == "<<", isUnsigned);
         return;
@@ -758,9 +768,11 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {
                 genIndexAddr(e.slot, *e.lhs);
-                code_ << "    push r27\n    push r26\n";
+                emit("push", "r27");
+                emit("push", "r26");
                 genExpr(*e.rhs);
-                code_ << "    pop r26\n    pop r27\n";
+                emit("pop", "r26");
+                emit("pop", "r27");
                 storeToX(canonicalPlace(widthOfType(e.slot->type)), widthOfType(e.slot->type));
                 return;
             }
@@ -771,10 +783,12 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::DerefAssign: {
             int w = widthOfType(e.type);
             genExpr(*e.lhs);  // pointer value -> canonicalPlace(2)
-            code_ << "    movw r26, r16\n";
-            code_ << "    push r27\n    push r26\n";
+            emit("movw", "r26, r16");
+            emit("push", "r27");
+            emit("push", "r26");
             genExpr(*e.rhs);
-            code_ << "    pop r26\n    pop r27\n";
+            emit("pop", "r26");
+            emit("pop", "r27");
             storeToX(canonicalPlace(w), w);
             return;
         }
@@ -801,7 +815,7 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // pointer value -> canonicalPlace(2)
-            code_ << "    movw r26, r16\n";
+            emit("movw", "r26, r16");
             genCompoundThroughX(e);
             return;
         }
@@ -812,11 +826,11 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
             testCanonicalNonzero(widthOfType(e.lhs->type));
             safeBranchIfFalse("brne", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
             (void)w;
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -829,7 +843,7 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
             } else if (e.op == "*") {
                 int w = widthOfType(e.type);
                 genExpr(*e.rhs);  // pointer value -> canonicalPlace(2)
-                code_ << "    movw r26, r16\n";
+                emit("movw", "r26, r16");
                 loadFromX(canonicalPlace(w), w);
             } else if (e.op == "~") {
                 int w = widthOfType(e.rhs->type);
@@ -837,7 +851,7 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
                 Place c = canonicalPlace(w);
                 for (int i = 0; i < w; i++) {
                     loadByte(c, i, kT0);
-                    code_ << "    com " << kT0 << "\n";
+                    emit("com", kT0);
                     storeByte(c, i, kT0);
                 }
             } else {  // "&"
@@ -859,15 +873,16 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
                 pushPlace(canonicalPlace(pushWidth), pushWidth);
                 totalBytes += pushWidth;
             }
-            code_ << "    call " << label(e.func) << "\n";
+            emit("call", label(e.func));
             adjustSP(totalBytes);
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // a flash *byte* address (see ldiwc's own comment) -> canonicalPlace(2)
-            code_ << "    movw r30, r16\n";
-            code_ << "    lsr r31\n    ror r30\n";  // halve into a word address for `icall`
-            code_ << "    icall\n";
+            emit("movw", "r30, r16");
+            emit("lsr", "r31");
+            emit("ror", "r30");  // halve into a word address for `icall`
+            emit("icall");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -900,18 +915,18 @@ void AVRCodegen::genStmt(const ir::Stmt &s) {
             safeBranchIfFalse("brne", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testCanonicalNonzero(widthOfType(s.cond->type));
             safeBranchIfFalse("brne", Lend);
@@ -919,25 +934,25 @@ void AVRCodegen::genStmt(const ir::Stmt &s) {
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
             genEpilogue();
-            code_ << "    ret\n";
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -956,16 +971,15 @@ void AVRCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -976,24 +990,30 @@ void AVRCodegen::genStmt(const ir::Stmt &s) {
 // file's own header comment for the full layout.
 void AVRCodegen::genPrologue(const ir::Function *fn) {
     curFrameSize_ = fn->frameSize;
-    code_ << "    push r28\n    push r29\n";
-    code_ << "    in r28, 0x3d\n    in r29, 0x3e\n";
+    emit("push", "r28");
+    emit("push", "r29");
+    emit("in", "r28, 0x3d");
+    emit("in", "r29, 0x3e");
     addConst16(28, -curFrameSize_);
-    code_ << "    out 0x3e, r29\n    out 0x3d, r28\n";
+    emit("out", "0x3e, r29");
+    emit("out", "0x3d, r28");
 }
 
 void AVRCodegen::genEpilogue() {
     addConst16(28, curFrameSize_);
-    code_ << "    out 0x3e, r29\n    out 0x3d, r28\n";
-    code_ << "    pop r29\n    pop r28\n";
+    emit("out", "0x3e, r29");
+    emit("out", "0x3d, r28");
+    emit("pop", "r29");
+    emit("pop", "r28");
 }
 
 void AVRCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     genPrologue(fn.func);
     genStmt(*fn.body);
     genEpilogue();
-    code_ << "    ret\n\n";
+    emit("ret");
+    emitRaw("");
 }
 
 std::string AVRCodegen::generate(const ir::Program &prog, bool objectMode) {
@@ -1025,18 +1045,21 @@ std::string AVRCodegen::generate(const ir::Program &prog, bool objectMode) {
         perFileAsm_[file] += chunk;
     };
 
-    code_ << "org 0\n\n";
+    emitRaw("org 0");
+    emitRaw("");
     if (!objectMode) {
         if (!mainFn) err(0, "no 'main' function defined");
-        code_ << "_start:\n";
-        code_ << "    eor " << kZero << ", " << kZero << "\n";
-        code_ << "    ldi r16, " << (kRamEnd & 0xFF) << "\n";
-        code_ << "    out 0x3d, r16\n";
-        code_ << "    ldi r16, " << ((kRamEnd >> 8) & 0xFF) << "\n";
-        code_ << "    out 0x3e, r16\n";
+        emitLabel("_start");
+        emit("eor", cat(kZero, ", ", kZero));
+        emit("ldi", cat("r16, ", (kRamEnd & 0xFF)));
+        emit("out", "0x3d, r16");
+        emit("ldi", cat("r16, ", ((kRamEnd >> 8) & 0xFF)));
+        emit("out", "0x3e, r16");
         code_ << initCode_.str();
-        code_ << "    call " << label(mainFn) << "\n";
-        code_ << "done:\n    jmp done\n\n";
+        emit("call", label(mainFn));
+        emitLabel("done");
+        emit("jmp", "done");
+        emitRaw("");
     }
     flush(mainFn ? mainFn->sourceFile : std::string());
 
@@ -1047,25 +1070,31 @@ std::string AVRCodegen::generate(const ir::Program &prog, bool objectMode) {
             // prologue (the one point this file's code is guaranteed to run first) takes over,
             // the zero register included (see MCS51Codegen.cpp's own `ssp` init for the same
             // split).
-            code_ << label(fb.func) << ":\n";
+            emitLabel(label(fb.func));
             genPrologue(fb.func);
-            code_ << "    eor " << kZero << ", " << kZero << "\n";
+            emit("eor", cat(kZero, ", ", kZero));
             code_ << initCode_.str();
             genStmt(*fb.body);
             genEpilogue();
-            code_ << "    ret\n\n";
+            emit("ret");
+            emitRaw("");
         } else {
             genFunction(fb);
         }
         flush(fb.func->sourceFile);
     }
 
-    for (const auto &decl : ramDecls_) code_ << decl << "\n";
+    for (const auto &decl : ramDecls_) emitRaw(decl);
     // In object mode, AVRLinkerFactory.cpp's own entry object declares these once for the whole
     // linked program instead (see its own comment) - a `long`/`long long` value staged through
     // one of them has to resolve to the same four buffers regardless of which object does the
     // staging and which reads it back.
-    if (!objectMode) code_ << "__wa: ram 8\n__wb: ram 8\n__wc: ram 8\n__wd: ram 8\n";
+    if (!objectMode) {
+        emitRaw("__wa: ram 8");
+        emitRaw("__wb: ram 8");
+        emitRaw("__wc: ram 8");
+        emitRaw("__wd: ram 8");
+    }
     flush(mainFn ? mainFn->sourceFile : std::string());
 
     return full;

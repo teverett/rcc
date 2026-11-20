@@ -97,7 +97,7 @@ namespace rcc {
 // scratch pseudo-registers/software-stack cells are shared by every
 // function in every file, so they're declared as compile-time equates at
 // a fixed address instead of relocatable data-space allocations.
-class PIC16Codegen : public Backend {
+class PIC16Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pic16"; }
@@ -270,7 +270,9 @@ class PIC16Codegen : public Backend {
     // symbol.
     void declareRam(const std::string &lbl, int count);
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat()
+    // and `code_` itself come from TextCodegenBase (see Codegen.h) -
+    // shared by every line-oriented-assembly backend, not just this one.
     std::vector<std::string> ramDecls_;
     std::map<std::string, std::string> perFileAsm_;
 

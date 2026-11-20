@@ -26,7 +26,7 @@ namespace rcc {
 // shift, and no flag for signed less-than (same sign-bit-bias trick as the
 // 8080 backend). Every jump/call is a full 16-bit absolute address.
 // `int` is 16 bits.
-class Z80Codegen : public Backend {
+class Z80Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "z80"; }
@@ -172,7 +172,9 @@ class Z80Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // "label: db lo, hi, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

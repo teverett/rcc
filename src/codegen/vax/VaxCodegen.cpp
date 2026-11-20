@@ -52,18 +52,18 @@ std::string VaxCodegen::slotMemAt(const ir::Slot *slot, int extra) const {
 
 void VaxCodegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    movl imm " << label(slot) << "," << reg << "\n";
+        emit("movl", cat("imm ", label(slot), ",", reg));
         return;
     }
-    code_ << "    moval " << slotMem(slot) << "," << reg << "\n";
+    emit("moval", cat(slotMem(slot), ",", reg));
 }
 
 void VaxCodegen::loadImmediate(const std::string &reg, int32_t v) {
     if (v == 0) {
-        code_ << "    clrl " << reg << "\n";
+        emit("clrl", reg);
         return;
     }
-    code_ << "    movl " << imm(static_cast<uint32_t>(v)) << "," << reg << "\n";
+    emit("movl", cat(imm(static_cast<uint32_t>(v)), ",", reg));
 }
 
 // A literal element's decimal text; a symbol element is the referenced Slot's or
@@ -109,20 +109,20 @@ void VaxCodegen::genLocalArrayInit(const ir::Slot *slot) {
         int at = w * static_cast<int>(i);
         if (elem.isSymbol) {
             const std::string target = elem.slot ? label(elem.slot) : label(elem.func);
-            code_ << "    movl imm " << target << "," << slotMemAt(slot, at) << "\n";
-            if (w == 8) code_ << "    clrl " << slotMemAt(slot, at + 4) << "\n";
+            emit("movl", cat("imm ", target, ",", slotMemAt(slot, at)));
+            if (w == 8) emit("clrl", slotMemAt(slot, at + 4));
             continue;
         }
         auto v = static_cast<uint64_t>(elem.value);
         if (w == 8) {
-            code_ << "    movl " << imm(static_cast<uint32_t>(v)) << "," << slotMemAt(slot, at) << "\n";
-            code_ << "    movl " << imm(static_cast<uint32_t>(v >> 32)) << "," << slotMemAt(slot, at + 4) << "\n";
+            emit("movl", cat(imm(static_cast<uint32_t>(v)), ",", slotMemAt(slot, at)));
+            emit("movl", cat(imm(static_cast<uint32_t>(v >> 32)), ",", slotMemAt(slot, at + 4)));
         } else if (w == 4) {
-            code_ << "    movl " << imm(static_cast<uint32_t>(v)) << "," << slotMemAt(slot, at) << "\n";
+            emit("movl", cat(imm(static_cast<uint32_t>(v)), ",", slotMemAt(slot, at)));
         } else if (w == 2) {
-            code_ << "    movw imm " << (v & 0xFFFFu) << "," << slotMemAt(slot, at) << "\n";
+            emit("movw", cat("imm ", v & 0xFFFFu, ",", slotMemAt(slot, at)));
         } else {
-            code_ << "    movb imm " << (v & 0xFFu) << "," << slotMemAt(slot, at) << "\n";
+            emit("movb", cat("imm ", v & 0xFFu, ",", slotMemAt(slot, at)));
         }
     }
 }
@@ -151,14 +151,18 @@ std::string VaxCodegen::generate(const ir::Program &prog, bool objectMode) {
     // `objectMode`, no object file emits this entry sequence itself - the linker
     // synthesizes exactly one once every object is merged and `main` is resolvable. An
     // object file's base is `org 0`; placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
         if (!mainFn) err(0, "no 'main' function defined");
-        code_ << "_start:\n";
-        code_ << "    movl " << imm(kInitialSP) << ",sp\n";
-        code_ << "    calls imm 0,abs " << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("movl", cat(imm(kInitialSP), ",sp"));
+        emit("calls", cat("imm 0,abs ", label(mainFn)));
         // The result sits in r0 the moment execution reaches `halt`.
-        code_ << "done:\n    halt\n    brb done\n\n";
+        emitLabel("done");
+        emit("halt");
+        emit("brb", "done");
+        emitRaw("");
     }
     flush(mainFn ? mainFn->sourceFile : std::string());
 
@@ -215,11 +219,12 @@ std::map<std::string, std::string> VaxCodegen::perFileAsm() const { return perFi
 // hardware stack, direct and mutual recursion each get independent storage per call,
 // limited only by the stack (kInitialSP).
 void VaxCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    dh 0\n";
-    if (fn.func->frameSize > 0) code_ << "    subl2 imm " << fn.func->frameSize << ",sp\n";
+    emitLabel(label(fn.func));
+    emit("dh", "0");
+    if (fn.func->frameSize > 0) emit("subl2", cat("imm ", fn.func->frameSize, ",sp"));
     genStmt(*fn.body);
-    code_ << "    ret\n\n";
+    emit("ret");
+    emitRaw("");
 }
 
 void VaxCodegen::genStmt(const ir::Stmt &s) {
@@ -230,51 +235,51 @@ void VaxCodegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    bisl2 r1,r0\n";
+            if (isWide(s.cond->type)) emit("bisl2", "r1,r0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    tstl r0\n";
-            code_ << "    jeql " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("tstl", "r0");
+            emit("jeql", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jbr " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jbr", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    bisl2 r1,r0\n";
-            code_ << "    tstl r0\n";
-            code_ << "    jeql " << Lend << "\n";
+            if (isWide(s.cond->type)) emit("bisl2", "r1,r0");
+            emit("tstl", "r0");
+            emit("jeql", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jbr " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jbr", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jbr " << loopLabels_.back().second << "\n";
+            emit("jbr", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jbr " << loopLabels_.back().first << "\n";
+            emit("jbr", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
-            code_ << "    ret\n";
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -293,16 +298,15 @@ void VaxCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jbr " << irLabel(s.labelId) << "\n";
+            emit("jbr", irLabel(s.labelId));
             return;
         }
     }
@@ -333,9 +337,9 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // r2 = target address
-                code_ << "    pushl r2\n";
+                emit("pushl", "r2");
                 genExpr(*e.rhs);
-                code_ << "    movl ai (sp),r2\n";
+                emit("movl", "ai (sp),r2");
                 storeMem("(r2)", e.slot->type);
                 return;
             }
@@ -348,9 +352,9 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
             // or a plain int word for untyped-int-as-address. storeMem() handles a wide
             // pointee too, storing the whole r1:r0 quadword.
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    pushl r0\n";
+            emit("pushl", "r0");
             genExpr(*e.rhs);  // r0, or r1:r0 if wide
-            code_ << "    movl ai (sp),r2\n";
+            emit("movl", "ai (sp),r2");
             storeMem("(r2)", e.type);
             return;
         }
@@ -363,33 +367,33 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
             // Plain scalar target - slotMem() addresses it afresh with no side effect, so
             // there is no address to hold across `e.rhs`'s evaluation.
             genExpr(*e.rhs);  // r0 = rhs
-            code_ << "    movl r0,r1\n";
+            emit("movl", "r0,r1");
             loadSlotValue(e.slot);  // r0 = old
-            if (e.yieldOld) code_ << "    pushl r0\n";
+            if (e.yieldOld) emit("pushl", "r0");
             genCompoundOp(e.op, e.type);
             narrowR0To(e.type);
             storeSlotValue(e.slot);
-            if (e.yieldOld) code_ << "    movl ai (sp),r0\n";
+            if (e.yieldOld) emit("movl", "ai (sp),r0");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    movl r0,r2\n";
+            emit("movl", "r0,r2");
             genCompoundThroughR2(e);
             return;
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
-            if (isWide(e.lhs->type)) code_ << "    bisl2 r1,r0\n";
-            code_ << "    tstl r0\n";
+            if (isWide(e.lhs->type)) emit("bisl2", "r1,r0");
+            emit("tstl", "r0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jeql " << Lelse << "\n";
+            emit("jeql", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jbr " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jbr", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -398,19 +402,19 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64("r0", "r1");
                 } else {
-                    code_ << "    mnegl r0,r0\n";
+                    emit("mnegl", "r0,r0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 // Loads at e.type's width/signedness - see DerefAssign above.
                 genExpr(*e.rhs);  // r0 = pointer value
-                code_ << "    movl r0,r2\n";
+                emit("movl", "r0,r2");
                 loadMem("(r2)", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    mcoml r0,r0\n";
-                if (isWide(e.rhs->type)) code_ << "    mcoml r1,r1\n";
+                emit("mcoml", "r0,r0");
+                if (isWide(e.rhs->type)) emit("mcoml", "r1,r1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -430,15 +434,15 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    movq r0,-(sp)\n";
+                    emit("movq", "r0,-(sp)");
                     totalBytes += 8;
                 } else {
-                    code_ << "    pushl r0\n";
+                    emit("pushl", "r0");
                     totalBytes += 4;
                 }
             }
             if (totalBytes / 4 > 255) err(e.line, "too many call arguments for this target");
-            code_ << "    calls imm " << totalBytes / 4 << ",abs " << label(e.func) << "\n";
+            emit("calls", cat("imm ", totalBytes / 4, ",abs ", label(e.func)));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -446,7 +450,7 @@ void VaxCodegen::genExpr(const ir::Expr &e) {
             // there's no declared parameter list to match pushed arguments against. The
             // address in r0 is a function label, which starts with its entry mask.
             genExpr(*e.lhs);
-            code_ << "    calls imm 0,(r0)\n";
+            emit("calls", "imm 0,(r0)");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -477,21 +481,21 @@ void VaxCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // r0 = index
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    ashl imm " << shift << ",r0,r0\n";
+        emit("ashl", cat("imm ", shift, ",r0,r0"));
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): `mull2` takes a real multiplicand
         // directly, immediate or not, so no shift-based scaling is needed at all here.
-        code_ << "    mull2 imm " << widthOfType(slot->type) << ",r0\n";
+        emit("mull2", cat("imm ", widthOfType(slot->type), ",r0"));
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    addl3 imm " << label(slot) << ",r0,r2\n";
+            emit("addl3", cat("imm ", label(slot), ",r0,r2"));
         } else {
-            code_ << "    moval " << slotMem(slot) << ",r2\n";
-            code_ << "    addl2 r0,r2\n";
+            emit("moval", cat(slotMem(slot), ",r2"));
+            emit("addl2", "r0,r2");
         }
     } else {
-        code_ << "    addl3 r0," << slotMem(slot) << ",r2\n";  // base = the pointer variable's value
+        emit("addl3", cat("r0,", slotMem(slot), ",r2"));  // base = the pointer variable's value
     }
 }
 
@@ -502,46 +506,56 @@ void VaxCodegen::genIndex(const ir::Expr &e) {
 
 void VaxCodegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    addl2 r1,r0\n"; return; }
-    if (op == "-") { code_ << "    subl2 r1,r0\n"; return; }
-    if (op == "*") { code_ << "    mull2 r1,r0\n"; return; }
-    if (op == "&") { code_ << "    mcoml r1,r3\n    bicl2 r3,r0\n"; return; }
-    if (op == "|") { code_ << "    bisl2 r1,r0\n"; return; }
-    if (op == "^") { code_ << "    xorl2 r1,r0\n"; return; }
-    if (op == "<<") { code_ << "    ashl r1,r0,r0\n"; return; }
+    if (op == "+") { emit("addl2", "r1,r0"); return; }
+    if (op == "-") { emit("subl2", "r1,r0"); return; }
+    if (op == "*") { emit("mull2", "r1,r0"); return; }
+    if (op == "&") {
+        emit("mcoml", "r1,r3");
+        emit("bicl2", "r3,r0");
+        return;
+    }
+    if (op == "|") { emit("bisl2", "r1,r0"); return; }
+    if (op == "^") { emit("xorl2", "r1,r0"); return; }
+    if (op == "<<") { emit("ashl", "r1,r0,r0"); return; }
     if (op == ">>") {
         if (isUnsigned) {
-            code_ << "    subl3 r1,imm 32,r3\n    extzv r1,r3,r0,r0\n";
+            emit("subl3", "r1,imm 32,r3");
+            emit("extzv", "r1,r3,r0,r0");
         } else {
-            code_ << "    mnegl r1,r3\n    ashl r3,r0,r0\n";
+            emit("mnegl", "r1,r3");
+            emit("ashl", "r3,r0,r0");
         }
         return;
     }
     // "/" or "%": the dividend is `old` (r0) and the divisor `rhs` (r1); swap them into
     // the dividend-in-r1, divisor-in-r0 shape genDivMod()'s sequences expect.
-    code_ << "    movl r0,r3\n    movl r1,r0\n    movl r3,r1\n";
+    emit("movl", "r0,r3");
+    emit("movl", "r1,r0");
+    emit("movl", "r3,r1");
     if (isUnsigned) {
         genUnsignedDivMod(op == "%");
     } else if (op == "%") {
-        code_ << "    divl3 r0,r1,r3\n    mull3 r3,r0,r3\n    subl3 r3,r1,r0\n";
+        emit("divl3", "r0,r1,r3");
+        emit("mull3", "r3,r0,r3");
+        emit("subl3", "r3,r1,r0");
     } else {
-        code_ << "    divl3 r0,r1,r0\n";
+        emit("divl3", "r0,r1,r0");
     }
 }
 
 // r2 must already hold the resolved address on entry; it is stashed on the stack across
 // `e.rhs`'s evaluation, which can clobber it. genCompoundOp() itself never touches r2.
 void VaxCodegen::genCompoundThroughR2(const ir::Expr &e) {
-    code_ << "    pushl r2\n";
-    genExpr(*e.rhs);                     // r0 = rhs
-    code_ << "    movl r0,r1\n";         // r1 = rhs
-    code_ << "    movl ai (sp),r2\n";    // r2 = address
-    loadMem("(r2)", e.type);             // r0 = old
-    if (e.yieldOld) code_ << "    pushl r0\n";
-    genCompoundOp(e.op, e.type);         // r0 = new (raw)
+    emit("pushl", "r2");
+    genExpr(*e.rhs);  // r0 = rhs
+    emit("movl", "r0,r1");       // r1 = rhs
+    emit("movl", "ai (sp),r2");  // r2 = address
+    loadMem("(r2)", e.type);     // r0 = old
+    if (e.yieldOld) emit("pushl", "r0");
+    genCompoundOp(e.op, e.type);  // r0 = new (raw)
     narrowR0To(e.type);
     storeMem("(r2)", e.type);
-    if (e.yieldOld) code_ << "    movl ai (sp),r0\n";
+    if (e.yieldOld) emit("movl", "ai (sp),r0");
 }
 
 void VaxCodegen::genAddrOf(const ir::Expr &operand) {
@@ -551,11 +565,11 @@ void VaxCodegen::genAddrOf(const ir::Expr &operand) {
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    movl r2,r0\n";
+        emit("movl", "r2,r0");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    movl imm " << label(operand.func) << ",r0\n";
+        emit("movl", cat("imm ", label(operand.func), ",r0"));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -564,35 +578,35 @@ void VaxCodegen::genAddrOf(const ir::Expr &operand) {
 void VaxCodegen::loadMem(const std::string &mem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "movzbl" : "cvtbl") << " " << mem << ",r0\n";
+        emit(type.isUnsigned ? "movzbl" : "cvtbl", cat(mem, ",r0"));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "movzwl" : "cvtwl") << " " << mem << ",r0\n";
+        emit(type.isUnsigned ? "movzwl" : "cvtwl", cat(mem, ",r0"));
     } else if (w == 4) {
-        code_ << "    movl " << mem << ",r0\n";
+        emit("movl", cat(mem, ",r0"));
     } else {  // 8 - long long: r1:r0 (hi:lo), low word first
-        code_ << "    movq " << mem << ",r0\n";
+        emit("movq", cat(mem, ",r0"));
     }
 }
 
 void VaxCodegen::storeMem(const std::string &mem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    movb r0," << mem << "\n";
+        emit("movb", cat("r0,", mem));
     } else if (w == 2) {
-        code_ << "    movw r0," << mem << "\n";
+        emit("movw", cat("r0,", mem));
     } else if (w == 4) {
-        code_ << "    movl r0," << mem << "\n";
+        emit("movl", cat("r0,", mem));
     } else {
-        code_ << "    movq r0," << mem << "\n";
+        emit("movq", cat("r0,", mem));
     }
 }
 
 void VaxCodegen::narrowR0To(Type to) {
     int w = widthOfType(to);
     if (w == 1) {
-        code_ << "    " << (to.isUnsigned ? "movzbl" : "cvtbl") << " r0,r0\n";
+        emit(to.isUnsigned ? "movzbl" : "cvtbl", "r0,r0");
     } else if (w == 2) {
-        code_ << "    " << (to.isUnsigned ? "movzwl" : "cvtwl") << " r0,r0\n";
+        emit(to.isUnsigned ? "movzwl" : "cvtwl", "r0,r0");
     }
     // 4 bytes (Int/Long): r0 already holds the full value. 8 never reaches here.
 }
@@ -611,9 +625,9 @@ void VaxCodegen::genConvert(const ir::Expr &e) {
         narrowR0To(to);  // r1 is simply discarded
     } else if (!fromWide && toWide) {
         if (from.isUnsigned) {
-            code_ << "    clrl r1\n";
+            emit("clrl", "r1");
         } else {
-            code_ << "    ashl imm -31,r0,r1\n";  // sign-extend r0 into r1
+            emit("ashl", "imm -31,r0,r1");  // sign-extend r0 into r1
         }
     } else if (!fromWide && !toWide) {
         narrowR0To(to);
@@ -626,16 +640,16 @@ void VaxCodegen::genConvert(const ir::Expr &e) {
 // `adwc`/`sbwc`.
 void VaxCodegen::genWideAddSub(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);
-    code_ << "    movq r0,-(sp)\n";
+    emit("movq", "r0,-(sp)");
     genExpr(rhs);  // r1:r0 = rhs
     if (isAdd) {
-        code_ << "    addl2 ai (sp),r0\n";
-        code_ << "    adwc ai (sp),r1\n";
+        emit("addl2", "ai (sp),r0");
+        emit("adwc", "ai (sp),r1");
     } else {
-        code_ << "    movq ai (sp),r2\n";  // r3:r2 = lhs (hi:lo)
-        code_ << "    subl2 r0,r2\n";
-        code_ << "    sbwc r1,r3\n";
-        code_ << "    movq r2,r0\n";
+        emit("movq", "ai (sp),r2");  // r3:r2 = lhs (hi:lo)
+        emit("subl2", "r0,r2");
+        emit("sbwc", "r1,r3");
+        emit("movq", "r2,r0");
     }
 }
 
@@ -646,21 +660,31 @@ void VaxCodegen::genWideAddSub(const ir::Expr &lhs, const ir::Expr &rhs, bool is
 // multiply of each suffices.
 void VaxCodegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    movq r0,-(sp)\n";
-    genExpr(rhs);                         // r1:r0 = rhs (hi:lo)
-    code_ << "    movq ai (sp),r2\n";     // r3:r2 = lhs (hi:lo)
+    emit("movq", "r0,-(sp)");
+    genExpr(rhs);  // r1:r0 = rhs (hi:lo)
+    emit("movq", "ai (sp),r2");  // r3:r2 = lhs (hi:lo)
     std::string La = newLabel(), Lb = newLabel();
-    code_ << "    emul r2,r0,imm 0,r4\n";  // r5:r4 = signed lhs_lo * rhs_lo
-    code_ << "    tstl r2\n    jgeq " << La << "\n    addl2 r0,r5\n" << La << ":\n";
-    code_ << "    tstl r0\n    jgeq " << Lb << "\n    addl2 r2,r5\n" << Lb << ":\n";
-    code_ << "    mull3 r2,r1,r6\n    addl2 r6,r5\n";  // lhs_lo * rhs_hi
-    code_ << "    mull3 r3,r0,r6\n    addl2 r6,r5\n";  // lhs_hi * rhs_lo
-    code_ << "    movq r4,r0\n";
+    emit("emul", "r2,r0,imm 0,r4");  // r5:r4 = signed lhs_lo * rhs_lo
+    emit("tstl", "r2");
+    emit("jgeq", La);
+    emit("addl2", "r0,r5");
+    emitLabel(La);
+    emit("tstl", "r0");
+    emit("jgeq", Lb);
+    emit("addl2", "r2,r5");
+    emitLabel(Lb);
+    emit("mull3", "r2,r1,r6");  // lhs_lo * rhs_hi
+    emit("addl2", "r6,r5");
+    emit("mull3", "r3,r0,r6");  // lhs_hi * rhs_lo
+    emit("addl2", "r6,r5");
+    emit("movq", "r4,r0");
 }
 
 void VaxCodegen::genNegate64(const std::string &lo, const std::string &hi) {
-    code_ << "    mcoml " << lo << "," << lo << "\n    mcoml " << hi << "," << hi << "\n";
-    code_ << "    addl2 imm 1," << lo << "\n    adwc imm 0," << hi << "\n";
+    emit("mcoml", cat(lo, ",", lo));
+    emit("mcoml", cat(hi, ",", hi));
+    emit("addl2", cat("imm 1,", lo));
+    emit("adwc", cat("imm 0,", hi));
 }
 
 // Classic bit-serial shift/compare/subtract long division, entirely in registers:
@@ -676,51 +700,69 @@ void VaxCodegen::genNegate64(const std::string &lo, const std::string &hi) {
 // shift) means the value is certainly >= d, forcing the subtract.
 void VaxCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    movq r0,-(sp)\n";
+    emit("movq", "r0,-(sp)");
     genExpr(rhs);
-    code_ << "    movq r0,r4\n";           // d
-    code_ << "    movq ai (sp),r2\n";      // n
+    emit("movq", "r0,r4");       // d
+    emit("movq", "ai (sp),r2");  // n
 
     if (!isUnsigned) {
         std::string LposN = newLabel(), LposD = newLabel();
-        code_ << "    clrl r11\n";
-        code_ << "    tstl r3\n    jgeq " << LposN << "\n    bisl2 imm 1,r11\n";
+        emit("clrl", "r11");
+        emit("tstl", "r3");
+        emit("jgeq", LposN);
+        emit("bisl2", "imm 1,r11");
         genNegate64("r2", "r3");
-        code_ << LposN << ":\n";
-        code_ << "    tstl r5\n    jgeq " << LposD << "\n    bisl2 imm 2,r11\n";
+        emitLabel(LposN);
+        emit("tstl", "r5");
+        emit("jgeq", LposD);
+        emit("bisl2", "imm 2,r11");
         genNegate64("r4", "r5");
-        code_ << LposD << ":\n";
+        emitLabel(LposD);
     }
 
     std::string Lloop = newLabel(), Lyes = newLabel(), Lno = newLabel(), Lnext = newLabel();
-    code_ << "    clrq r6\n    clrq r8\n    movl imm 64,r10\n";
-    code_ << Lloop << ":\n";
-    code_ << "    extzv imm 31,imm 1,r7,r1\n";  // remainder's top bit, lost by the shift below
-    code_ << "    extzv imm 31,imm 1,r3,r0\n";  // dividend's top bit, shifted into the remainder
-    code_ << "    ashq imm 1,r2,r2\n";
-    code_ << "    ashq imm 1,r6,r6\n";
-    code_ << "    bisl2 r0,r6\n";
-    code_ << "    tstl r1\n    jneq " << Lyes << "\n";
-    code_ << "    cmpl r7,r5\n    jlssu " << Lno << "\n    jgtru " << Lyes << "\n";
-    code_ << "    cmpl r6,r4\n    jlssu " << Lno << "\n";
-    code_ << Lyes << ":\n";
-    code_ << "    subl2 r4,r6\n    sbwc r5,r7\n";
-    code_ << "    ashq imm 1,r8,r8\n    incl r8\n    jbr " << Lnext << "\n";
-    code_ << Lno << ":\n";
-    code_ << "    ashq imm 1,r8,r8\n";
-    code_ << Lnext << ":\n";
-    code_ << "    decl r10\n    jgtr " << Lloop << "\n";
+    emit("clrq", "r6");
+    emit("clrq", "r8");
+    emit("movl", "imm 64,r10");
+    emitLabel(Lloop);
+    emit("extzv", "imm 31,imm 1,r7,r1");  // remainder's top bit, lost by the shift below
+    emit("extzv", "imm 31,imm 1,r3,r0");  // dividend's top bit, shifted into the remainder
+    emit("ashq", "imm 1,r2,r2");
+    emit("ashq", "imm 1,r6,r6");
+    emit("bisl2", "r0,r6");
+    emit("tstl", "r1");
+    emit("jneq", Lyes);
+    emit("cmpl", "r7,r5");
+    emit("jlssu", Lno);
+    emit("jgtru", Lyes);
+    emit("cmpl", "r6,r4");
+    emit("jlssu", Lno);
+    emitLabel(Lyes);
+    emit("subl2", "r4,r6");
+    emit("sbwc", "r5,r7");
+    emit("ashq", "imm 1,r8,r8");
+    emit("incl", "r8");
+    emit("jbr", Lnext);
+    emitLabel(Lno);
+    emit("ashq", "imm 1,r8,r8");
+    emitLabel(Lnext);
+    emit("decl", "r10");
+    emit("jgtr", Lloop);
 
     if (!isUnsigned) {
         std::string LkeepQ = newLabel(), LkeepR = newLabel();
-        code_ << "    tstl r11\n    jeql " << LkeepQ << "\n    cmpl r11,imm 3\n    jeql " << LkeepQ << "\n";
+        emit("tstl", "r11");
+        emit("jeql", LkeepQ);
+        emit("cmpl", "r11,imm 3");
+        emit("jeql", LkeepQ);
         genNegate64("r8", "r9");
-        code_ << LkeepQ << ":\n";
-        code_ << "    bitl imm 1,r11\n    jeql " << LkeepR << "\n";
+        emitLabel(LkeepQ);
+        emit("bitl", "imm 1,r11");
+        emit("jeql", LkeepR);
         genNegate64("r6", "r7");
-        code_ << LkeepR << ":\n";
+        emitLabel(LkeepR);
     }
-    code_ << "    movq " << (wantRemainder ? "r6" : "r8") << ",r0\n";
+    emit("movq", cat(wantRemainder ? "r6" : "r8", ",r0"));
 }
 
 // A `long long` shifted by a runtime count (already promoted to a plain int). `ashq`
@@ -729,19 +771,23 @@ void VaxCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wa
 // `ashq` defines as clearing everything, leaving an empty mask).
 void VaxCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    movq r0,-(sp)\n";
+    emit("movq", "r0,-(sp)");
     genExpr(rhs);  // r0 = shift count
-    code_ << "    movl r0,r4\n";
-    code_ << "    movq ai (sp),r0\n";  // r1:r0 = the value being shifted
+    emit("movl", "r0,r4");
+    emit("movq", "ai (sp),r0");  // r1:r0 = the value being shifted
     if (isLeft) {
-        code_ << "    ashq r4,r0,r0\n";
+        emit("ashq", "r4,r0,r0");
         return;
     }
-    code_ << "    mnegl r4,r5\n    ashq r5,r0,r0\n";
+    emit("mnegl", "r4,r5");
+    emit("ashq", "r5,r0,r0");
     if (!isUnsigned) return;
-    code_ << "    subl3 r4,imm 64,r6\n";
-    code_ << "    mnegl imm 1,r8\n    movl r8,r9\n    ashq r6,r8,r8\n";
-    code_ << "    bicl2 r8,r0\n    bicl2 r9,r1\n";
+    emit("subl3", "r4,imm 64,r6");
+    emit("mnegl", "imm 1,r8");
+    emit("movl", "r8,r9");
+    emit("ashq", "r6,r8,r8");
+    emit("bicl2", "r8,r0");
+    emit("bicl2", "r9,r1");
 }
 
 // A `long long` comparison - compare the high words first (signed or unsigned per
@@ -749,26 +795,46 @@ void VaxCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isL
 // words are equal.
 void VaxCodegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    movq r0,-(sp)\n";
-    genExpr(rhs);                      // r1:r0 = rhs (hi:lo)
-    code_ << "    movq ai (sp),r2\n";  // r3:r2 = lhs (hi:lo)
+    emit("movq", "r0,-(sp)");
+    genExpr(rhs);  // r1:r0 = rhs (hi:lo)
+    emit("movq", "ai (sp),r2");  // r3:r2 = lhs (hi:lo)
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         std::string Lne = newLabel();
-        code_ << "    cmpl r2,r0\n    jneq " << Lne << "\n    cmpl r3,r1\n    jneq " << Lne << "\n";
-        code_ << (op == "==" ? "    movl imm 1,r0\n" : "    clrl r0\n") << "    jbr " << Ldone << "\n";
-        code_ << Lne << ":\n" << (op == "==" ? "    clrl r0\n" : "    movl imm 1,r0\n");
-        code_ << Ldone << ":\n";
+        emit("cmpl", "r2,r0");
+        emit("jneq", Lne);
+        emit("cmpl", "r3,r1");
+        emit("jneq", Lne);
+        if (op == "==") {
+            emit("movl", "imm 1,r0");
+        } else {
+            emit("clrl", "r0");
+        }
+        emit("jbr", Ldone);
+        emitLabel(Lne);
+        if (op == "==") {
+            emit("clrl", "r0");
+        } else {
+            emit("movl", "imm 1,r0");
+        }
+        emitLabel(Ldone);
         return;
     }
     // Once the high words are equal, the remaining 32 bits are a plain unsigned magnitude.
     std::string LhiDiff = newLabel();
-    code_ << "    cmpl r3,r1\n    jneq " << LhiDiff << "\n";
-    code_ << "    cmpl r2,r0\n    " << jumpFor(op, true, lhs.line) << " " << Ltrue << "\n    jbr " << Lfalse << "\n";
-    code_ << LhiDiff << ":\n    " << jumpFor(op, isUnsigned, lhs.line) << " " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    clrl r0\n    jbr " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movl imm 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit("cmpl", "r3,r1");
+    emit("jneq", LhiDiff);
+    emit("cmpl", "r2,r0");
+    emit(jumpFor(op, true, lhs.line), Ltrue);
+    emit("jbr", Lfalse);
+    emitLabel(LhiDiff);
+    emit(jumpFor(op, isUnsigned, lhs.line), Ltrue);
+    emitLabel(Lfalse);
+    emit("clrl", "r0");
+    emit("jbr", Ldone);
+    emitLabel(Ltrue);
+    emit("movl", "imm 1,r0");
+    emitLabel(Ldone);
 }
 
 void VaxCodegen::genBinary(const ir::Expr &e) {
@@ -785,12 +851,12 @@ void VaxCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl r0\n";
+        emit("pushl", "r0");
         genExpr(*e.rhs);  // r0 = rhs, the lhs is on the stack
         if (op == "+") {
-            code_ << "    addl2 ai (sp),r0\n";
+            emit("addl2", "ai (sp),r0");
         } else {
-            code_ << "    subl3 r0,ai (sp),r0\n";  // r0 = lhs - rhs
+            emit("subl3", "r0,ai (sp),r0");  // r0 = lhs - rhs
         }
         return;
     }
@@ -800,9 +866,9 @@ void VaxCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl r0\n";
+        emit("pushl", "r0");
         genExpr(*e.rhs);
-        code_ << "    mull2 ai (sp),r0\n";
+        emit("mull2", "ai (sp),r0");
         return;
     }
     if (op == "/" || op == "%") {
@@ -816,23 +882,28 @@ void VaxCodegen::genBinary(const ir::Expr &e) {
     if (op == "&" || op == "|" || op == "^") {
         genExpr(*e.lhs);
         if (wide) {
-            code_ << "    movq r0,-(sp)\n";
+            emit("movq", "r0,-(sp)");
             genExpr(*e.rhs);
-            code_ << "    movq ai (sp),r2\n";  // r3:r2 = lhs
+            emit("movq", "ai (sp),r2");  // r3:r2 = lhs
             if (op == "&") {
-                code_ << "    mcoml r0,r0\n    mcoml r1,r1\n    bicl3 r0,r2,r0\n    bicl3 r1,r3,r1\n";
+                emit("mcoml", "r0,r0");
+                emit("mcoml", "r1,r1");
+                emit("bicl3", "r0,r2,r0");
+                emit("bicl3", "r1,r3,r1");
             } else {
                 const char *insn = op == "|" ? "bisl2" : "xorl2";
-                code_ << "    " << insn << " r2,r0\n    " << insn << " r3,r1\n";
+                emit(insn, "r2,r0");
+                emit(insn, "r3,r1");
             }
             return;
         }
-        code_ << "    pushl r0\n";
+        emit("pushl", "r0");
         genExpr(*e.rhs);
         if (op == "&") {
-            code_ << "    mcoml r0,r0\n    bicl3 r0,ai (sp),r0\n";  // lhs & ~(~rhs)
+            emit("mcoml", "r0,r0");
+            emit("bicl3", "r0,ai (sp),r0");  // lhs & ~(~rhs)
         } else {
-            code_ << "    " << (op == "|" ? "bisl2" : "xorl2") << " ai (sp),r0\n";
+            emit(op == "|" ? "bisl2" : "xorl2", "ai (sp),r0");
         }
         return;
     }
@@ -842,9 +913,10 @@ void VaxCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl r0\n";
+        emit("pushl", "r0");
         genExpr(*e.rhs);  // r0 = shift count
-        code_ << "    movl r0,r1\n    movl ai (sp),r0\n";  // r0 = value to shift, r1 = count
+        emit("movl", "r0,r1");
+        emit("movl", "ai (sp),r0");  // r0 = value to shift, r1 = count
         genCompoundOp(op, operandType);
         return;
     }
@@ -863,18 +935,20 @@ void VaxCodegen::genBinary(const ir::Expr &e) {
 // dividend - quotient * divisor.
 void VaxCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pushl r0\n";
+    emit("pushl", "r0");
     genExpr(rhs);
-    code_ << "    movl ai (sp),r1\n";  // r1 = dividend, r0 = divisor
+    emit("movl", "ai (sp),r1");  // r1 = dividend, r0 = divisor
     if (isUnsigned) {
         genUnsignedDivMod(wantRemainder);
         return;
     }
     if (!wantRemainder) {
-        code_ << "    divl3 r0,r1,r0\n";
+        emit("divl3", "r0,r1,r0");
         return;
     }
-    code_ << "    divl3 r0,r1,r3\n    mull3 r3,r0,r3\n    subl3 r3,r1,r0\n";
+    emit("divl3", "r0,r1,r3");
+    emit("mull3", "r3,r0,r3");
+    emit("subl3", "r3,r1,r0");
 }
 
 // `divl3` is signed, so an unsigned divide splits by the divisor's and dividend's top bits:
@@ -885,21 +959,33 @@ void VaxCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRe
 //   subtract of the divisor if it reached it.
 void VaxCodegen::genUnsignedDivMod(bool wantRemainder) {
     std::string Lbig = newLabel(), Lhigh = newLabel(), Lq = newLabel();
-    code_ << "    tstl r0\n    jlss " << Lbig << "\n";
-    code_ << "    tstl r1\n    jlss " << Lhigh << "\n";
-    code_ << "    divl3 r0,r1,r3\n    jbr " << Lq << "\n";
-    code_ << Lhigh << ":\n";
-    code_ << "    extzv imm 1,imm 31,r1,r4\n";
-    code_ << "    divl3 r0,r4,r3\n    ashl imm 1,r3,r3\n";
-    code_ << "    mull3 r3,r0,r4\n    subl3 r4,r1,r4\n";
-    code_ << "    cmpl r4,r0\n    jlssu " << Lq << "\n    incl r3\n    jbr " << Lq << "\n";
-    code_ << Lbig << ":\n";
-    code_ << "    clrl r3\n    cmpl r1,r0\n    jlssu " << Lq << "\n    movl imm 1,r3\n";
-    code_ << Lq << ":\n";
+    emit("tstl", "r0");
+    emit("jlss", Lbig);
+    emit("tstl", "r1");
+    emit("jlss", Lhigh);
+    emit("divl3", "r0,r1,r3");
+    emit("jbr", Lq);
+    emitLabel(Lhigh);
+    emit("extzv", "imm 1,imm 31,r1,r4");
+    emit("divl3", "r0,r4,r3");
+    emit("ashl", "imm 1,r3,r3");
+    emit("mull3", "r3,r0,r4");
+    emit("subl3", "r4,r1,r4");
+    emit("cmpl", "r4,r0");
+    emit("jlssu", Lq);
+    emit("incl", "r3");
+    emit("jbr", Lq);
+    emitLabel(Lbig);
+    emit("clrl", "r3");
+    emit("cmpl", "r1,r0");
+    emit("jlssu", Lq);
+    emit("movl", "imm 1,r3");
+    emitLabel(Lq);
     if (wantRemainder) {
-        code_ << "    mull3 r3,r0,r4\n    subl3 r4,r1,r0\n";
+        emit("mull3", "r3,r0,r4");
+        emit("subl3", "r4,r1,r0");
     } else {
-        code_ << "    movl r3,r0\n";
+        emit("movl", "r3,r0");
     }
 }
 
@@ -912,51 +998,63 @@ void VaxCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir
         return;
     }
     genExpr(lhs);
-    code_ << "    pushl r0\n";
+    emit("pushl", "r0");
     genExpr(rhs);
-    code_ << "    cmpl ai (sp),r0\n";  // flags for lhs - rhs
+    emit("cmpl", "ai (sp),r0");  // flags for lhs - rhs
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jumpFor(op, lhs.type.isUnsigned, lhs.line) << " " << Ltrue << "\n";
-    code_ << "    clrl r0\n";
-    code_ << "    jbr " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movl imm 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit(jumpFor(op, lhs.type.isUnsigned, lhs.line), Ltrue);
+    emit("clrl", "r0");
+    emit("jbr", Ldone);
+    emitLabel(Ltrue);
+    emit("movl", "imm 1,r0");
+    emitLabel(Ldone);
 }
 
 void VaxCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    bisl2 r1,r0\n";
+    if (isWide(lhs.type)) emit("bisl2", "r1,r0");
     std::string Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    tstl r0\n    jeql " << Lfalse << "\n";
+    emit("tstl", "r0");
+    emit("jeql", Lfalse);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    bisl2 r1,r0\n";
-    code_ << "    tstl r0\n    jeql " << Lfalse << "\n";
-    code_ << "    movl imm 1,r0\n    jbr " << Ldone << "\n";
-    code_ << Lfalse << ":\n    clrl r0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("bisl2", "r1,r0");
+    emit("tstl", "r0");
+    emit("jeql", Lfalse);
+    emit("movl", "imm 1,r0");
+    emit("jbr", Ldone);
+    emitLabel(Lfalse);
+    emit("clrl", "r0");
+    emitLabel(Ldone);
 }
 
 void VaxCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    bisl2 r1,r0\n";
+    if (isWide(lhs.type)) emit("bisl2", "r1,r0");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    tstl r0\n    jneq " << Ltrue << "\n";
+    emit("tstl", "r0");
+    emit("jneq", Ltrue);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    bisl2 r1,r0\n";
-    code_ << "    tstl r0\n    jneq " << Ltrue << "\n";
-    code_ << "    clrl r0\n    jbr " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movl imm 1,r0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("bisl2", "r1,r0");
+    emit("tstl", "r0");
+    emit("jneq", Ltrue);
+    emit("clrl", "r0");
+    emit("jbr", Ldone);
+    emitLabel(Ltrue);
+    emit("movl", "imm 1,r0");
+    emitLabel(Ldone);
 }
 
 void VaxCodegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    bisl2 r1,r0\n";
+    if (isWide(rhs.type)) emit("bisl2", "r1,r0");
     std::string Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    tstl r0\n    jneq " << Lfalse << "\n";
-    code_ << "    movl imm 1,r0\n    jbr " << Ldone << "\n";
-    code_ << Lfalse << ":\n    clrl r0\n";
-    code_ << Ldone << ":\n";
+    emit("tstl", "r0");
+    emit("jneq", Lfalse);
+    emit("movl", "imm 1,r0");
+    emit("jbr", Ldone);
+    emitLabel(Lfalse);
+    emit("clrl", "r0");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> VaxCodegen::assembleInProcess(const std::string &asmText,

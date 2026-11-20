@@ -42,43 +42,43 @@ std::string ParrotVmCodegen::narrow(const std::string &reg, Type to) {
                      // these widths in a single register - no masking needed.
     }
     std::string masked = newReg();
-    code_ << "   band " << masked << ", " << reg << ", " << mask << "\n";
+    emit("band", cat(masked, ", ", reg, ", ", mask));
     if (to.isUnsigned) return masked;
     std::string signReg = newReg();
-    code_ << "   band " << signReg << ", " << masked << ", " << signBit << "\n";
+    emit("band", cat(signReg, ", ", masked, ", ", signBit));
     std::string result = newReg();
     std::string Lneg = newLabel(), Ldone = newLabel();
-    code_ << "   if " << signReg << " goto " << Lneg << "\n";
-    code_ << "   " << result << " = " << masked << "\n";
-    code_ << "   goto " << Ldone << "\n";
-    code_ << Lneg << ":\n";
-    code_ << "   sub " << result << ", " << masked << ", " << wrap << "\n";
-    code_ << Ldone << ":\n";
+    emit("if", cat(signReg, " goto ", Lneg));
+    emit(result, cat("= ", masked));
+    emit("goto", Ldone);
+    emitLabel(Lneg);
+    emit("sub", cat(result, ", ", masked, ", ", wrap));
+    emitLabel(Ldone);
     return result;
 }
 
 std::string ParrotVmCodegen::loadMem(const std::string &addrReg, Type t) {
     std::string reg = newReg();
-    code_ << "   " << reg << " = mem[" << addrReg << "]\n";
+    emit(reg, cat("= mem[", addrReg, "]"));
     return narrow(reg, t);
 }
 
 void ParrotVmCodegen::storeMem(const std::string &addrReg, const std::string &valueReg, Type t) {
     std::string narrowed = narrow(valueReg, t);
-    code_ << "   mem[" << addrReg << "] = " << narrowed << "\n";
+    emit(cat("mem[", addrReg, "]"), cat("= ", narrowed));
 }
 
 std::string ParrotVmCodegen::slotAddress(const ir::Slot *slot) {
     std::string reg = newReg();
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "   " << reg << " = " << globalOffsets_.at(slot) << "\n";
+        emit(reg, cat("= ", globalOffsets_.at(slot)));
         return reg;
     }
     long off = localOffsets_.at(slot);
     if (off == 0) {
-        code_ << "   " << reg << " = $I_fp\n";
+        emit(reg, "= $I_fp");
     } else {
-        code_ << "   add " << reg << ", $I_fp, " << off << "\n";
+        emit("add", cat(reg, ", $I_fp, ", off));
     }
     return reg;
 }
@@ -90,10 +90,10 @@ std::string ParrotVmCodegen::elementAddress(const ir::Slot *slot, const ir::Expr
     std::string scaled = idx;
     if (elemW != 1) {
         scaled = newReg();
-        code_ << "   mul " << scaled << ", " << idx << ", " << elemW << "\n";
+        emit("mul", cat(scaled, ", ", idx, ", ", elemW));
     }
     std::string addr = newReg();
-    code_ << "   add " << addr << ", " << base << ", " << scaled << "\n";
+    emit("add", cat(addr, ", ", base, ", ", scaled));
     return addr;
 }
 
@@ -108,7 +108,7 @@ std::string ParrotVmCodegen::genAddress(const ir::Expr &e) {
     if (e.kind == ir::ExprKind::Index) return elementAddress(e.slot, *e.lhs);
     if (e.kind == ir::ExprKind::Func) {
         std::string reg = newReg();
-        code_ << "   " << reg << " = " << funcIndex(e.func) << "\n";
+        emit(reg, cat("= ", funcIndex(e.func)));
         return reg;
     }
     err(e.line, "internal: unhandled addressable-operand kind in parrotvm backend");
@@ -117,17 +117,17 @@ std::string ParrotVmCodegen::genAddress(const ir::Expr &e) {
 std::string ParrotVmCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string a = genExpr(lhs), b = genExpr(rhs), d = newReg();
     if (op == "==") {
-        code_ << "   iseq " << d << ", " << a << ", " << b << "\n";
+        emit("iseq", cat(d, ", ", a, ", ", b));
     } else if (op == "!=") {
-        code_ << "   isne " << d << ", " << a << ", " << b << "\n";
+        emit("isne", cat(d, ", ", a, ", ", b));
     } else if (op == "<") {
-        code_ << "   islt " << d << ", " << a << ", " << b << "\n";
+        emit("islt", cat(d, ", ", a, ", ", b));
     } else if (op == "<=") {
-        code_ << "   isle " << d << ", " << a << ", " << b << "\n";
+        emit("isle", cat(d, ", ", a, ", ", b));
     } else if (op == ">") {
-        code_ << "   isgt " << d << ", " << a << ", " << b << "\n";
+        emit("isgt", cat(d, ", ", a, ", ", b));
     } else if (op == ">=") {
-        code_ << "   isge " << d << ", " << a << ", " << b << "\n";
+        emit("isge", cat(d, ", ", a, ", ", b));
     } else {
         err(lhs.line, "internal: unhandled comparison operator '" + op + "' in parrotvm backend");
     }
@@ -141,7 +141,7 @@ void ParrotVmCodegen::genCondBranch(const ir::Expr &cond, const std::string &Lfa
         return;
     }
     std::string reg = genExpr(cond);
-    code_ << "   unless " << reg << " goto " << Lfalse << "\n";
+    emit("unless", cat(reg, " goto ", Lfalse));
 }
 
 std::string ParrotVmCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -149,9 +149,11 @@ std::string ParrotVmCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &
     std::string Lfalse = newLabel(), Ldone = newLabel();
     genCondBranch(lhs, Lfalse);
     genCondBranch(rhs, Lfalse);
-    code_ << "   " << result << " = 1\n   goto " << Ldone << "\n";
-    code_ << Lfalse << ":\n   " << result << " = 0\n";
-    code_ << Ldone << ":\n";
+    emit(result, "= 1");
+    emit("goto", Ldone);
+    emitLabel(Lfalse);
+    emit(result, "= 0");
+    emitLabel(Ldone);
     return result;
 }
 
@@ -159,12 +161,14 @@ std::string ParrotVmCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &r
     std::string result = newReg();
     std::string Ltrue = newLabel(), Ldone = newLabel();
     std::string a = genExpr(lhs);
-    code_ << "   if " << a << " goto " << Ltrue << "\n";
+    emit("if", cat(a, " goto ", Ltrue));
     std::string b = genExpr(rhs);
-    code_ << "   if " << b << " goto " << Ltrue << "\n";
-    code_ << "   " << result << " = 0\n   goto " << Ldone << "\n";
-    code_ << Ltrue << ":\n   " << result << " = 1\n";
-    code_ << Ldone << ":\n";
+    emit("if", cat(b, " goto ", Ltrue));
+    emit(result, "= 0");
+    emit("goto", Ldone);
+    emitLabel(Ltrue);
+    emit(result, "= 1");
+    emitLabel(Ldone);
     return result;
 }
 
@@ -179,25 +183,25 @@ std::string ParrotVmCodegen::genBinary(const ir::Expr &e) {
     std::string b = genExpr(*e.rhs);
     std::string d = newReg();
     if (op == "+") {
-        code_ << "   add " << d << ", " << a << ", " << b << "\n";
+        emit("add", cat(d, ", ", a, ", ", b));
     } else if (op == "-") {
-        code_ << "   sub " << d << ", " << a << ", " << b << "\n";
+        emit("sub", cat(d, ", ", a, ", ", b));
     } else if (op == "*") {
-        code_ << "   mul " << d << ", " << a << ", " << b << "\n";
+        emit("mul", cat(d, ", ", a, ", ", b));
     } else if (op == "/") {
-        code_ << "   div " << d << ", " << a << ", " << b << "\n";
+        emit("div", cat(d, ", ", a, ", ", b));
     } else if (op == "%") {
-        code_ << "   mod " << d << ", " << a << ", " << b << "\n";
+        emit("mod", cat(d, ", ", a, ", ", b));
     } else if (op == "<<") {
-        code_ << "   shl " << d << ", " << a << ", " << b << "\n";
+        emit("shl", cat(d, ", ", a, ", ", b));
     } else if (op == ">>") {
-        code_ << "   shr " << d << ", " << a << ", " << b << "\n";
+        emit("shr", cat(d, ", ", a, ", ", b));
     } else if (op == "&") {
-        code_ << "   band " << d << ", " << a << ", " << b << "\n";
+        emit("band", cat(d, ", ", a, ", ", b));
     } else if (op == "^") {
-        code_ << "   bxor " << d << ", " << a << ", " << b << "\n";
+        emit("bxor", cat(d, ", ", a, ", ", b));
     } else if (op == "|") {
-        code_ << "   bor " << d << ", " << a << ", " << b << "\n";
+        emit("bor", cat(d, ", ", a, ", ", b));
     } else {
         err(e.line, "internal: unhandled binary operator '" + op + "' in parrotvm backend");
     }
@@ -209,25 +213,25 @@ std::string ParrotVmCodegen::applyCompoundOp(const ir::Expr &e, const std::strin
     const std::string &op = e.op;
     std::string d = newReg();
     if (op == "+") {
-        code_ << "   add " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("add", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "-") {
-        code_ << "   sub " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("sub", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "*") {
-        code_ << "   mul " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("mul", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "/") {
-        code_ << "   div " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("div", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "%") {
-        code_ << "   mod " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("mod", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "<<") {
-        code_ << "   shl " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("shl", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == ">>") {
-        code_ << "   shr " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("shr", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "&") {
-        code_ << "   band " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("band", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "^") {
-        code_ << "   bxor " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("bxor", cat(d, ", ", oldVal, ", ", rhsVal));
     } else if (op == "|") {
-        code_ << "   bor " << d << ", " << oldVal << ", " << rhsVal << "\n";
+        emit("bor", cat(d, ", ", oldVal, ", ", rhsVal));
     } else {
         err(e.line, "internal: unhandled compound-assignment operator '" + op + "' in parrotvm backend");
     }
@@ -240,7 +244,7 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             std::string reg = newReg();
-            code_ << "   " << reg << " = " << e.intValue << "\n";
+            emit(reg, cat("= ", e.intValue));
             return reg;
         }
         case ir::ExprKind::Var:
@@ -293,13 +297,13 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
             if (e.op == "-") {
                 std::string v = genExpr(*e.rhs);
                 std::string d = newReg();
-                code_ << "   neg " << d << ", " << v << "\n";
+                emit("neg", cat(d, ", ", v));
                 return narrow(d, e.type);
             }
             if (e.op == "!") {
                 std::string v = genExpr(*e.rhs);
                 std::string d = newReg();
-                code_ << "   iseq " << d << ", " << v << ", 0\n";
+                emit("iseq", cat(d, ", ", v, ", 0"));
                 return d;
             }
             if (e.op == "~") {
@@ -307,9 +311,9 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
                 // Pdp1Codegen uses for the same operator).
                 std::string v = genExpr(*e.rhs);
                 std::string t = newReg();
-                code_ << "   neg " << t << ", " << v << "\n";
+                emit("neg", cat(t, ", ", v));
                 std::string d = newReg();
-                code_ << "   sub " << d << ", " << t << ", 1\n";
+                emit("sub", cat(d, ", ", t, ", 1"));
                 return narrow(d, e.type);
             }
             if (e.op == "*") {
@@ -327,21 +331,21 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
             std::string argList;
             for (size_t i = 0; i < argRegs.size(); i++) argList += (i ? ", " : "") + argRegs[i];
             if (e.func->isVoid) {
-                code_ << "   '" << label(e.func) << "'(" << argList << ")\n";
+                emitRaw(cat(indent(), "'", label(e.func), "'(", argList, ")"));
                 std::string d = newReg();
-                code_ << "   " << d << " = 0\n";
+                emit(d, "= 0");
                 return d;
             }
             std::string d = newReg();
-            code_ << "   " << d << " = '" << label(e.func) << "'(" << argList << ")\n";
+            emit(d, cat("= '", label(e.func), "'(", argList, ")"));
             return d;
         }
         case ir::ExprKind::CallPtr: {
             std::string idx = genExpr(*e.lhs);
             std::string sub = newReg("P");
-            code_ << "   " << sub << " = funcs[" << idx << "]\n";
+            emit(sub, cat("= funcs[", idx, "]"));
             std::string d = newReg();
-            code_ << "   " << d << " = " << sub << "()\n";
+            emit(d, cat("= ", sub, "()"));
             return d;
         }
         case ir::ExprKind::Intrinsic: {
@@ -349,7 +353,7 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
             // concept) - a no-op value, same as a target with no real instruction for it.
             (void)e.op;
             std::string d = newReg();
-            code_ << "   " << d << " = 0\n";
+            emit(d, "= 0");
             return d;
         }
         case ir::ExprKind::Convert:
@@ -359,11 +363,12 @@ std::string ParrotVmCodegen::genExpr(const ir::Expr &e) {
             std::string Lelse = newLabel(), Ldone = newLabel();
             genCondBranch(*e.lhs, Lelse);
             std::string thenVal = genExpr(*e.rhs);
-            code_ << "   " << result << " = " << thenVal << "\n   goto " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit(result, cat("= ", thenVal));
+            emit("goto", Ldone);
+            emitLabel(Lelse);
             std::string elseVal = genExpr(*e.elseExpr);
-            code_ << "   " << result << " = " << elseVal << "\n";
-            code_ << Ldone << ":\n";
+            emit(result, cat("= ", elseVal));
+            emitLabel(Ldone);
             return result;
         }
         case ir::ExprKind::Func:
@@ -383,34 +388,34 @@ void ParrotVmCodegen::genStmt(const ir::Stmt &s) {
             genCondBranch(*s.cond, s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "   goto " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("goto", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genCondBranch(*s.cond, Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "   goto " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("goto", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break:
-            code_ << "   goto " << loopLabels_.back().second << "\n";
+            emit("goto", loopLabels_.back().second);
             return;
         case ir::StmtKind::Continue:
-            code_ << "   goto " << loopLabels_.back().first << "\n";
+            emit("goto", loopLabels_.back().first);
             return;
         case ir::StmtKind::Return: {
             bool hasValue = s.initOrReturnOrExpr != nullptr;
@@ -426,25 +431,32 @@ void ParrotVmCodegen::genStmt(const ir::Stmt &s) {
                     std::string addr = newReg();
                     long offset = static_cast<long>(i) * elemW;
                     if (offset == 0) {
+                        // Deliberately NOT routed through emit()/cat(): slotAddress() has its
+                        // own code_-emission side effects, and chaining it as a late operand of
+                        // this '<<' (same as the pre-refactor original) interleaves its emitted
+                        // line into this one's still-open text - a real, pre-existing bug (see
+                        // docs/known-bugs.md), reproduced here on purpose rather than silently
+                        // fixed by this refactor.
                         code_ << "   " << addr << " = " << slotAddress(s.declSlot) << "\n";
                     } else {
                         std::string base = slotAddress(s.declSlot);
-                        code_ << "   add " << addr << ", " << base << ", " << offset << "\n";
+                        emit("add", cat(addr, ", ", base, ", ", offset));
                     }
                     std::string val = newReg();
                     if (!elem.isSymbol) {
-                        code_ << "   " << val << " = " << elem.value << "\n";
+                        emit(val, cat("= ", elem.value));
                     } else if (elem.slot) {
+                        // Same deliberate non-conversion as the offset==0 case above.
                         code_ << "   " << val << " = " << slotAddress(elem.slot) << "\n";
                     } else {
-                        code_ << "   " << val << " = " << funcIndex(elem.func) << "\n";
+                        emit(val, cat("= ", funcIndex(elem.func)));
                     }
-                    code_ << "   mem[" << addr << "] = " << val << "\n";
+                    emit(cat("mem[", addr, "]"), cat("= ", val));
                 }
                 return;
             }
             std::string val = s.initOrReturnOrExpr ? genExpr(*s.initOrReturnOrExpr) : newReg();
-            if (!s.initOrReturnOrExpr) code_ << "   " << val << " = 0\n";
+            if (!s.initOrReturnOrExpr) emit(val, "= 0");
             storeSlot(s.declSlot, val);
             return;
         }
@@ -454,15 +466,14 @@ void ParrotVmCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label:
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         case ir::StmtKind::Goto:
-            code_ << "   goto " << irLabel(s.labelId) << "\n";
+            emit("goto", irLabel(s.labelId));
             return;
     }
 }
@@ -492,12 +503,12 @@ void ParrotVmCodegen::collectLocalDecls(const ir::Stmt *s) {
 
 void ParrotVmCodegen::emitEpilogueAndReturn(bool hasValue, const std::string &retReg) {
     std::string newSp = newReg();
-    code_ << "   add " << newSp << ", $I_fp, " << currentFrameSize_ << "\n";
-    code_ << "   regs[0] = " << newSp << "\n";
+    emit("add", cat(newSp, ", $I_fp, ", currentFrameSize_));
+    emit("regs[0]", cat("= ", newSp));
     if (hasValue) {
-        code_ << "   .return (" << retReg << ")\n";
+        emit(".return", cat("(", retReg, ")"));
     } else {
-        code_ << "   .return ()\n";
+        emit(".return", "()");
     }
 }
 
@@ -512,30 +523,30 @@ void ParrotVmCodegen::genFunction(const ir::FunctionBody &fn) {
     }
     collectLocalDecls(fn.body.get());
 
-    code_ << ".sub '" << label(f) << "'\n";
+    emitRaw(cat(".sub '", label(f), "'"));
     for (ir::Slot *p : f->params) {
-        code_ << "   .param int p" << p->paramIndex << "\n";
+        emit(".param", cat("int p", p->paramIndex));
     }
-    code_ << "   .local pmc mem\n";
-    code_ << "   .local pmc regs\n";
-    code_ << "   .local pmc funcs\n";
-    code_ << "   mem = get_global '$mem'\n";
-    code_ << "   regs = get_global '$regs'\n";
-    code_ << "   funcs = get_global '$funcs'\n";
-    code_ << "   .local int $I_sp\n";
-    code_ << "   .local int $I_fp\n";
-    code_ << "   $I_sp = regs[0]\n";
-    if (currentFrameSize_ > 0) code_ << "   sub $I_sp, $I_sp, " << currentFrameSize_ << "\n";
-    code_ << "   $I_fp = $I_sp\n";
-    code_ << "   regs[0] = $I_sp\n";
+    emit(".local", "pmc mem");
+    emit(".local", "pmc regs");
+    emit(".local", "pmc funcs");
+    emit("mem", "= get_global '$mem'");
+    emit("regs", "= get_global '$regs'");
+    emit("funcs", "= get_global '$funcs'");
+    emit(".local", "int $I_sp");
+    emit(".local", "int $I_fp");
+    emit("$I_sp", "= regs[0]");
+    if (currentFrameSize_ > 0) emit("sub", cat("$I_sp, $I_sp, ", currentFrameSize_));
+    emit("$I_fp", "= $I_sp");
+    emit("regs[0]", "= $I_sp");
     for (ir::Slot *p : f->params) {
         std::string addr = slotAddress(p);
-        code_ << "   mem[" << addr << "] = p" << p->paramIndex << "\n";
+        emit(cat("mem[", addr, "]"), cat("= p", p->paramIndex));
     }
 
     genStmt(*fn.body);
     emitEpilogueAndReturn(false, "");
-    code_ << ".end\n";
+    emitRaw(".end");
 }
 
 std::string ParrotVmCodegen::generate(const ir::Program &prog, bool objectMode) {
@@ -568,23 +579,23 @@ std::string ParrotVmCodegen::generate(const ir::Program &prog, bool objectMode) 
 
     long memSize = globalsSize + kStackReserve;
     size_t startPos = static_cast<size_t>(code_.tellp());
-    code_ << ".sub '_start' :main\n";
-    code_ << "   .local pmc mem\n";
-    code_ << "   mem = new ['ResizableIntegerArray']\n";
-    code_ << "   mem = " << memSize << "\n";
-    code_ << "   set_global '$mem', mem\n";
-    code_ << "   .local pmc regs\n";
-    code_ << "   regs = new ['ResizableIntegerArray']\n";
-    code_ << "   regs = 1\n";
-    code_ << "   regs[0] = " << memSize << "\n";
-    code_ << "   set_global '$regs', regs\n";
-    code_ << "   .local pmc funcs\n";
-    code_ << "   funcs = new ['ResizablePMCArray']\n";
-    code_ << "   funcs = " << funcTable_.size() << "\n";
+    emitRaw(".sub '_start' :main");
+    emit(".local", "pmc mem");
+    emit("mem", "= new ['ResizableIntegerArray']");
+    emit("mem", cat("= ", memSize));
+    emit("set_global", "'$mem', mem");
+    emit(".local", "pmc regs");
+    emit("regs", "= new ['ResizableIntegerArray']");
+    emit("regs", "= 1");
+    emit("regs[0]", cat("= ", memSize));
+    emit("set_global", "'$regs', regs");
+    emit(".local", "pmc funcs");
+    emit("funcs", "= new ['ResizablePMCArray']");
+    emit("funcs", cat("= ", funcTable_.size()));
     for (size_t i = 0; i < funcTable_.size(); i++) {
-        code_ << "   funcs[" << i << "] = find_sub '" << label(funcTable_[i]) << "'\n";
+        emit(cat("funcs[", i, "]"), cat("= find_sub '", label(funcTable_[i]), "'"));
     }
-    code_ << "   set_global '$funcs', funcs\n";
+    emit("set_global", "'$funcs', funcs");
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global || slot->isExternal) continue;
         long base = globalOffsets_[slot.get()];
@@ -594,22 +605,22 @@ std::string ParrotVmCodegen::generate(const ir::Program &prog, bool objectMode) 
                 const ir::ArrayInitElem &elem = slot->arrayInit[i];
                 long addr = base + static_cast<long>(i) * elemW;
                 if (!elem.isSymbol) {
-                    code_ << "   mem[" << addr << "] = " << elem.value << "\n";
+                    emit(cat("mem[", addr, "]"), cat("= ", elem.value));
                 } else if (elem.slot) {
-                    code_ << "   mem[" << addr << "] = " << globalOffsets_[elem.slot] << "\n";
+                    emit(cat("mem[", addr, "]"), cat("= ", globalOffsets_[elem.slot]));
                 } else {
-                    code_ << "   mem[" << addr << "] = " << funcIndex(elem.func) << "\n";
+                    emit(cat("mem[", addr, "]"), cat("= ", funcIndex(elem.func)));
                 }
             }
         } else if (slot->hasInit) {
-            code_ << "   mem[" << base << "] = " << slot->initValue << "\n";
+            emit(cat("mem[", base, "]"), cat("= ", slot->initValue));
         }
     }
     if (mainFn) {
-        code_ << "   $I0 = '" << label(mainFn) << "'()\n";
+        emit("$I0", cat("= '", label(mainFn), "'()"));
     }
-    code_ << "   .return ()\n";
-    code_ << ".end\n";
+    emit(".return", "()");
+    emitRaw(".end");
     ranges.push_back({homeFile, startPos, static_cast<size_t>(code_.tellp())});
 
     for (const auto &fb : prog.functionBodies) {

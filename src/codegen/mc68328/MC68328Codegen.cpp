@@ -67,19 +67,21 @@ std::string MC68328Codegen::generate(const ir::Program &prog, bool objectMode) {
     // synthesizes the reset vector table and entry sequence once objects are merged and
     // `main`'s linked address is resolvable. An object file's own base is `org 0`; the linker
     // places it.
-    code_ << "org 0\n";
+    emitRaw("org 0");
     if (!objectMode) {
         // Reset vector table: vector 0 (initial SSP), vector 1 (initial PC); the CPU's reset
         // exception loads A7 and PC from these directly.
-        code_ << "    dl " << kInitialSP << "\n";
-        code_ << "    dl " << kStartAddress << "\n";
-        code_ << "_start:\n";
+        emit("dl", kInitialSP);
+        emit("dl", kStartAddress);
+        emitLabel("_start");
         // Belt-and-suspenders reload of A7: some simulators (confirmed on qemu-system-m68k's
         // `-M none` board) honor the PC half of reset from vector 1 but not the A7 half.
-        code_ << "    movel " << kInitialSP << ",a7\n";
-        code_ << "    jsr " << label(mainFn) << "\n";
+        emit("movel", cat(kInitialSP, ",a7"));
+        emit("jsr", label(mainFn));
         // The result sits in D0 the moment execution reaches `halt`.
-        code_ << "halt:\n    bra halt\n\n";
+        emitLabel("halt");
+        emit("bra", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -124,15 +126,16 @@ std::string MC68328Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> MC68328Codegen::perFileAsm() const { return perFileAsm_; }
 
 void MC68328Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     // `linkl a6,-N` pushes the caller's a6, points this call's a6 at it, and reserves N bytes
     // below it for this function's Locals.
-    code_ << "    linkl a6," << (-fn.func->frameSize) << "\n";
+    emit("linkl", cat("a6,", (-fn.func->frameSize)));
 
     genStmt(*fn.body);
 
-    code_ << "    unlkl a6\n";
-    code_ << "    rts\n\n";
+    emit("unlkl", "a6");
+    emit("rts");
+    emitRaw("");
 }
 
 void MC68328Codegen::genStmt(const ir::Stmt &s) {
@@ -143,51 +146,52 @@ void MC68328Codegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    orl d1,d0\n";
-            code_ << "    cmpl 0,d0\n";
+            if (isWide(s.cond->type)) emit("orl", "d1,d0");
+            emit("cmpl", "0,d0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("beq", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    bra " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("bra", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    orl d1,d0\n";
-            code_ << "    cmpl 0,d0\n    beq " << Lend << "\n";
+            if (isWide(s.cond->type)) emit("orl", "d1,d0");
+            emit("cmpl", "0,d0");
+            emit("beq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    bra " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("bra", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    bra " << loopLabels_.back().second << "\n";
+            emit("bra", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    bra " << loopLabels_.back().first << "\n";
+            emit("bra", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
-            code_ << "    unlkl a6\n";
-            code_ << "    rts\n";
+            emit("unlkl", "a6");
+            emit("rts");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -206,16 +210,15 @@ void MC68328Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    bra " << irLabel(s.labelId) << "\n";
+            emit("bra", irLabel(s.labelId));
             return;
         }
     }
@@ -228,11 +231,11 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 auto v = static_cast<uint64_t>(e.intValue);
-                code_ << "    movel " << static_cast<int32_t>(static_cast<uint32_t>(v)) << ",d0\n";
-                code_ << "    movel " << static_cast<int32_t>(static_cast<uint32_t>(v >> 32)) << ",d1\n";
+                emit("movel", cat(static_cast<int32_t>(static_cast<uint32_t>(v)), ",d0"));
+                emit("movel", cat(static_cast<int32_t>(static_cast<uint32_t>(v >> 32)), ",d1"));
                 return;
             }
-            code_ << "    movel " << static_cast<int32_t>(static_cast<uint32_t>(e.intValue)) << ",d0\n";
+            emit("movel", cat(static_cast<int32_t>(static_cast<uint32_t>(e.intValue)), ",d0"));
             return;
         }
         case ir::ExprKind::Var: {
@@ -246,9 +249,9 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // a0 = target address
-                code_ << "    pushl a0\n";
+                emit("pushl", "a0");
                 genExpr(*e.rhs);
-                code_ << "    popl a0\n";
+                emit("popl", "a0");
                 storeIndirect(e.slot->type);
                 return;
             }
@@ -260,10 +263,10 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
             // Stores at e.type's own width/signedness: the pointee type, or a native int word
             // for the untyped-int-as-address style.
             genExpr(*e.lhs);  // d0 = pointer value
-            code_ << "    movel d0,a0\n";
-            code_ << "    pushl a0\n";
+            emit("movel", "d0,a0");
+            emit("pushl", "a0");
             genExpr(*e.rhs);
-            code_ << "    popl a0\n";
+            emit("popl", "a0");
             storeIndirect(e.type);
             return;
         }
@@ -277,33 +280,33 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
             // address needs to be held across rhs's evaluation.
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // d0 = rhs
-            code_ << "    movel d0,d1\n";
+            emit("movel", "d0,d1");
             loadOperand(mem, "", e.type);  // d0 = old
-            if (e.yieldOld) code_ << "    pushl d0\n";
+            if (e.yieldOld) emit("pushl", "d0");
             genCompoundOp(e.op, e.type);
             narrowD0To(e.type);
             storeOperand(mem, "", e.type);
-            if (e.yieldOld) code_ << "    popl d0\n";
+            if (e.yieldOld) emit("popl", "d0");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // d0 = pointer value
-            code_ << "    movel d0,a0\n";  // a0 = address
+            emit("movel", "d0,a0");  // a0 = address
             genCompoundThroughA0(e);
             return;
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
-            if (isWide(e.lhs->type)) code_ << "    orl d1,d0\n";
-            code_ << "    cmpl 0,d0\n";
+            if (isWide(e.lhs->type)) emit("orl", "d1,d0");
+            emit("cmpl", "0,d0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq " << Lelse << "\n";
+            emit("beq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    bra " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("bra", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -312,19 +315,19 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    negl d0\n";
+                    emit("negl", "d0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 // Loads at e.type's own width/signedness, same as DerefAssign above.
                 genExpr(*e.rhs);  // d0 = pointer value
-                code_ << "    movel d0,a0\n";
+                emit("movel", "d0,a0");
                 loadIndirect(e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    notl d0\n";
-                if (isWide(e.rhs->type)) code_ << "    notl d1\n";
+                emit("notl", "d0");
+                if (isWide(e.rhs->type)) emit("notl", "d1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -339,15 +342,16 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    pushl d1\n    pushl d0\n";
+                    emit("pushl", "d1");
+                    emit("pushl", "d0");
                     totalBytes += 8;
                 } else {
-                    code_ << "    pushl d0\n";
+                    emit("pushl", "d0");
                     totalBytes += 4;
                 }
             }
-            code_ << "    jsr " << label(e.func) << "\n";
-            if (totalBytes > 0) code_ << "    adda " << totalBytes << ",a7\n";
+            emit("jsr", label(e.func));
+            if (totalBytes > 0) emit("adda", cat(totalBytes, ",a7"));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -355,8 +359,8 @@ void MC68328Codegen::genExpr(const ir::Expr &e) {
             // no per-callee cell to pass arguments through. "jsrind a0" is a near call through
             // whatever address a0 holds.
             genExpr(*e.lhs);  // d0 = the callee's own entry address
-            code_ << "    movel d0,a0\n";
-            code_ << "    jsrind a0\n";
+            emit("movel", "d0,a0");
+            emit("jsrind", "a0");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -388,62 +392,64 @@ void MC68328Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr)
     // non-power-of-two width (a struct's).
     int doublings = elemDoublings(slot->type);
     if (doublings >= 0) {
-        for (int i = 0; i < doublings; i++) code_ << "    addl d0,d0\n";
+        for (int i = 0; i < doublings; i++) emit("addl", "d0,d0");
     } else {
         scaleIndexByWidth(slot->type);
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    leal " << label(slot) << ",a0\n";
-            code_ << "    adda d0,a0\n";
+            emit("leal", cat(label(slot), ",a0"));
+            emit("adda", "d0,a0");
         } else {
-            code_ << "    leal " << addr(slot) << ",a0\n";
-            code_ << "    adda d0,a0\n";
+            emit("leal", cat(addr(slot), ",a0"));
+            emit("adda", "d0,a0");
         }
     } else {
-        code_ << "    movel " << operandOf(slot) << ",a0\n";
-        code_ << "    adda d0,a0\n";
+        emit("movel", cat(operandOf(slot), ",a0"));
+        emit("adda", "d0,a0");
     }
 }
 
 void MC68328Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    addl d1,d0\n"; return; }
-    if (op == "-") { code_ << "    subl d1,d0\n"; return; }
+    if (op == "+") { emit("addl", "d1,d0"); return; }
+    if (op == "-") { emit("subl", "d1,d0"); return; }
     // MULS.W/MULU.W Dn,Dn: the only hardware multiply, 16-bit operands in, 32-bit product out.
-    if (op == "*") { code_ << "    " << (isUnsigned ? "muluw" : "mulsw") << " d1,d0\n"; return; }
-    if (op == "&") { code_ << "    andl d1,d0\n"; return; }
-    if (op == "|") { code_ << "    orl d1,d0\n"; return; }
+    if (op == "*") { emit((isUnsigned ? "muluw" : "mulsw"), "d1,d0"); return; }
+    if (op == "&") { emit("andl", "d1,d0"); return; }
+    if (op == "|") { emit("orl", "d1,d0"); return; }
     // EOR.L Dn,<ea>: d1 is the source register field, d0 the destination.
-    if (op == "^") { code_ << "    eorl d1,d0\n"; return; }
+    if (op == "^") { emit("eorl", "d1,d0"); return; }
     if (op == "<<" || op == ">>") {
-        code_ << "    " << (op == "<<" ? "lsll" : (isUnsigned ? "lsrl" : "asrl")) << " d1,d0\n";
+        emit((op == "<<" ? "lsll" : (isUnsigned ? "lsrl" : "asrl")), "d1,d0");
         return;
     }
     // "/" or "%": d0 = old value (dividend), d1 = divisor.
-    code_ << "    movel d1,d5\n    movel d0,d1\n    movel d5,d0\n";
+    emit("movel", "d1,d5");
+    emit("movel", "d0,d1");
+    emit("movel", "d5,d0");
     emitDivMod32(isUnsigned);
-    code_ << "    movel " << (op == "%" ? "d2" : "d3") << ",d0\n";
+    emit("movel", cat((op == "%" ? "d2" : "d3"), ",d0"));
 }
 
 // A0 must already hold the resolved address on entry; it's stashed on the stack across
 // `e.rhs`'s evaluation since that can recursively clobber every data register and A0 itself.
 void MC68328Codegen::genCompoundThroughA0(const ir::Expr &e) {
-    code_ << "    pushl a0\n";
+    emit("pushl", "a0");
     genExpr(*e.rhs);              // d0 = rhs
-    code_ << "    movel d0,d1\n";  // d1 = rhs, held across the a0 reload below
-    code_ << "    popl a0\n";       // a0 = address
+    emit("movel", "d0,d1");  // d1 = rhs, held across the a0 reload below
+    emit("popl", "a0");  // a0 = address
     loadIndirect(e.type);             // d0 = old
-    if (e.yieldOld) code_ << "    pushl d0\n";
+    if (e.yieldOld) emit("pushl", "d0");
     genCompoundOp(e.op, e.type);         // d0 = new (raw)
     narrowD0To(e.type);
     if (e.yieldOld) {
-        code_ << "    movel d0,d2\n";  // d2 = new
-        code_ << "    popl d0\n";       // d0 = old
-        code_ << "    movel d0,d3\n";    // d3 = old, preserved across the store below
-        code_ << "    movel d2,d0\n";     // d0 = new (storeIndirect always stores from d0)
+        emit("movel", "d0,d2");  // d2 = new
+        emit("popl", "d0");  // d0 = old
+        emit("movel", "d0,d3");  // d3 = old, preserved across the store below
+        emit("movel", "d2,d0");  // d0 = new (storeIndirect always stores from d0)
         storeIndirect(e.type);               // a0 still addresses the target (loadIndirect never bumps it - e.type is never wide)
-        code_ << "    movel d3,d0\n";          // d0 = old (final result)
+        emit("movel", "d3,d0");  // d0 = old (final result)
     } else {
         storeIndirect(e.type);  // d0 already = new; a0 still addresses the target
     }
@@ -458,14 +464,12 @@ void MC68328Codegen::genLocalArrayInit(const ir::Slot *slot) {
         int byteOffset = static_cast<int>(i) * w;
         if (w == 8 && !elem.isSymbol) {
             auto v = static_cast<uint64_t>(elem.value);
-            code_ << "    movel " << static_cast<int32_t>(static_cast<uint32_t>(v)) << "," << addr(slot, byteOffset)
-                  << "\n";
-            code_ << "    movel " << static_cast<int32_t>(static_cast<uint32_t>(v >> 32)) << ","
-                  << addr(slot, byteOffset + 4) << "\n";
+            emit("movel", cat(static_cast<int32_t>(static_cast<uint32_t>(v)), ",", addr(slot, byteOffset)));
+            emit("movel", cat(static_cast<int32_t>(static_cast<uint32_t>(v >> 32)), ",", addr(slot, byteOffset + 4)));
             continue;
         }
         const char *mnemonic = w == 1 ? "moveb" : w == 2 ? "movew" : "movel";
-        code_ << "    " << mnemonic << " " << arrayElemText(elem) << "," << addr(slot, byteOffset) << "\n";
+        emit(mnemonic, cat(arrayElemText(elem), ",", addr(slot, byteOffset)));
     }
 }
 
@@ -477,11 +481,12 @@ void MC68328Codegen::genIndex(const ir::Expr &e) {
 void MC68328Codegen::narrowD0To(Type to) {
     int w = widthOfType(to);
     if (w == 1) {
-        code_ << "    extw d0\n    extl d0\n";
-        if (to.isUnsigned) code_ << "    andl 255,d0\n";
+        emit("extw", "d0");
+        emit("extl", "d0");
+        if (to.isUnsigned) emit("andl", "255,d0");
     } else if (w == 2) {
-        code_ << "    extl d0\n";
-        if (to.isUnsigned) code_ << "    andl 65535,d0\n";
+        emit("extl", "d0");
+        if (to.isUnsigned) emit("andl", "65535,d0");
     }
     // 4 bytes: nothing to do. 8 bytes never reaches here (see genConvert()).
 }
@@ -489,30 +494,39 @@ void MC68328Codegen::narrowD0To(Type to) {
 void MC68328Codegen::loadOperand(const std::string &mem, const std::string &highMem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    moveb " << mem << ",d0\n";
-        code_ << "    " << (type.isUnsigned ? "andl 255,d0\n" : "extw d0\n    extl d0\n");
+        emit("moveb", cat(mem, ",d0"));
+        if (type.isUnsigned) {
+            emit("andl", "255,d0");
+        } else {
+            emit("extw", "d0");
+            emit("extl", "d0");
+        }
     } else if (w == 2) {
-        code_ << "    movew " << mem << ",d0\n";
-        code_ << "    " << (type.isUnsigned ? "andl 65535,d0\n" : "extl d0\n");
+        emit("movew", cat(mem, ",d0"));
+        if (type.isUnsigned) {
+            emit("andl", "65535,d0");
+        } else {
+            emit("extl", "d0");
+        }
     } else if (w == 4) {
-        code_ << "    movel " << mem << ",d0\n";
+        emit("movel", cat(mem, ",d0"));
     } else {  // 8 - long long: D0:D1 (lo:hi)
-        code_ << "    movel " << mem << ",d0\n";
-        code_ << "    movel " << highMem << ",d1\n";
+        emit("movel", cat(mem, ",d0"));
+        emit("movel", cat(highMem, ",d1"));
     }
 }
 
 void MC68328Codegen::storeOperand(const std::string &mem, const std::string &highMem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    moveb d0," << mem << "\n";
+        emit("moveb", cat("d0,", mem));
     } else if (w == 2) {
-        code_ << "    movew d0," << mem << "\n";
+        emit("movew", cat("d0,", mem));
     } else if (w == 4) {
-        code_ << "    movel d0," << mem << "\n";
+        emit("movel", cat("d0,", mem));
     } else {  // 8
-        code_ << "    movel d0," << mem << "\n";
-        code_ << "    movel d1," << highMem << "\n";
+        emit("movel", cat("d0,", mem));
+        emit("movel", cat("d1,", highMem));
     }
 }
 
@@ -521,30 +535,41 @@ void MC68328Codegen::storeOperand(const std::string &mem, const std::string &hig
 void MC68328Codegen::loadIndirect(Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    ldindb a0,d0\n";
-        code_ << "    " << (type.isUnsigned ? "andl 255,d0\n" : "extw d0\n    extl d0\n");
+        emit("ldindb", "a0,d0");
+        if (type.isUnsigned) {
+            emit("andl", "255,d0");
+        } else {
+            emit("extw", "d0");
+            emit("extl", "d0");
+        }
     } else if (w == 2) {
-        code_ << "    ldindw a0,d0\n";
-        code_ << "    " << (type.isUnsigned ? "andl 65535,d0\n" : "extl d0\n");
+        emit("ldindw", "a0,d0");
+        if (type.isUnsigned) {
+            emit("andl", "65535,d0");
+        } else {
+            emit("extl", "d0");
+        }
     } else if (w == 4) {
-        code_ << "    ldind a0,d0\n";
+        emit("ldind", "a0,d0");
     } else {  // 8
-        code_ << "    ldind a0,d0\n";
-        code_ << "    adda 4,a0\n    ldind a0,d1\n";
+        emit("ldind", "a0,d0");
+        emit("adda", "4,a0");
+        emit("ldind", "a0,d1");
     }
 }
 
 void MC68328Codegen::storeIndirect(Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb d0,a0\n";
+        emit("stindb", "d0,a0");
     } else if (w == 2) {
-        code_ << "    stindw d0,a0\n";
+        emit("stindw", "d0,a0");
     } else if (w == 4) {
-        code_ << "    stind d0,a0\n";
+        emit("stind", "d0,a0");
     } else {  // 8
-        code_ << "    stind d0,a0\n";
-        code_ << "    adda 4,a0\n    stind d1,a0\n";
+        emit("stind", "d0,a0");
+        emit("adda", "4,a0");
+        emit("stind", "d1,a0");
     }
 }
 
@@ -561,12 +586,13 @@ void MC68328Codegen::genConvert(const ir::Expr &e) {
         narrowD0To(to);  // d1 is simply discarded
     } else if (!fromWide && toWide) {
         if (from.isUnsigned) {
-            code_ << "    movel 0,d1\n";
+            emit("movel", "0,d1");
         } else {
             // Sign-extend D0 into D1 (no "cdq"-equivalent instruction here): arithmetic-shift a
             // copy of D0 right by 31 to leave D1 all-0s or all-1s per D0's sign.
-            code_ << "    movel d0,d1\n";
-            code_ << "    movel 31,d2\n    asrl d2,d1\n";
+            emit("movel", "d0,d1");
+            emit("movel", "31,d2");
+            emit("asrl", "d2,d1");
         }
     } else if (!fromWide && !toWide) {
         narrowD0To(to);
@@ -578,14 +604,19 @@ void MC68328Codegen::genConvert(const ir::Expr &e) {
 // while rhs evaluates, then ripple the carry/borrow across the word pair with ADDX/SUBX.
 void MC68328Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);  // d0:d1 = lhs
-    code_ << "    pushl d1\n    pushl d0\n";  // stack (top->bottom): lhs_lo, lhs_hi
+    emit("pushl", "d1");
+    emit("pushl", "d0");  // stack (top->bottom): lhs_lo, lhs_hi
     genExpr(rhs);                              // d0:d1 = rhs
-    code_ << "    movel d0,d2\n    movel d1,d3\n";  // d2=rhs_lo, d3=rhs_hi
-    code_ << "    popl d0\n    popl d1\n";            // d0=lhs_lo, d1=lhs_hi
+    emit("movel", "d0,d2");
+    emit("movel", "d1,d3");  // d2=rhs_lo, d3=rhs_hi
+    emit("popl", "d0");
+    emit("popl", "d1");  // d0=lhs_lo, d1=lhs_hi
     if (isAdd) {
-        code_ << "    addl d2,d0\n    addxl d3,d1\n";
+        emit("addl", "d2,d0");
+        emit("addxl", "d3,d1");
     } else {
-        code_ << "    subl d2,d0\n    subxl d3,d1\n";
+        emit("subl", "d2,d0");
+        emit("subxl", "d3,d1");
     }
 }
 
@@ -597,149 +628,262 @@ void MC68328Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool i
 // (shifted right, consumed bit by bit), [a0+16/20] accumulating result. Result in D0(lo):D1(hi).
 void MC68328Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    pushl d1\n    pushl d0\n";  // mcand_hi, mcand_lo (lo on top)
+    emit("pushl", "d1");
+    emit("pushl", "d0");  // mcand_hi, mcand_lo (lo on top)
     genExpr(rhs);
-    code_ << "    pushl d1\n    pushl d0\n";  // mplier_hi, mplier_lo (lo on top)
-    code_ << "    suba 24,a7\n    movel a7,a0\n";
-    code_ << "    movel [a0+32],d0\n    movel d0,[a0+0]\n";   // mcand_lo
-    code_ << "    movel [a0+36],d0\n    movel d0,[a0+4]\n";   // mcand_hi
-    code_ << "    movel [a0+24],d0\n    movel d0,[a0+8]\n";   // mplier_lo
-    code_ << "    movel [a0+28],d0\n    movel d0,[a0+12]\n";  // mplier_hi
-    code_ << "    movel 0,d0\n";
-    code_ << "    movel d0,[a0+16]\n    movel d0,[a0+20]\n";  // result = 0
-    code_ << "    movel 1,d3\n    movel 31,d6\n";             // fixed shift-count registers
+    emit("pushl", "d1");
+    emit("pushl", "d0");  // mplier_hi, mplier_lo (lo on top)
+    emit("suba", "24,a7");
+    emit("movel", "a7,a0");
+    emit("movel", "[a0+32],d0");
+    emit("movel", "d0,[a0+0]");  // mcand_lo
+    emit("movel", "[a0+36],d0");
+    emit("movel", "d0,[a0+4]");  // mcand_hi
+    emit("movel", "[a0+24],d0");
+    emit("movel", "d0,[a0+8]");  // mplier_lo
+    emit("movel", "[a0+28],d0");
+    emit("movel", "d0,[a0+12]");  // mplier_hi
+    emit("movel", "0,d0");
+    emit("movel", "d0,[a0+16]");
+    emit("movel", "d0,[a0+20]");  // result = 0
+    emit("movel", "1,d3");
+    emit("movel", "31,d6");  // fixed shift-count registers
     std::string Lloop = newLabel(), Ldone = newLabel(), LnoAdd = newLabel();
-    code_ << "    movel 64,d1\n";  // loop counter
-    code_ << Lloop << ":\n";
-    code_ << "    cmpl 0,d1\n    beq " << Ldone << "\n    subl 1,d1\n";
+    emit("movel", "64,d1");  // loop counter
+    emitLabel(Lloop);
+    emit("cmpl", "0,d1");
+    emit("beq", Ldone);
+    emit("subl", "1,d1");
 
     // if the multiplier's bit 0 is set, result += multiplicand (64-bit add via ADD/ADDX).
-    code_ << "    movel [a0+8],d0\n    andl 1,d0\n    cmpl 0,d0\n    beq " << LnoAdd << "\n";
-    code_ << "    movel [a0+16],d0\n    movel [a0+0],d2\n    addl d2,d0\n    movel d0,[a0+16]\n";
-    code_ << "    movel [a0+20],d0\n    movel [a0+4],d2\n    addxl d2,d0\n    movel d0,[a0+20]\n";
-    code_ << LnoAdd << ":\n";
+    emit("movel", "[a0+8],d0");
+    emit("andl", "1,d0");
+    emit("cmpl", "0,d0");
+    emit("beq", LnoAdd);
+    emit("movel", "[a0+16],d0");
+    emit("movel", "[a0+0],d2");
+    emit("addl", "d2,d0");
+    emit("movel", "d0,[a0+16]");
+    emit("movel", "[a0+20],d0");
+    emit("movel", "[a0+4],d2");
+    emit("addxl", "d2,d0");
+    emit("movel", "d0,[a0+20]");
+    emitLabel(LnoAdd);
 
     // multiplicand <<= 1: ADD.L Dn,Dn doubles Dn and sets the carry from bit 31; ADDX.L Dn,Dn
     // doubles the high word while folding that carry in.
-    code_ << "    movel [a0+0],d0\n    addl d0,d0\n    movel d0,[a0+0]\n";
-    code_ << "    movel [a0+4],d0\n    addxl d0,d0\n    movel d0,[a0+4]\n";
+    emit("movel", "[a0+0],d0");
+    emit("addl", "d0,d0");
+    emit("movel", "d0,[a0+0]");
+    emit("movel", "[a0+4],d0");
+    emit("addxl", "d0,d0");
+    emit("movel", "d0,[a0+4]");
 
     // multiplier >>= 1: the high word's outgoing bit 0 is carried into the low word's new bit 31
     // by hand.
-    code_ << "    movel [a0+12],d4\n";                           // d4 = mplier_hi (before shifting)
-    code_ << "    movel d4,d0\n    lsrl d3,d0\n    movel d0,[a0+12]\n";  // mplier_hi >>= 1
-    code_ << "    andl 1,d4\n    lsll d6,d4\n";                   // d4 = (old mplier_hi & 1) << 31
-    code_ << "    movel [a0+8],d0\n    lsrl d3,d0\n    orl d4,d0\n    movel d0,[a0+8]\n";
+    emit("movel", "[a0+12],d4");  // d4 = mplier_hi (before shifting)
+    emit("movel", "d4,d0");
+    emit("lsrl", "d3,d0");
+    emit("movel", "d0,[a0+12]");  // mplier_hi >>= 1
+    emit("andl", "1,d4");
+    emit("lsll", "d6,d4");  // d4 = (old mplier_hi & 1) << 31
+    emit("movel", "[a0+8],d0");
+    emit("lsrl", "d3,d0");
+    emit("orl", "d4,d0");
+    emit("movel", "d0,[a0+8]");
 
-    code_ << "    bra " << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    code_ << "    movel [a0+16],d0\n    movel [a0+20],d1\n";  // d0:d1 = result
-    code_ << "    adda 40,a7\n";  // release the 6-word scratch block and the 4 earlier stashed operand words
+    emit("bra", Lloop);
+    emitLabel(Ldone);
+    emit("movel", "[a0+16],d0");
+    emit("movel", "[a0+20],d1");  // d0:d1 = result
+    emit("adda", "40,a7");  // release the 6-word scratch block and the 4 earlier stashed operand words
 }
 
 void MC68328Codegen::genNegate64() {
-    code_ << "    notl d0\n    notl d1\n";
-    code_ << "    movel 0,d2\n";
-    code_ << "    addl 1,d0\n";
-    code_ << "    addxl d2,d1\n";
+    emit("notl", "d0");
+    emit("notl", "d1");
+    emit("movel", "0,d2");
+    emit("addl", "1,d0");
+    emit("addxl", "d2,d1");
 }
 
 // Classic bit-serial shift/compare/subtract long division, addressed via a0 over a 9-word
 // scratch block.
 void MC68328Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pushl d1\n    pushl d0\n";  // lhs_hi, lhs_lo (lhs_lo on top)
+    emit("pushl", "d1");
+    emit("pushl", "d0");  // lhs_hi, lhs_lo (lhs_lo on top)
     genExpr(rhs);
-    code_ << "    pushl d1\n    pushl d0\n";  // rhs_hi, rhs_lo (rhs_lo on top)
-    code_ << "    suba 36,a7\n    movel a7,a0\n";
+    emit("pushl", "d1");
+    emit("pushl", "d0");  // rhs_hi, rhs_lo (rhs_lo on top)
+    emit("suba", "36,a7");
+    emit("movel", "a7,a0");
     // Fetch the stashed operands from just above the scratch block.
-    code_ << "    movel [a0+44],d0\n    movel d0,[a0+0]\n";   // n_lo = lhs_lo
-    code_ << "    movel [a0+48],d0\n    movel d0,[a0+4]\n";   // n_hi = lhs_hi
-    code_ << "    movel [a0+36],d0\n    movel d0,[a0+8]\n";   // d_lo = rhs_lo
-    code_ << "    movel [a0+40],d0\n    movel d0,[a0+12]\n";  // d_hi = rhs_hi
-    code_ << "    movel 0,d0\n";
-    code_ << "    movel d0,[a0+16]\n    movel d0,[a0+20]\n";  // r = 0
-    code_ << "    movel d0,[a0+24]\n    movel d0,[a0+28]\n";  // q = 0
-    code_ << "    movel 64,d0\n    movel d0,[a0+32]\n";       // 64 iterations
+    emit("movel", "[a0+44],d0");
+    emit("movel", "d0,[a0+0]");  // n_lo = lhs_lo
+    emit("movel", "[a0+48],d0");
+    emit("movel", "d0,[a0+4]");  // n_hi = lhs_hi
+    emit("movel", "[a0+36],d0");
+    emit("movel", "d0,[a0+8]");  // d_lo = rhs_lo
+    emit("movel", "[a0+40],d0");
+    emit("movel", "d0,[a0+12]");  // d_hi = rhs_hi
+    emit("movel", "0,d0");
+    emit("movel", "d0,[a0+16]");
+    emit("movel", "d0,[a0+20]");  // r = 0
+    emit("movel", "d0,[a0+24]");
+    emit("movel", "d0,[a0+28]");  // q = 0
+    emit("movel", "64,d0");
+    emit("movel", "d0,[a0+32]");  // 64 iterations
 
     // d6/d7 are fixed shift counts for the whole routine, never rewritten below.
-    code_ << "    movel 1,d6\n    movel 31,d7\n";
+    emit("movel", "1,d6");
+    emit("movel", "31,d7");
 
     std::string LskipNegN = newLabel(), LskipNegD = newLabel();
     if (!isUnsigned) {
         // lhsSign/rhsSign reuse [a0+36]/[a0+40], the rhs staging words, never read again for
         // that purpose.
-        code_ << "    movel [a0+4],d0\n    lsrl d7,d0\n    movel d0,[a0+36]\n";  // lhsSign
-        code_ << "    movel [a0+12],d0\n    lsrl d7,d0\n    movel d0,[a0+40]\n";  // rhsSign
-        code_ << "    movel [a0+36],d0\n    cmpl 0,d0\n    beq " << LskipNegN << "\n";
-        code_ << "    movel [a0+0],d0\n    movel [a0+4],d1\n";
+        emit("movel", "[a0+4],d0");
+        emit("lsrl", "d7,d0");
+        emit("movel", "d0,[a0+36]");  // lhsSign
+        emit("movel", "[a0+12],d0");
+        emit("lsrl", "d7,d0");
+        emit("movel", "d0,[a0+40]");  // rhsSign
+        emit("movel", "[a0+36],d0");
+        emit("cmpl", "0,d0");
+        emit("beq", LskipNegN);
+        emit("movel", "[a0+0],d0");
+        emit("movel", "[a0+4],d1");
         genNegate64();
-        code_ << "    movel d0,[a0+0]\n    movel d1,[a0+4]\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    movel [a0+40],d0\n    cmpl 0,d0\n    beq " << LskipNegD << "\n";
-        code_ << "    movel [a0+8],d0\n    movel [a0+12],d1\n";
+        emit("movel", "d0,[a0+0]");
+        emit("movel", "d1,[a0+4]");
+        emitLabel(LskipNegN);
+        emit("movel", "[a0+40],d0");
+        emit("cmpl", "0,d0");
+        emit("beq", LskipNegD);
+        emit("movel", "[a0+8],d0");
+        emit("movel", "[a0+12],d1");
         genNegate64();
-        code_ << "    movel d0,[a0+8]\n    movel d1,[a0+12]\n";
-        code_ << LskipNegD << ":\n";
+        emit("movel", "d0,[a0+8]");
+        emit("movel", "d1,[a0+12]");
+        emitLabel(LskipNegD);
     }
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), LshiftQ = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    movel [a0+32],d0\n    cmpl 0,d0\n    beq " << Ldone << "\n";
-    code_ << "    subl 1,d0\n    movel d0,[a0+32]\n";
+    emitLabel(Lloop);
+    emit("movel", "[a0+32],d0");
+    emit("cmpl", "0,d0");
+    emit("beq", Ldone);
+    emit("subl", "1,d0");
+    emit("movel", "d0,[a0+32]");
 
     // n <<= 1 (0-filled), capturing its own old top bit into d1.
-    code_ << "    movel [a0+4],d0\n    lsrl d7,d0\n    movel d0,d1\n";  // d1 = n's old top bit
-    code_ << "    movel [a0+0],d0\n    lsrl d7,d0\n    movel d0,d2\n";  // d2 = n_lo's old top bit
-    code_ << "    movel [a0+0],d0\n    lsll d6,d0\n    movel d0,[a0+0]\n";
-    code_ << "    movel [a0+4],d0\n    lsll d6,d0\n    orl d2,d0\n    movel d0,[a0+4]\n";
+    emit("movel", "[a0+4],d0");
+    emit("lsrl", "d7,d0");
+    emit("movel", "d0,d1");  // d1 = n's old top bit
+    emit("movel", "[a0+0],d0");
+    emit("lsrl", "d7,d0");
+    emit("movel", "d0,d2");  // d2 = n_lo's old top bit
+    emit("movel", "[a0+0],d0");
+    emit("lsll", "d6,d0");
+    emit("movel", "d0,[a0+0]");
+    emit("movel", "[a0+4],d0");
+    emit("lsll", "d6,d0");
+    emit("orl", "d2,d0");
+    emit("movel", "d0,[a0+4]");
 
     // r = (r << 1) | (n's old top bit, already in d1).
-    code_ << "    movel [a0+16],d0\n    lsrl d7,d0\n    movel d0,d3\n";  // d3 = r_lo's old top bit
-    code_ << "    movel [a0+16],d0\n    lsll d6,d0\n    orl d1,d0\n    movel d0,[a0+16]\n";
-    code_ << "    movel [a0+20],d0\n    lsll d6,d0\n    orl d3,d0\n    movel d0,[a0+20]\n";
+    emit("movel", "[a0+16],d0");
+    emit("lsrl", "d7,d0");
+    emit("movel", "d0,d3");  // d3 = r_lo's old top bit
+    emit("movel", "[a0+16],d0");
+    emit("lsll", "d6,d0");
+    emit("orl", "d1,d0");
+    emit("movel", "d0,[a0+16]");
+    emit("movel", "[a0+20],d0");
+    emit("lsll", "d6,d0");
+    emit("orl", "d3,d0");
+    emit("movel", "d0,[a0+20]");
 
     // if (r >= d) { r -= d; quotient bit = 1 } else { quotient bit = 0 } - always an unsigned
     // compare, since n and d were already negated to a non-negative magnitude above.
-    code_ << "    movel [a0+20],d0\n    movel [a0+12],d1\n    cmpl d1,d0\n    bne " << LhiDiff << "\n";
-    code_ << "    movel [a0+16],d0\n    movel [a0+8],d1\n    cmpl d1,d0\n    bcc " << LsubYes << "\n";
-    code_ << "    bra " << LsubNo << "\n";
-    code_ << LhiDiff << ":\n    bcc " << LsubYes << "\n    bra " << LsubNo << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    movel [a0+16],d0\n    movel [a0+8],d1\n    subl d1,d0\n    movel d0,[a0+16]\n";
-    code_ << "    movel [a0+20],d0\n    movel [a0+12],d1\n    subxl d1,d0\n    movel d0,[a0+20]\n";
-    code_ << "    movel 1,d5\n    bra " << LshiftQ << "\n";
-    code_ << LsubNo << ":\n    movel 0,d5\n";
-    code_ << LshiftQ << ":\n";
+    emit("movel", "[a0+20],d0");
+    emit("movel", "[a0+12],d1");
+    emit("cmpl", "d1,d0");
+    emit("bne", LhiDiff);
+    emit("movel", "[a0+16],d0");
+    emit("movel", "[a0+8],d1");
+    emit("cmpl", "d1,d0");
+    emit("bcc", LsubYes);
+    emit("bra", LsubNo);
+    emitLabel(LhiDiff);
+    emit("bcc", LsubYes);
+    emit("bra", LsubNo);
+    emitLabel(LsubYes);
+    emit("movel", "[a0+16],d0");
+    emit("movel", "[a0+8],d1");
+    emit("subl", "d1,d0");
+    emit("movel", "d0,[a0+16]");
+    emit("movel", "[a0+20],d0");
+    emit("movel", "[a0+12],d1");
+    emit("subxl", "d1,d0");
+    emit("movel", "d0,[a0+20]");
+    emit("movel", "1,d5");
+    emit("bra", LshiftQ);
+    emitLabel(LsubNo);
+    emit("movel", "0,d5");
+    emitLabel(LshiftQ);
 
     // q = (q << 1) | quotient bit (in d5).
-    code_ << "    movel [a0+24],d0\n    lsrl d7,d0\n    movel d0,d2\n";  // d2 = q_lo's old top bit
-    code_ << "    movel [a0+24],d0\n    lsll d6,d0\n    orl d5,d0\n    movel d0,[a0+24]\n";
-    code_ << "    movel [a0+28],d0\n    lsll d6,d0\n    orl d2,d0\n    movel d0,[a0+28]\n";
-    code_ << "    bra " << Lloop << "\n";
+    emit("movel", "[a0+24],d0");
+    emit("lsrl", "d7,d0");
+    emit("movel", "d0,d2");  // d2 = q_lo's old top bit
+    emit("movel", "[a0+24],d0");
+    emit("lsll", "d6,d0");
+    emit("orl", "d5,d0");
+    emit("movel", "d0,[a0+24]");
+    emit("movel", "[a0+28],d0");
+    emit("lsll", "d6,d0");
+    emit("orl", "d2,d0");
+    emit("movel", "d0,[a0+28]");
+    emit("bra", Lloop);
 
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
     if (!isUnsigned) {
         // Quotient is negative iff the operands' signs differed; the
         // remainder always takes the dividend's (lhs) own sign.
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    movel [a0+36],d5\n    movel [a0+40],d0\n    eorl d5,d0\n";
-        code_ << "    cmpl 0,d0\n    beq " << LskipNegQ << "\n";
-        code_ << "    movel [a0+24],d0\n    movel [a0+28],d1\n";
+        emit("movel", "[a0+36],d5");
+        emit("movel", "[a0+40],d0");
+        emit("eorl", "d5,d0");
+        emit("cmpl", "0,d0");
+        emit("beq", LskipNegQ);
+        emit("movel", "[a0+24],d0");
+        emit("movel", "[a0+28],d1");
         genNegate64();
-        code_ << "    movel d0,[a0+24]\n    movel d1,[a0+28]\n";
-        code_ << LskipNegQ << ":\n";
-        code_ << "    movel [a0+36],d0\n    cmpl 0,d0\n    beq " << LskipNegR << "\n";
-        code_ << "    movel [a0+16],d0\n    movel [a0+20],d1\n";
+        emit("movel", "d0,[a0+24]");
+        emit("movel", "d1,[a0+28]");
+        emitLabel(LskipNegQ);
+        emit("movel", "[a0+36],d0");
+        emit("cmpl", "0,d0");
+        emit("beq", LskipNegR);
+        emit("movel", "[a0+16],d0");
+        emit("movel", "[a0+20],d1");
         genNegate64();
-        code_ << "    movel d0,[a0+16]\n    movel d1,[a0+20]\n";
-        code_ << LskipNegR << ":\n";
+        emit("movel", "d0,[a0+16]");
+        emit("movel", "d1,[a0+20]");
+        emitLabel(LskipNegR);
     }
-    code_ << "    movel [a0+24],d0\n    movel [a0+28],d1\n";  // d0:d1 = quotient
-    code_ << "    movel [a0+16],d2\n    movel [a0+20],d3\n";  // d2:d3 = remainder
-    code_ << "    adda 52,a7\n";  // release the 9-word scratch block and the 4 earlier stashed operand words
-    if (wantRemainder) code_ << "    movel d2,d0\n    movel d3,d1\n";
+    emit("movel", "[a0+24],d0");
+    emit("movel", "[a0+28],d1");  // d0:d1 = quotient
+    emit("movel", "[a0+16],d2");
+    emit("movel", "[a0+20],d3");  // d2:d3 = remainder
+    emit("adda", "52,a7");  // release the 9-word scratch block and the 4 earlier stashed operand words
+    if (wantRemainder) {
+        emit("movel", "d2,d0");
+        emit("movel", "d3,d1");
+    }
 }
 
 // A `long long` shifted by a runtime count: no native instruction shifts more than 32 bits at
@@ -747,24 +891,34 @@ void MC68328Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, boo
 // by hand.
 void MC68328Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pushl d1\n    pushl d0\n";
+    emit("pushl", "d1");
+    emit("pushl", "d0");
     genExpr(rhs);                   // d0 = shift count (already promoted to a plain int)
-    code_ << "    movel d0,d2\n";   // d2 = remaining count
-    code_ << "    popl d0\n    popl d1\n";  // d0:d1 restored = the value being shifted (lo:hi)
-    code_ << "    movel 1,d6\n    movel 31,d7\n";  // fixed shift-count registers (register-count-only dialect)
+    emit("movel", "d0,d2");  // d2 = remaining count
+    emit("popl", "d0");
+    emit("popl", "d1");  // d0:d1 restored = the value being shifted (lo:hi)
+    emit("movel", "1,d6");
+    emit("movel", "31,d7");  // fixed shift-count registers (register-count-only dialect)
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    cmpl 0,d2\n    beq " << Ldone << "\n    subl 1,d2\n";
+    emitLabel(Lloop);
+    emit("cmpl", "0,d2");
+    emit("beq", Ldone);
+    emit("subl", "1,d2");
     if (isLeft) {
-        code_ << "    movel d0,d3\n    lsrl d7,d3\n";  // d3 = d0's old top bit
-        code_ << "    lsll d6,d1\n    orl d3,d1\n";
-        code_ << "    lsll d6,d0\n";
+        emit("movel", "d0,d3");
+        emit("lsrl", "d7,d3");  // d3 = d0's old top bit
+        emit("lsll", "d6,d1");
+        emit("orl", "d3,d1");
+        emit("lsll", "d6,d0");
     } else {
-        code_ << "    movel d1,d3\n    lsll d7,d3\n";  // d3 = (d1&1)<<31
-        code_ << "    lsrl d6,d0\n    orl d3,d0\n";
-        code_ << "    " << (isUnsigned ? "lsrl" : "asrl") << " d6,d1\n";
+        emit("movel", "d1,d3");
+        emit("lsll", "d7,d3");  // d3 = (d1&1)<<31
+        emit("lsrl", "d6,d0");
+        emit("orl", "d3,d0");
+        emit((isUnsigned ? "lsrl" : "asrl"), "d6,d1");
     }
-    code_ << "    bra " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("bra", Lloop);
+    emitLabel(Ldone);
 }
 
 // A `long long` comparison: compare the high words first (signed or unsigned branch per
@@ -772,49 +926,62 @@ void MC68328Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool
 // unsigned regardless of the overall type's signedness.
 void MC68328Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pushl d1\n    pushl d0\n";
+    emit("pushl", "d1");
+    emit("pushl", "d0");
     genExpr(rhs);
-    code_ << "    movel d0,d2\n    movel d1,d3\n";  // d2:d3 = rhs (lo:hi)
-    code_ << "    popl d0\n    popl d1\n";          // d0:d1 = lhs (lo:hi)
+    emit("movel", "d0,d2");
+    emit("movel", "d1,d3");  // d2:d3 = rhs (lo:hi)
+    emit("popl", "d0");
+    emit("popl", "d1");  // d0:d1 = lhs (lo:hi)
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    cmpl d2,d0\n    bne " << Lfalse << "\n";
-        code_ << "    cmpl d3,d1\n    bne " << Lfalse << "\n";
-        code_ << "    movel " << onEqual << ",d0\n    bra " << Ldone << "\n";
-        code_ << Lfalse << ":\n    movel " << onDiffer << ",d0\n";
-        code_ << Ldone << ":\n";
+        emit("cmpl", "d2,d0");
+        emit("bne", Lfalse);
+        emit("cmpl", "d3,d1");
+        emit("bne", Lfalse);
+        emit("movel", cat(onEqual, ",d0"));
+        emit("bra", Ldone);
+        emitLabel(Lfalse);
+        emit("movel", cat(onDiffer, ",d0"));
+        emitLabel(Ldone);
         return;
     }
     std::string signedBcc = op == "<" ? "blt" : op == "<=" ? "ble" : op == ">" ? "bgt" : "bge";
     std::string unsignedBcc = op == "<" ? "bcs" : op == "<=" ? "bls" : op == ">" ? "bhi" : "bcc";
     std::string hiBcc = isUnsigned ? unsignedBcc : signedBcc;
     std::string LhiDiff = newLabel();
-    code_ << "    cmpl d3,d1\n    bne " << LhiDiff << "\n";
-    code_ << "    cmpl d2,d0\n    " << unsignedBcc << " " << Ltrue << "\n";
-    code_ << "    bra " << Lfalse << "\n";
-    code_ << LhiDiff << ":\n    " << hiBcc << " " << Ltrue << "\n";
-    code_ << "    bra " << Lfalse << "\n";
-    code_ << Lfalse << ":\n    movel 0,d0\n    bra " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movel 1,d0\n";
-    code_ << Ldone << ":\n";
+    emit("cmpl", "d3,d1");
+    emit("bne", LhiDiff);
+    emit("cmpl", "d2,d0");
+    emit(unsignedBcc, Ltrue);
+    emit("bra", Lfalse);
+    emitLabel(LhiDiff);
+    emit(hiBcc, Ltrue);
+    emit("bra", Lfalse);
+    emitLabel(Lfalse);
+    emit("movel", "0,d0");
+    emit("bra", Ldone);
+    emitLabel(Ltrue);
+    emit("movel", "1,d0");
+    emitLabel(Ldone);
 }
 
 void MC68328Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
-        code_ << "    leal " << operandOf(operand.slot) << ",a0\n";
-        code_ << "    movel a0,d0\n";
+        emit("leal", cat(operandOf(operand.slot), ",a0"));
+        emit("movel", "a0,d0");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    movel a0,d0\n";
+        emit("movel", "a0,d0");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    leal " << label(operand.func) << ",a0\n";
-        code_ << "    movel a0,d0\n";
+        emit("leal", cat(label(operand.func), ",a0"));
+        emit("movel", "a0,d0");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -833,14 +1000,14 @@ void MC68328Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl d0\n";
+        emit("pushl", "d0");
         genExpr(*e.rhs);
-        code_ << "    popl d1\n";  // d1 = lhs, d0 = rhs
+        emit("popl", "d1");  // d1 = lhs, d0 = rhs
         if (op == "+") {
-            code_ << "    addl d1,d0\n";  // d0 = d0 + d1 = rhs + lhs
+            emit("addl", "d1,d0");  // d0 = d0 + d1 = rhs + lhs
         } else {
-            code_ << "    subl d0,d1\n";  // d1 = d1 - d0 = lhs - rhs
-            code_ << "    movel d1,d0\n";
+            emit("subl", "d0,d1");  // d1 = d1 - d0 = lhs - rhs
+            emit("movel", "d1,d0");
         }
         return;
     }
@@ -864,20 +1031,24 @@ void MC68328Codegen::genBinary(const ir::Expr &e) {
         const char *insn = op == "&" ? "andl" : op == "|" ? "orl" : "eorl";
         if (wide) {
             genExpr(*e.lhs);
-            code_ << "    pushl d1\n    pushl d0\n";
+            emit("pushl", "d1");
+            emit("pushl", "d0");
             genExpr(*e.rhs);
-            code_ << "    movel d0,d2\n    movel d1,d3\n";
-            code_ << "    popl d0\n    popl d1\n";
-            code_ << "    " << insn << " d2,d0\n    " << insn << " d3,d1\n";
+            emit("movel", "d0,d2");
+            emit("movel", "d1,d3");
+            emit("popl", "d0");
+            emit("popl", "d1");
+            emit(insn, "d2,d0");
+            emit(insn, "d3,d1");
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl d0\n";
+        emit("pushl", "d0");
         genExpr(*e.rhs);
-        code_ << "    popl d1\n";  // d1 = lhs, d0 = rhs
+        emit("popl", "d1");  // d1 = lhs, d0 = rhs
         // EOR's source/dest convention (Dn is always source) still gives the right result for
         // this commutative op regardless of operand order.
-        code_ << "    " << insn << " d1,d0\n";
+        emit(insn, "d1,d0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -886,12 +1057,12 @@ void MC68328Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pushl d0\n";
+        emit("pushl", "d0");
         genExpr(*e.rhs);
-        code_ << "    movel d0,d1\n";  // d1 = shift count
-        code_ << "    popl d0\n";      // d0 = value to shift
+        emit("movel", "d0,d1");  // d1 = shift count
+        emit("popl", "d0");  // d0 = value to shift
         const char *insn = op == "<<" ? "lsll" : (isUnsigned ? "lsrl" : "asrl");
-        code_ << "    " << insn << " d1,d0\n";
+        emit(insn, "d1,d0");
         return;
     }
     if (op == "&&") {
@@ -909,10 +1080,10 @@ void MC68328Codegen::genBinary(const ir::Expr &e) {
 void MC68328Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     bool isUnsigned = lhs.type.isUnsigned;
     genExpr(lhs);
-    code_ << "    pushl d0\n";
+    emit("pushl", "d0");
     genExpr(rhs);
-    code_ << "    popl d1\n";  // d1 = lhs, d0 = rhs
-    code_ << "    " << (isUnsigned ? "muluw" : "mulsw") << " d1,d0\n";  // d0 = d0 * d1 = rhs * lhs
+    emit("popl", "d1");  // d1 = lhs, d0 = rhs
+    emit((isUnsigned ? "muluw" : "mulsw"), "d1,d0");  // d0 = d0 * d1 = rhs * lhs
 }
 
 // `int`/`long` are 32 bits here, wider than DIVS.W/DIVU.W's 32/16
@@ -920,11 +1091,11 @@ void MC68328Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // (emitDivMod32()).
 void MC68328Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pushl d0\n";
+    emit("pushl", "d0");
     genExpr(rhs);
-    code_ << "    popl d1\n";  // d1 = lhs (dividend), d0 = rhs (divisor)
+    emit("popl", "d1");  // d1 = lhs (dividend), d0 = rhs (divisor)
     emitDivMod32(isUnsigned);
-    code_ << "    movel " << (wantRemainder ? "d2" : "d3") << ",d0\n";
+    emit("movel", cat((wantRemainder ? "d2" : "d3"), ",d0"));
 }
 
 // Restoring shift-subtract division, one quotient bit per iteration.
@@ -934,49 +1105,78 @@ void MC68328Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wa
 // are divided as magnitudes; the quotient is negated when the signs
 // differ and the remainder takes the dividend's sign.
 void MC68328Codegen::emitDivMod32(bool isUnsigned) {
-    code_ << "    pushl a0\n";  // a compound assignment's target address
-    code_ << "    movel 1,d6\n    movel 31,d7\n";
+    emit("pushl", "a0");  // a compound assignment's target address
+    emit("movel", "1,d6");
+    emit("movel", "31,d7");
     std::string LskipN = newLabel(), LskipD = newLabel();
     if (!isUnsigned) {
-        code_ << "    movel d1,d5\n    lsrl d7,d5\n    pushl d5\n";  // dividend sign
-        code_ << "    movel d0,d5\n    lsrl d7,d5\n    pushl d5\n";  // divisor sign
-        code_ << "    movel a7,a0\n";                                  // [a0+0] divisor sign, [a0+4] dividend sign
-        code_ << "    movel [a0+4],d5\n    cmpl 0,d5\n    beq " << LskipN << "\n";
-        code_ << "    notl d1\n    addl 1,d1\n";
-        code_ << LskipN << ":\n";
-        code_ << "    movel [a0+0],d5\n    cmpl 0,d5\n    beq " << LskipD << "\n";
-        code_ << "    notl d0\n    addl 1,d0\n";
-        code_ << LskipD << ":\n";
+        emit("movel", "d1,d5");
+        emit("lsrl", "d7,d5");
+        emit("pushl", "d5");  // dividend sign
+        emit("movel", "d0,d5");
+        emit("lsrl", "d7,d5");
+        emit("pushl", "d5");  // divisor sign
+        emit("movel", "a7,a0");  // [a0+0] divisor sign, [a0+4] dividend sign
+        emit("movel", "[a0+4],d5");
+        emit("cmpl", "0,d5");
+        emit("beq", LskipN);
+        emit("notl", "d1");
+        emit("addl", "1,d1");
+        emitLabel(LskipN);
+        emit("movel", "[a0+0],d5");
+        emit("cmpl", "0,d5");
+        emit("beq", LskipD);
+        emit("notl", "d0");
+        emit("addl", "1,d0");
+        emitLabel(LskipD);
     }
     std::string Lloop = newLabel(), Ldone = newLabel(), Lsub = newLabel(), Lnext = newLabel();
-    code_ << "    movel 0,d2\n    movel 0,d3\n    movel 32,d4\n";
-    code_ << Lloop << ":\n";
-    code_ << "    cmpl 0,d4\n    beq " << Ldone << "\n";
-    code_ << "    subl 1,d4\n";
-    code_ << "    movel d1,d5\n    lsrl d7,d5\n    lsll d6,d1\n";     // d5 = dividend's outgoing bit
-    code_ << "    movel d2,a0\n";                                      // a0 = remainder before shifting
-    code_ << "    lsll d6,d2\n    orl d5,d2\n    lsll d6,d3\n";
-    code_ << "    movel a0,d5\n    lsrl d7,d5\n    cmpl 0,d5\n    bne " << Lsub << "\n";
-    code_ << "    cmpl d0,d2\n    bcc " << Lsub << "\n";
-    code_ << "    bra " << Lnext << "\n";
-    code_ << Lsub << ":\n";
-    code_ << "    subl d0,d2\n    orl d6,d3\n";
-    code_ << Lnext << ":\n";
-    code_ << "    bra " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("movel", "0,d2");
+    emit("movel", "0,d3");
+    emit("movel", "32,d4");
+    emitLabel(Lloop);
+    emit("cmpl", "0,d4");
+    emit("beq", Ldone);
+    emit("subl", "1,d4");
+    emit("movel", "d1,d5");
+    emit("lsrl", "d7,d5");
+    emit("lsll", "d6,d1");  // d5 = dividend's outgoing bit
+    emit("movel", "d2,a0");  // a0 = remainder before shifting
+    emit("lsll", "d6,d2");
+    emit("orl", "d5,d2");
+    emit("lsll", "d6,d3");
+    emit("movel", "a0,d5");
+    emit("lsrl", "d7,d5");
+    emit("cmpl", "0,d5");
+    emit("bne", Lsub);
+    emit("cmpl", "d0,d2");
+    emit("bcc", Lsub);
+    emit("bra", Lnext);
+    emitLabel(Lsub);
+    emit("subl", "d0,d2");
+    emit("orl", "d6,d3");
+    emitLabel(Lnext);
+    emit("bra", Lloop);
+    emitLabel(Ldone);
     if (!isUnsigned) {
         std::string LskipQ = newLabel(), LskipR = newLabel();
-        code_ << "    movel a7,a0\n";
-        code_ << "    movel [a0+0],d5\n    movel [a0+4],d4\n    eorl d4,d5\n";
-        code_ << "    cmpl 0,d5\n    beq " << LskipQ << "\n";
-        code_ << "    notl d3\n    addl 1,d3\n";
-        code_ << LskipQ << ":\n";
-        code_ << "    cmpl 0,d4\n    beq " << LskipR << "\n";
-        code_ << "    notl d2\n    addl 1,d2\n";
-        code_ << LskipR << ":\n";
-        code_ << "    adda 8,a7\n";
+        emit("movel", "a7,a0");
+        emit("movel", "[a0+0],d5");
+        emit("movel", "[a0+4],d4");
+        emit("eorl", "d4,d5");
+        emit("cmpl", "0,d5");
+        emit("beq", LskipQ);
+        emit("notl", "d3");
+        emit("addl", "1,d3");
+        emitLabel(LskipQ);
+        emit("cmpl", "0,d4");
+        emit("beq", LskipR);
+        emit("notl", "d2");
+        emit("addl", "1,d2");
+        emitLabel(LskipR);
+        emit("adda", "8,a7");
     }
-    code_ << "    popl a0\n";
+    emit("popl", "a0");
 }
 
 void MC68328Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -999,56 +1199,70 @@ void MC68328Codegen::genCompare(const std::string &op, const ir::Expr &lhs, cons
 // N^V for signed), so it's applied directly here.
 void MC68328Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &branchIfTrue) {
     genExpr(lhs);
-    code_ << "    pushl d0\n";
+    emit("pushl", "d0");
     genExpr(rhs);
-    code_ << "    popl d1\n";  // d1 = lhs, d0 = rhs
-    code_ << "    cmpl d0,d1\n";  // flags = d1 - d0 = lhs - rhs
+    emit("popl", "d1");  // d1 = lhs, d0 = rhs
+    emit("cmpl", "d0,d1");  // flags = d1 - d0 = lhs - rhs
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << branchIfTrue << " " << Ltrue << "\n";
-    code_ << "    movel 0,d0\n    bra " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movel 1,d0\n";
-    code_ << Ldone << ":\n";
+    emit(branchIfTrue, Ltrue);
+    emit("movel", "0,d0");
+    emit("bra", Ldone);
+    emitLabel(Ltrue);
+    emit("movel", "1,d0");
+    emitLabel(Ldone);
 }
 
 // A wide (`long long`) operand's truthiness needs both words: `orl d1,d0` folds them together
 // before the usual "cmpl 0,d0".
 void MC68328Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    orl d1,d0\n";
+    if (isWide(lhs.type)) emit("orl", "d1,d0");
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmpl 0,d0\n    beq " << Lfalse << "\n";
+    emit("cmpl", "0,d0");
+    emit("beq", Lfalse);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orl d1,d0\n";
-    code_ << "    cmpl 0,d0\n    beq " << Lfalse << "\n";
-    code_ << "    bra " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    movel 0,d0\n    bra " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movel 1,d0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("orl", "d1,d0");
+    emit("cmpl", "0,d0");
+    emit("beq", Lfalse);
+    emit("bra", Ltrue);
+    emitLabel(Lfalse);
+    emit("movel", "0,d0");
+    emit("bra", Ldone);
+    emitLabel(Ltrue);
+    emit("movel", "1,d0");
+    emitLabel(Ldone);
 }
 
 void MC68328Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    orl d1,d0\n";
+    if (isWide(lhs.type)) emit("orl", "d1,d0");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmpl 0,d0\n    bne " << Ltrue << "\n";
+    emit("cmpl", "0,d0");
+    emit("bne", Ltrue);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orl d1,d0\n";
-    code_ << "    cmpl 0,d0\n    bne " << Ltrue << "\n";
-    code_ << "    bra " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    movel 1,d0\n    bra " << Ldone << "\n";
-    code_ << Lfalse << ":\n    movel 0,d0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("orl", "d1,d0");
+    emit("cmpl", "0,d0");
+    emit("bne", Ltrue);
+    emit("bra", Lfalse);
+    emitLabel(Ltrue);
+    emit("movel", "1,d0");
+    emit("bra", Ldone);
+    emitLabel(Lfalse);
+    emit("movel", "0,d0");
+    emitLabel(Ldone);
 }
 
 void MC68328Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    orl d1,d0\n";
-    code_ << "    cmpl 0,d0\n";
+    if (isWide(rhs.type)) emit("orl", "d1,d0");
+    emit("cmpl", "0,d0");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    beq " << Ltrue << "\n";
-    code_ << "    movel 0,d0\n    bra " << Ldone << "\n";
-    code_ << Ltrue << ":\n    movel 1,d0\n";
-    code_ << Ldone << ":\n";
+    emit("beq", Ltrue);
+    emit("movel", "0,d0");
+    emit("bra", Ldone);
+    emitLabel(Ltrue);
+    emit("movel", "1,d0");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> MC68328Codegen::assembleInProcess(const std::string &asmText,

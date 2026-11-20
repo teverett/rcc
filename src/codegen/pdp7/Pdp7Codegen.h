@@ -37,7 +37,7 @@ namespace rcc {
 // since each one's live range is a single short, call-free
 // instruction sequence). A Local or Param never gets a label - see
 // emitLoadSlotAddress().
-class Pdp7Codegen : public Backend {
+class Pdp7Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "pdp7"; }
@@ -50,6 +50,9 @@ class Pdp7Codegen : public Backend {
                                                   const std::string &format) const override;
 
    private:
+    // This dialect's own convention is 3 spaces, not TextCodegenBase's 4-space default.
+    std::string indent() const override { return "   "; }
+
     void genFunction(const ir::FunctionBody &fn);
     void genStmt(const ir::Stmt &s);
     void genExpr(const ir::Expr &e);  // leaves the result in AC
@@ -459,7 +462,6 @@ class Pdp7Codegen : public Backend {
     // runtime-computed address.
     void computeElementAddress(const ir::Slot *slot, const ir::Expr &idxExpr);
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: value" data-word lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;  // built by generate() - see Codegen.h's perFileAsm()
 

@@ -35,13 +35,13 @@ void SaturnCodegen::narrowA(Type to) {
     uint32_t mask = width == 1 ? 0xFFu : 0xFFFFu;
     uint32_t signBit = width == 1 ? 0x80u : 0x8000u;
     uint32_t signExtend = ~mask;
-    code_ << "    and a, " << mask << "\n";
+    emit("and", cat("a, ", mask));
     if (to.isUnsigned) return;
     std::string Ldone = newLabel();
-    code_ << "    cmp a, " << signBit << "\n";
-    code_ << "    jl " << Ldone << "\n";
-    code_ << "    or a, " << signExtend << "\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", cat("a, ", signBit));
+    emit("jl", Ldone);
+    emit("or", cat("a, ", signExtend));
+    emitLabel(Ldone);
 }
 
 // --- generate() -----------------------------------------------------------
@@ -60,13 +60,14 @@ std::string SaturnCodegen::generate(const ir::Program &prog, bool objectMode) {
                             : !prog.slots.empty() ? prog.slots.front()->sourceFile
                                                    : std::string();
 
-    code_ << "org " << (objectMode ? 0 : kSaturnBaseAddress) << "\n\n";
+    emitRaw(cat("org ", objectMode ? 0 : kSaturnBaseAddress));
+    emitRaw("");
 
     if (mainFn && !objectMode) {
         size_t rangeStart = static_cast<size_t>(code_.tellp());
-        code_ << "    mov d0, " << kSaturnStackTop << "\n";
-        code_ << "    gosbvl " << label(mainFn) << "\n";
-        code_ << "    halt\n";
+        emit("mov", cat("d0, ", kSaturnStackTop));
+        emit("gosbvl", label(mainFn));
+        emit("halt");
         codeRanges.push_back({mainFn->sourceFile, rangeStart, static_cast<size_t>(code_.tellp())});
     }
 
@@ -157,7 +158,7 @@ std::map<std::string, std::string> SaturnCodegen::perFileAsm() const { return pe
 
 void SaturnCodegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
-    code_ << curFunctionLabel_ << ":\n";
+    emitLabel(curFunctionLabel_);
     emitPrologue(fn.func);
     genStmt(*fn.body);
     emitEpilogueAndReturn(/*hasValue=*/false, Type{});
@@ -167,10 +168,10 @@ void SaturnCodegen::genFunction(const ir::FunctionBody &fn) {
 
 void SaturnCodegen::emitPrologue(const ir::Function *fn) {
     // `gosbvl` already pushed the return address onto the `d0` stack before jumping here.
-    code_ << "    push d1\n";       // save caller's d1 (oldFP)
-    code_ << "    mov d1, d0\n";    // this call's own frame pointer
+    emit("push", "d1");     // save caller's d1 (oldFP)
+    emit("mov", "d1, d0");  // this call's own frame pointer
     if (fn->frameSize > 0) {
-        code_ << "    sub d0, " << fn->frameSize << "\n";  // reserve this call's Locals
+        emit("sub", cat("d0, ", fn->frameSize));  // reserve this call's Locals
     }
 }
 
@@ -185,27 +186,29 @@ void SaturnCodegen::emitEpilogueAndReturn(bool hasValue, Type retType) {
         for (int i = 0; i < chunks; i++) {
             std::string cell = "__retvalW" + std::to_string(i);
             trailer_.push_back(cell + ": dw 0");
-            code_ << "    pop a\n    st [" << cell << "], a\n";
+            emit("pop", "a");
+            emit("st", cat("[", cell, "], a"));
             retCells.push_back(cell);
         }
     }
-    code_ << "    mov d0, d1\n";  // discard this call's own Locals
-    code_ << "    pop d1\n";      // restore caller's d1 (oldFP); `d0` now points at the return
-                                  // address `gosbvl` pushed (top of stack).
+    emit("mov", "d0, d1");  // discard this call's own Locals
+    emit("pop", "d1");      // restore caller's d1 (oldFP); `d0` now points at the return
+                             // address `gosbvl` pushed (top of stack).
     if (!wide) {
         // A narrow return value is already sitting in `a` from the caller's own genExpr()/
         // genStmt() Return case; `rtn` pops the return address and jumps to it directly.
-        code_ << "    rtn\n";
+        emit("rtn");
         return;
     }
     // A wide return value's chunks must land ABOVE the return address once we're back in the
     // caller (see genWideExpr()'s own Call case), so the return address has to come off the
     // stack before they go on - `rtn` alone can't be reordered around that, hence `jmpr`.
-    code_ << "    pop b\n";  // b = return address
+    emit("pop", "b");  // b = return address
     for (int i = chunks - 1; i >= 0; i--) {
-        code_ << "    ld a, [" << retCells[i] << "]\n    push a\n";
+        emit("ld", cat("a, [", retCells[i], "]"));
+        emit("push", "a");
     }
-    code_ << "    jmpr b\n";
+    emit("jmpr", "b");
 }
 
 namespace {
@@ -218,42 +221,42 @@ const char *stMnemonic(int byteWidth) { return byteWidth == 1 ? "stb" : byteWidt
 
 void SaturnCodegen::emitLoadSlotAddress(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    mov a, " << label(slot) << "\n";
+        emit("mov", cat("a, ", label(slot)));
         return;
     }
     long offset = (slot->kind == ir::SlotKind::Param) ? static_cast<long>(slot->frameOffset)
                                                         : -localBaseOffset(slot);
-    code_ << "    mov a, d1\n";
+    emit("mov", "a, d1");
     if (offset > 0) {
-        code_ << "    add a, " << offset << "\n";
+        emit("add", cat("a, ", offset));
     } else if (offset < 0) {
-        code_ << "    sub a, " << (-offset) << "\n";
+        emit("sub", cat("a, ", -offset));
     }
 }
 
 void SaturnCodegen::emitLoadSlot(const ir::Slot *slot) {
     const char *ld = ldMnemonic(widthOfType(slot->type));
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    " << ld << " a, [" << label(slot) << "]\n";
+        emit(ld, cat("a, [", label(slot), "]"));
         narrowA(slot->type);
         return;
     }
     emitLoadSlotAddress(slot);
-    code_ << "    " << ld << " a, [a]\n";
+    emit(ld, "a, [a]");
     narrowA(slot->type);
 }
 
 void SaturnCodegen::emitStoreSlot(const ir::Slot *slot) {
     const char *st = stMnemonic(widthOfType(slot->type));
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    " << st << " [" << label(slot) << "], a\n";
+        emit(st, cat("[", label(slot), "], a"));
         return;
     }
-    code_ << "    push a\n";
+    emit("push", "a");
     emitLoadSlotAddress(slot);
-    code_ << "    mov c, a\n";
-    code_ << "    pop a\n";
-    code_ << "    " << st << " [c], a\n";
+    emit("mov", "c, a");
+    emit("pop", "a");
+    emit(st, "[c], a");
 }
 
 void SaturnCodegen::emitSlotBaseAddress(const ir::Slot *slot) {
@@ -279,24 +282,24 @@ void SaturnCodegen::emitLocalArrayInit(const ir::Slot *slot) {
         for (int w = 0; w < units; w++) {
             if (!elem.isSymbol) {
                 long unitValue = units == 1 ? elem.value : (elem.value >> (32 * w)) & 0xFFFFFFFFL;
-                code_ << "    mov a, " << unitValue << "\n";
+                emit("mov", cat("a, ", unitValue));
             } else if (w > 0) {
                 // A symbol element is a plain word-wide address; only word 0 holds it, every
                 // higher word is zero.
-                code_ << "    mov a, 0\n";
+                emit("mov", "a, 0");
             } else if (elem.slot) {
                 emitLoadSlotAddress(elem.slot);
             } else {
-                code_ << "    mov a, " << label(elem.func) << "\n";
+                emit("mov", cat("a, ", label(elem.func)));
             }
-            code_ << "    mov c, d1\n";
+            emit("mov", "c, d1");
             long offset = -localBaseOffset(slot) + static_cast<long>(i) * byteWidth + w * 4;
             if (offset > 0) {
-                code_ << "    add c, " << offset << "\n";
+                emit("add", cat("c, ", offset));
             } else if (offset < 0) {
-                code_ << "    sub c, " << (-offset) << "\n";
+                emit("sub", cat("c, ", -offset));
             }
-            code_ << "    " << st << " [c], a\n";
+            emit(st, "[c], a");
         }
     }
 }
@@ -325,53 +328,53 @@ void SaturnCodegen::computeElementAddressA(const ir::Slot *slot, const ir::Expr 
     int shiftAmt = log2ElemWidth(bytesPerElem);
     if (exprIsCallFree(idxExpr)) {
         genExpr(idxExpr);  // index in `a`
-        code_ << "    mov c, a\n";
+        emit("mov", "c, a");
         if (shiftAmt < 0) {
             // Non-power-of-two width: scale via __mul32 first (it clobbers `a`), then compute
             // the base address afterward, once `a` is free again.
-            code_ << "    st [__mul_a], c\n";
-            code_ << "    mov a, " << bytesPerElem << "\n";
-            code_ << "    st [__mul_b], a\n";
-            code_ << "    gosbvl __mul32\n";
-            code_ << "    mov c, a\n";
+            emit("st", "[__mul_a], c");
+            emit("mov", cat("a, ", bytesPerElem));
+            emit("st", "[__mul_b], a");
+            emit("gosbvl", "__mul32");
+            emit("mov", "c, a");
             emitSlotBaseAddress(slot);  // base in `a`
-            code_ << "    add a, c\n";
+            emit("add", "a, c");
             return;
         }
         emitSlotBaseAddress(slot);  // base in `a`
-        if (shiftAmt != 0) code_ << "    shl c, " << shiftAmt << "\n";
-        code_ << "    add a, c\n";
+        if (shiftAmt != 0) emit("shl", cat("c, ", shiftAmt));
+        emit("add", "a, c");
         return;
     }
     // idxExpr may itself call: compute the base first and protect it on the stack while the
     // index evaluates.
     emitSlotBaseAddress(slot);
-    code_ << "    push a\n";
+    emit("push", "a");
     genExpr(idxExpr);
-    code_ << "    mov c, a\n";
+    emit("mov", "c, a");
     if (shiftAmt < 0) {
-        code_ << "    st [__mul_a], c\n";
-        code_ << "    mov a, " << bytesPerElem << "\n";
-        code_ << "    st [__mul_b], a\n";
-        code_ << "    gosbvl __mul32\n";
-        code_ << "    mov c, a\n";
-        code_ << "    pop a\n";
-        code_ << "    add a, c\n";
+        emit("st", "[__mul_a], c");
+        emit("mov", cat("a, ", bytesPerElem));
+        emit("st", "[__mul_b], a");
+        emit("gosbvl", "__mul32");
+        emit("mov", "c, a");
+        emit("pop", "a");
+        emit("add", "a, c");
         return;
     }
-    if (shiftAmt != 0) code_ << "    shl c, " << shiftAmt << "\n";
-    code_ << "    pop a\n";
-    code_ << "    add a, c\n";
+    if (shiftAmt != 0) emit("shl", cat("c, ", shiftAmt));
+    emit("pop", "a");
+    emit("add", "a, c");
 }
 
 void SaturnCodegen::computeElementAddress(const ir::Slot *slot, const ir::Expr &idxExpr) {
     computeElementAddressA(slot, idxExpr);
-    code_ << "    push a\n";
+    emit("push", "a");
 }
 
 void SaturnCodegen::genIndex(const ir::Expr &e) {
     computeElementAddressA(e.slot, *e.lhs);
-    code_ << "    " << ldMnemonic(widthOfType(e.slot->type)) << " a, [a]\n";
+    emit(ldMnemonic(widthOfType(e.slot->type)), "a, [a]");
     narrowA(e.type);
 }
 
@@ -381,7 +384,7 @@ void SaturnCodegen::genAddrOf(const ir::Expr &operand) {
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    mov a, " << label(operand.func) << "\n";
+        emit("mov", cat("a, ", label(operand.func)));
         return;
     }
     // A bare Var naming either a declared array (its own address) or a plain scalar (its
@@ -414,36 +417,36 @@ void SaturnCodegen::genStmt(const ir::Stmt &s) {
             genCondBranch(*s.cond, s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    goto " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("goto", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genCondBranch(*s.cond, Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    goto " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("goto", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    goto " << loopLabels_.back().second << "\n";
+            emit("goto", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    goto " << loopLabels_.back().first << "\n";
+            emit("goto", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -473,7 +476,7 @@ void SaturnCodegen::genStmt(const ir::Stmt &s) {
                 if (s.initOrReturnOrExpr) {
                     genExpr(*s.initOrReturnOrExpr);
                 } else {
-                    code_ << "    mov a, 0\n";
+                    emit("mov", "a, 0");
                 }
                 emitStoreSlot(s.declSlot);
             }
@@ -486,16 +489,15 @@ void SaturnCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    goto " << irLabel(s.labelId) << "\n";
+            emit("goto", irLabel(s.labelId));
             return;
         }
     }
@@ -538,7 +540,7 @@ void SaturnCodegen::genCondBranch(const ir::Expr &cond, const std::string &label
         std::string Lcontinue = newLabel();
         genCondBranchTrue(*cond.lhs, Lcontinue);
         genCondBranch(*cond.rhs, label);
-        code_ << Lcontinue << ":\n";
+        emitLabel(Lcontinue);
         return;
     }
     if (cond.kind == ir::ExprKind::Unary && cond.op == "!") {
@@ -550,13 +552,13 @@ void SaturnCodegen::genCondBranch(const ir::Expr &cond, const std::string &label
         bool unsignedCmp = cond.lhs->type.isUnsigned || cond.rhs->type.isUnsigned || isPointer(cond.lhs->type) ||
                             isPointer(cond.rhs->type);
         genOperandsIntoCA(*cond.lhs, *cond.rhs);
-        code_ << "    cmp c, a\n";
-        code_ << "    " << jccForFalse(cond.op, unsignedCmp) << " " << label << "\n";
+        emit("cmp", "c, a");
+        emit(jccForFalse(cond.op, unsignedCmp), label);
         return;
     }
     genExpr(cond);
-    code_ << "    cmp a, 0\n";
-    code_ << "    je " << label << "\n";
+    emit("cmp", "a, 0");
+    emit("je", label);
 }
 
 void SaturnCodegen::genCondBranchTrue(const ir::Expr &cond, const std::string &label) {
@@ -569,7 +571,7 @@ void SaturnCodegen::genCondBranchTrue(const ir::Expr &cond, const std::string &l
         std::string Lcontinue = newLabel();
         genCondBranch(*cond.lhs, Lcontinue);
         genCondBranchTrue(*cond.rhs, label);
-        code_ << Lcontinue << ":\n";
+        emitLabel(Lcontinue);
         return;
     }
     if (cond.kind == ir::ExprKind::Unary && cond.op == "!") {
@@ -581,24 +583,24 @@ void SaturnCodegen::genCondBranchTrue(const ir::Expr &cond, const std::string &l
         bool unsignedCmp = cond.lhs->type.isUnsigned || cond.rhs->type.isUnsigned || isPointer(cond.lhs->type) ||
                             isPointer(cond.rhs->type);
         genOperandsIntoCA(*cond.lhs, *cond.rhs);
-        code_ << "    cmp c, a\n";
-        code_ << "    " << jccForTrue(cond.op, unsignedCmp) << " " << label << "\n";
+        emit("cmp", "c, a");
+        emit(jccForTrue(cond.op, unsignedCmp), label);
         return;
     }
     genExpr(cond);
-    code_ << "    cmp a, 0\n";
-    code_ << "    jne " << label << "\n";
+    emit("cmp", "a, 0");
+    emit("jne", label);
 }
 
 void SaturnCodegen::genCompareValue(const std::string &op, bool isUnsigned) {
     // On entry: `cmp c, a` has already run (c = lhs, a = rhs). Leaves a 0/1 result in `a`.
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jccForTrue(op, isUnsigned) << " " << Ltrue << "\n";
-    code_ << "    mov a, 0\n";
-    code_ << "    goto " << Ldone << "\n";
-    code_ << Ltrue << ":\n";
-    code_ << "    mov a, 1\n";
-    code_ << Ldone << ":\n";
+    emit(jccForTrue(op, isUnsigned), Ltrue);
+    emit("mov", "a, 0");
+    emit("goto", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "a, 1");
+    emitLabel(Ldone);
 }
 
 std::string SaturnCodegen::allocTemp() { return "T" + std::to_string(tempCounter_++); }
@@ -613,17 +615,17 @@ void SaturnCodegen::declareTemp(const std::string &label) { trailer_.push_back(l
 // same as "rhs leaves c alone".
 void SaturnCodegen::genOperandsIntoCA(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    push a\n";
+    emit("push", "a");
     genExpr(rhs);
-    code_ << "    pop c\n";
+    emit("pop", "c");
 }
 
 void SaturnCodegen::genBinary(const ir::Expr &e) {
     const std::string &op = e.op;
     if (op == "+" || op == "-") {
         genOperandsIntoCA(*e.lhs, *e.rhs);
-        code_ << (op == "+" ? "    add c, a\n" : "    sub c, a\n");
-        code_ << "    mov a, c\n";
+        emit(op == "+" ? "add" : "sub", "c, a");
+        emit("mov", "a, c");
         narrowA(e.type);
         return;
     }
@@ -657,7 +659,7 @@ void SaturnCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genOperandsIntoCA(*e.lhs, *e.rhs);
-        code_ << "    cmp c, a\n";
+        emit("cmp", "c, a");
         genCompareValue(op, unsignedCmp);
         return;
     }
@@ -665,16 +667,22 @@ void SaturnCodegen::genBinary(const ir::Expr &e) {
         std::string Lfalse = newLabel(), Ldone = newLabel();
         genCondBranch(*e.lhs, Lfalse);
         genCondBranch(*e.rhs, Lfalse);
-        code_ << "    mov a, 1\n    goto " << Ldone << "\n";
-        code_ << Lfalse << ":\n    mov a, 0\n" << Ldone << ":\n";
+        emit("mov", "a, 1");
+        emit("goto", Ldone);
+        emitLabel(Lfalse);
+        emit("mov", "a, 0");
+        emitLabel(Ldone);
         return;
     }
     if (op == "||") {
         std::string Ltrue = newLabel(), Ldone = newLabel();
         genCondBranchTrue(*e.lhs, Ltrue);
         genCondBranchTrue(*e.rhs, Ltrue);
-        code_ << "    mov a, 0\n    goto " << Ldone << "\n";
-        code_ << Ltrue << ":\n    mov a, 1\n" << Ldone << ":\n";
+        emit("mov", "a, 0");
+        emit("goto", Ldone);
+        emitLabel(Ltrue);
+        emit("mov", "a, 1");
+        emitLabel(Ldone);
         return;
     }
     err(e.line, "internal: unhandled binary operator '" + op + "'");
@@ -682,20 +690,20 @@ void SaturnCodegen::genBinary(const ir::Expr &e) {
 
 void SaturnCodegen::genBitwise(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
     genOperandsIntoCA(lhs, rhs);
-    code_ << "    " << (op == "&" ? "and" : op == "|" ? "or" : "xor") << " c, a\n";
-    code_ << "    mov a, c\n";
+    emit(op == "&" ? "and" : op == "|" ? "or" : "xor", "c, a");
+    emit("mov", "a, c");
 }
 
 void SaturnCodegen::genShift(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
     genOperandsIntoCA(lhs, rhs);  // c = value, a = count
     if (op == "<<") {
-        code_ << "    shl c, a\n";
+        emit("shl", "c, a");
     } else if (lhs.type.isUnsigned) {
-        code_ << "    shr c, a\n";
+        emit("shr", "c, a");
     } else {
-        code_ << "    sar c, a\n";
+        emit("sar", "c, a");
     }
-    code_ << "    mov a, c\n";
+    emit("mov", "a, c");
     narrowA(lhs.type);
 }
 
@@ -704,9 +712,9 @@ void SaturnCodegen::genShift(const std::string &op, const ir::Expr &lhs, const i
 // same bit pattern whether the operands are signed or unsigned, so one routine serves both.
 void SaturnCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genOperandsIntoCA(lhs, rhs);
-    code_ << "    st [__mul_a], c\n";
-    code_ << "    st [__mul_b], a\n";
-    code_ << "    gosbvl __mul32\n";
+    emit("st", "[__mul_a], c");
+    emit("st", "[__mul_b], a");
+    emit("gosbvl", "__mul32");
 }
 
 // Signed division/modulo reduces to the unsigned routine by negating any negative operand first
@@ -715,7 +723,7 @@ void SaturnCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // second runtime routine.
 void SaturnCodegen::callDivMod(bool isUnsigned, bool, bool) {
     if (isUnsigned) {
-        code_ << "    gosbvl __udivmod32\n";
+        emit("gosbvl", "__udivmod32");
         return;
     }
     // `c` = dividend, `a` = divisor on entry (see genDivMod()). Track each operand's sign, negate
@@ -728,38 +736,50 @@ void SaturnCodegen::callDivMod(bool isUnsigned, bool, bool) {
     // directly), so a negated register has to be written back to its own memory cell too -
     // leaving the stale original (possibly negative) value there would feed the unsigned
     // routine a negative dividend/divisor bit pattern instead of its corrected magnitude.
-    code_ << "    st [__dm_dvdneg], 0\n";
-    code_ << "    cmp c, 0\n    jge " << Ldvdpos << "\n";
-    code_ << "    neg c\n    st [__dm_a], c\n    st [__dm_dvdneg], 1\n";
-    code_ << Ldvdpos << ":\n";
-    code_ << "    st [__dm_dvsneg], 0\n";
-    code_ << "    cmp a, 0\n    jge " << Ldvspos << "\n";
-    code_ << "    neg a\n    st [__dm_b], a\n    st [__dm_dvsneg], 1\n";
-    code_ << Ldvspos << ":\n";
-    code_ << "    gosbvl __udivmod32\n";  // quotient in a, remainder in __dm_a
+    emit("st", "[__dm_dvdneg], 0");
+    emit("cmp", "c, 0");
+    emit("jge", Ldvdpos);
+    emit("neg", "c");
+    emit("st", "[__dm_a], c");
+    emit("st", "[__dm_dvdneg], 1");
+    emitLabel(Ldvdpos);
+    emit("st", "[__dm_dvsneg], 0");
+    emit("cmp", "a, 0");
+    emit("jge", Ldvspos);
+    emit("neg", "a");
+    emit("st", "[__dm_b], a");
+    emit("st", "[__dm_dvsneg], 1");
+    emitLabel(Ldvspos);
+    emit("gosbvl", "__udivmod32");  // quotient in a, remainder in __dm_a
     // Quotient's sign: dividend-sign XOR divisor-sign.
     std::string Lqpos = newLabel(), Lqdone = newLabel();
-    code_ << "    mov c, a\n";  // c = unsigned quotient (a is about to be clobbered by loads)
-    code_ << "    ld a, [__dm_dvdneg]\n    mov b, a\n";
-    code_ << "    ld a, [__dm_dvsneg]\n    xor b, a\n";
-    code_ << "    cmp b, 0\n    je " << Lqpos << "\n";
-    code_ << "    neg c\n";
-    code_ << Lqpos << ":\n";
-    code_ << "    mov a, c\n";
+    emit("mov", "c, a");  // c = unsigned quotient (a is about to be clobbered by loads)
+    emit("ld", "a, [__dm_dvdneg]");
+    emit("mov", "b, a");
+    emit("ld", "a, [__dm_dvsneg]");
+    emit("xor", "b, a");
+    emit("cmp", "b, 0");
+    emit("je", Lqpos);
+    emit("neg", "c");
+    emitLabel(Lqpos);
+    emit("mov", "a, c");
     // Remainder's sign always matches the dividend's original sign.
-    code_ << "    ld b, [__dm_dvdneg]\n";
-    code_ << "    cmp b, 0\n    je " << Lqdone << "\n";
-    code_ << "    ld c, [__dm_a]\n    neg c\n    st [__dm_a], c\n";
-    code_ << Lqdone << ":\n";
+    emit("ld", "b, [__dm_dvdneg]");
+    emit("cmp", "b, 0");
+    emit("je", Lqdone);
+    emit("ld", "c, [__dm_a]");
+    emit("neg", "c");
+    emit("st", "[__dm_a], c");
+    emitLabel(Lqdone);
 }
 
 void SaturnCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder) {
     genOperandsIntoCA(lhs, rhs);  // c = dividend, a = divisor
     bool isUnsigned = lhs.type.isUnsigned || rhs.type.isUnsigned;
-    code_ << "    st [__dm_a], c\n";
-    code_ << "    st [__dm_b], a\n";
+    emit("st", "[__dm_a], c");
+    emit("st", "[__dm_b], a");
     callDivMod(isUnsigned, false, false);
-    if (wantRemainder) code_ << "    ld a, [__dm_a]\n";
+    if (wantRemainder) emit("ld", "a, [__dm_a]");
     narrowA(lhs.type);
 }
 
@@ -773,15 +793,15 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
     if (isWide(e.type)) {
         genWideExpr(e);
         int chunks = chunkCount(e.type);
-        code_ << "    pop a\n";
-        for (int i = 1; i < chunks; i++) code_ << "    pop c\n";
+        emit("pop", "a");
+        for (int i = 1; i < chunks; i++) emit("pop", "c");
         return;
     }
     switch (e.kind) {
         case ir::ExprKind::FloatLit:
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
-            code_ << "    mov a, " << e.intValue << "\n";
+            emit("mov", cat("a, ", e.intValue));
             return;
         }
         case ir::ExprKind::Var: {
@@ -796,7 +816,8 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
             if (e.lhs) {  // slot[idx] = rhs
                 computeElementAddress(e.slot, *e.lhs);  // pushes the element's own address
                 genExpr(*e.rhs);
-                code_ << "    pop c\n    " << stMnemonic(widthOfType(e.slot->type)) << " [c], a\n";
+                emit("pop", "c");
+                emit(stMnemonic(widthOfType(e.slot->type)), "[c], a");
                 return;
             }
             genExpr(*e.rhs);
@@ -806,19 +827,24 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    neg a\n";
+                emit("neg", "a");
             } else if (e.op == "!") {
                 genExpr(*e.rhs);
                 std::string Ltrue = newLabel(), Ldone = newLabel();
-                code_ << "    cmp a, 0\n    je " << Ltrue << "\n    mov a, 0\n    goto " << Ldone << "\n";
-                code_ << Ltrue << ":\n    mov a, 1\n" << Ldone << ":\n";
+                emit("cmp", "a, 0");
+                emit("je", Ltrue);
+                emit("mov", "a, 0");
+                emit("goto", Ldone);
+                emitLabel(Ltrue);
+                emit("mov", "a, 1");
+                emitLabel(Ldone);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // a = pointer value
-                code_ << "    " << ldMnemonic(widthOfType(e.type)) << " a, [a]\n";
+                emit(ldMnemonic(widthOfType(e.type)), "a, [a]");
                 narrowA(e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    not a\n";
+                emit("not", "a");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -826,9 +852,10 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // a = pointer value
-            code_ << "    push a\n";
+            emit("push", "a");
             genExpr(*e.rhs);
-            code_ << "    pop c\n    " << stMnemonic(widthOfType(e.type)) << " [c], a\n";
+            emit("pop", "c");
+            emit(stMnemonic(widthOfType(e.type)), "[c], a");
             return;
         }
         case ir::ExprKind::CompoundAssign: {
@@ -837,7 +864,7 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // a = pointer value
-            code_ << "    push a\n";
+            emit("push", "a");
             genCompoundThroughAddress(e);
             return;
         }
@@ -845,10 +872,10 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
             std::string Lelse = newLabel(), Ldone = newLabel();
             genCondBranch(*e.lhs, Lelse);
             genExpr(*e.rhs);
-            code_ << "    goto " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("goto", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Call: {
@@ -859,18 +886,18 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
                     totalBytes += widthOfType(e.args[i]->type);  // already real bytes, 4/chunk
                 } else {
                     genExpr(*e.args[i]);
-                    code_ << "    push a\n";
+                    emit("push", "a");
                     totalBytes += 4;
                 }
             }
-            code_ << "    gosbvl " << label(e.func) << "\n";
-            if (totalBytes > 0) code_ << "    add d0, " << totalBytes << "\n";
+            emit("gosbvl", label(e.func));
+            if (totalBytes > 0) emit("add", cat("d0, ", totalBytes));
             narrowA(e.type);
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // a = callee's entry address
-            code_ << "    gosbvlr a\n";
+            emit("gosbvlr", "a");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -881,7 +908,7 @@ void SaturnCodegen::genExpr(const ir::Expr &e) {
             // Real Saturn interrupt-enable/disable has no analogue in this freestanding,
             // simplified model; this is a harmless no-op, the same convention most other
             // backends (e.g. mips) use for this IR node.
-            code_ << "    ; " << e.op << " (no-op on this backend)\n";
+            emit(";", cat(e.op, " (no-op on this backend)"));
             return;
         }
         case ir::ExprKind::Convert: {
@@ -897,8 +924,8 @@ void SaturnCodegen::genConvert(const ir::Expr &e) {
     if (isWide(e.lhs->type)) {
         genWideExpr(*e.lhs);
         int chunks = chunkCount(e.lhs->type);
-        code_ << "    pop a\n";  // the low chunk - this is the value being kept
-        for (int i = 1; i < chunks; i++) code_ << "    pop c\n";
+        emit("pop", "a");  // the low chunk - this is the value being kept
+        for (int i = 1; i < chunks; i++) emit("pop", "c");
         narrowA(e.type);
         return;
     }
@@ -911,33 +938,33 @@ void SaturnCodegen::genConvert(const ir::Expr &e) {
 void SaturnCodegen::combineInPlace(const ir::Expr &e, const std::string &dst, const std::string &rhsReg) {
     const std::string &op = e.op;
     if (op == "+") {
-        code_ << "    add " << dst << ", " << rhsReg << "\n";
+        emit("add", cat(dst, ", ", rhsReg));
     } else if (op == "-") {
-        code_ << "    sub " << dst << ", " << rhsReg << "\n";
+        emit("sub", cat(dst, ", ", rhsReg));
     } else if (op == "&") {
-        code_ << "    and " << dst << ", " << rhsReg << "\n";
+        emit("and", cat(dst, ", ", rhsReg));
     } else if (op == "|") {
-        code_ << "    or " << dst << ", " << rhsReg << "\n";
+        emit("or", cat(dst, ", ", rhsReg));
     } else if (op == "^") {
-        code_ << "    xor " << dst << ", " << rhsReg << "\n";
+        emit("xor", cat(dst, ", ", rhsReg));
     } else if (op == "<<") {
-        code_ << "    shl " << dst << ", " << rhsReg << "\n";
+        emit("shl", cat(dst, ", ", rhsReg));
     } else if (op == ">>") {
-        code_ << (e.type.isUnsigned ? "    shr " : "    sar ") << dst << ", " << rhsReg << "\n";
+        emit(e.type.isUnsigned ? "shr" : "sar", cat(dst, ", ", rhsReg));
     } else if (op == "*") {
-        code_ << "    st [__mul_a], " << dst << "\n";
-        code_ << "    st [__mul_b], " << rhsReg << "\n";
-        code_ << "    gosbvl __mul32\n";
-        if (dst != "a") code_ << "    mov " << dst << ", a\n";
+        emit("st", cat("[__mul_a], ", dst));
+        emit("st", cat("[__mul_b], ", rhsReg));
+        emit("gosbvl", "__mul32");
+        if (dst != "a") emit("mov", cat(dst, ", a"));
     } else if (op == "/" || op == "%") {
         bool isUnsigned = e.type.isUnsigned;
-        code_ << "    st [__dm_a], " << dst << "\n";
-        code_ << "    st [__dm_b], " << rhsReg << "\n";
-        if (dst != "c") code_ << "    mov c, " << dst << "\n";
-        if (rhsReg != "a") code_ << "    ld a, [__dm_b]\n";
+        emit("st", cat("[__dm_a], ", dst));
+        emit("st", cat("[__dm_b], ", rhsReg));
+        if (dst != "c") emit("mov", cat("c, ", dst));
+        if (rhsReg != "a") emit("ld", "a, [__dm_b]");
         callDivMod(isUnsigned, false, false);
-        if (op == "%") code_ << "    ld a, [__dm_a]\n";
-        if (dst != "a") code_ << "    mov " << dst << ", a\n";
+        if (op == "%") emit("ld", "a, [__dm_a]");
+        if (dst != "a") emit("mov", cat(dst, ", a"));
     } else {
         err(e.line, "internal: unhandled compound-assignment operator '" + op + "'");
     }
@@ -954,15 +981,15 @@ void SaturnCodegen::genCompoundScalar(const ir::Expr &e) {
     // emitLoadSlot()/emitStoreSlot(), neither of which ever touches `c`, so `c` safely holds
     // rhs across the `emitLoadSlot()` call below with nothing needing the stack.
     genExpr(*e.rhs);
-    code_ << "    mov c, a\n";  // c = rhs
-    emitLoadSlot(e.slot);       // a = old value
-    if (e.yieldOld) code_ << "    push a\n";
-    code_ << "    mov b, a\n";  // b = old value (dst for combineInPlace)
+    emit("mov", "c, a");  // c = rhs
+    emitLoadSlot(e.slot);  // a = old value
+    if (e.yieldOld) emit("push", "a");
+    emit("mov", "b, a");  // b = old value (dst for combineInPlace)
     combineInPlace(e, "b", "c");
-    code_ << "    mov a, b\n";
+    emit("mov", "a, b");
     narrowA(e.type);
     emitStoreSlot(e.slot);  // leaves `a` (the new value) unchanged
-    if (e.yieldOld) code_ << "    pop a\n";
+    if (e.yieldOld) emit("pop", "a");
 }
 
 // The target address must already be pushed on the stack by the caller, before e.rhs is
@@ -976,40 +1003,40 @@ void SaturnCodegen::genCompoundThroughAddress(const ir::Expr &e) {
     const char *st = stMnemonic(widthOfType(e.type));
     std::string addrCell = allocTemp();
     declareTemp(addrCell);
-    genExpr(*e.rhs);               // a = rhs
-    code_ << "    pop c\n";        // c = address
-    code_ << "    st [" << addrCell << "], c\n";
-    code_ << "    mov b, a\n";     // b = rhs
-    code_ << "    " << ld << " a, [c]\n";  // a = old value
-    if (e.yieldOld) code_ << "    push a\n";
-    combineInPlace(e, "a", "b");   // result in `a`; may clobber `b`/`c` freely
+    genExpr(*e.rhs);  // a = rhs
+    emit("pop", "c");  // c = address
+    emit("st", cat("[", addrCell, "], c"));
+    emit("mov", "b, a");  // b = rhs
+    emit(ld, "a, [c]");   // a = old value
+    if (e.yieldOld) emit("push", "a");
+    combineInPlace(e, "a", "b");  // result in `a`; may clobber `b`/`c` freely
     narrowA(e.type);
-    code_ << "    ld c, [" << addrCell << "]\n";
-    code_ << "    " << st << " [c], a\n";
-    if (e.yieldOld) code_ << "    pop a\n";
+    emit("ld", cat("c, [", addrCell, "]"));
+    emit(st, "[c], a");
+    if (e.yieldOld) emit("pop", "a");
 }
 
 // --- `long`/`long long` (wide) support --------------------------------------------------------
 
 void SaturnCodegen::pushWideFromAddress(Type type) {
-    code_ << "    mov c, a\n";  // c = base address
+    emit("mov", "c, a");  // c = base address
     int chunks = chunkCount(type);
     for (int i = chunks - 1; i >= 0; i--) {
-        code_ << "    mov a, c\n";
-        if (i > 0) code_ << "    add a, " << (i * 4) << "\n";
-        code_ << "    ld a, [a]\n";
-        code_ << "    push a\n";
+        emit("mov", "a, c");
+        if (i > 0) emit("add", cat("a, ", i * 4));
+        emit("ld", "a, [a]");
+        emit("push", "a");
     }
 }
 
 void SaturnCodegen::popWideToAddress(Type type) {
-    code_ << "    mov c, a\n";  // c = base address
+    emit("mov", "c, a");  // c = base address
     int chunks = chunkCount(type);
     for (int i = 0; i < chunks; i++) {
-        code_ << "    pop a\n";
-        code_ << "    mov b, c\n";
-        if (i > 0) code_ << "    add b, " << (i * 4) << "\n";
-        code_ << "    st [b], a\n";
+        emit("pop", "a");
+        emit("mov", "b, c");
+        if (i > 0) emit("add", cat("b, ", i * 4));
+        emit("st", "[b], a");
     }
 }
 
@@ -1019,8 +1046,8 @@ void SaturnCodegen::pushWideLiteral(Type type, long value) {
     // right shift sign-extends correctly even past the host `long`'s own width.
     for (int i = chunks - 1; i >= 0; i--) {
         long chunkVal = (value >> (32 * i)) & 0xFFFFFFFFL;
-        code_ << "    mov a, " << chunkVal << "\n";
-        code_ << "    push a\n";
+        emit("mov", cat("a, ", chunkVal));
+        emit("push", "a");
     }
 }
 
@@ -1038,23 +1065,25 @@ void SaturnCodegen::emitAddWithCarry(const std::string &dest, const std::string 
     declareTemp(carry2);
 
     auto halfAdd = [&](const std::string &rhsSrc, const std::string &carryOutCell) {
-        code_ << "    st [" << prev << "], " << dest << "\n";
-        code_ << "    add " << dest << ", " << rhsSrc << "\n";
+        emit("st", cat("[", prev, "], ", dest));
+        emit("add", cat(dest, ", ", rhsSrc));
         std::string Lset = newLabel(), Ldone = newLabel();
-        code_ << "    ld b, [" << prev << "]\n";
-        code_ << "    cmp " << dest << ", b\n";
-        code_ << "    jb " << Lset << "\n";
-        code_ << "    st [" << carryOutCell << "], 0\n    goto " << Ldone << "\n";
-        code_ << Lset << ":\n    st [" << carryOutCell << "], 1\n";
-        code_ << Ldone << ":\n";
+        emit("ld", cat("b, [", prev, "]"));
+        emit("cmp", cat(dest, ", b"));
+        emit("jb", Lset);
+        emit("st", cat("[", carryOutCell, "], 0"));
+        emit("goto", Ldone);
+        emitLabel(Lset);
+        emit("st", cat("[", carryOutCell, "], 1"));
+        emitLabel(Ldone);
     };
     halfAdd(addend, carry1);
-    code_ << "    ld b, [" << carryCell << "]\n";
+    emit("ld", cat("b, [", carryCell, "]"));
     halfAdd("b", carry2);
-    code_ << "    ld a, [" << carry1 << "]\n";
-    code_ << "    ld b, [" << carry2 << "]\n";
-    code_ << "    or a, b\n";
-    code_ << "    st [" << carryCell << "], a\n";
+    emit("ld", cat("a, [", carry1, "]"));
+    emit("ld", cat("b, [", carry2, "]"));
+    emit("or", "a, b");
+    emit("st", cat("[", carryCell, "], a"));
 }
 
 void SaturnCodegen::genWideNegate(int chunks) {
@@ -1065,19 +1094,22 @@ void SaturnCodegen::genWideNegate(int chunks) {
     }
     // Two's-complement negate: complement every chunk, then add 1 with carry rippling upward.
     for (int i = 0; i < chunks; i++) {
-        code_ << "    pop a\n    not a\n    st [" << t[i] << "], a\n";
+        emit("pop", "a");
+        emit("not", "a");
+        emit("st", cat("[", t[i], "], a"));
     }
     std::string carryCell = allocTemp();
     declareTemp(carryCell);
-    code_ << "    st [" << carryCell << "], 1\n";  // the "+1" of two's-complement negation
+    emit("st", cat("[", carryCell, "], 1"));  // the "+1" of two's-complement negation
     for (int i = 0; i < chunks; i++) {
-        code_ << "    ld c, [" << t[i] << "]\n";
-        code_ << "    mov a, 0\n";
+        emit("ld", cat("c, [", t[i], "]"));
+        emit("mov", "a, 0");
         emitAddWithCarry("c", "a", carryCell);
-        code_ << "    st [" << t[i] << "], c\n";
+        emit("st", cat("[", t[i], "], c"));
     }
     for (int i = chunks - 1; i >= 0; i--) {
-        code_ << "    ld a, [" << t[i] << "]\n    push a\n";
+        emit("ld", cat("a, [", t[i], "]"));
+        emit("push", "a");
     }
 }
 
@@ -1093,28 +1125,39 @@ void SaturnCodegen::genWideAddSub(bool isAdd, int chunks) {
     }
     // genWideExpr() pushes chunk 0 (low) last, so it's on top: the FIRST pop must land in
     // index 0, not chunks-1.
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << rhsT[i] << "], a\n";
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << lhsT[i] << "], a\n";
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", rhsT[i], "], a"));
+    }
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", lhsT[i], "], a"));
+    }
 
     std::string carryCell = allocTemp();
     declareTemp(carryCell);
     if (!isAdd) {
         // a - b = a + (~b + 1): negate rhsT in place first via the same ripple-carry machinery.
-        code_ << "    st [" << carryCell << "], 1\n";
+        emit("st", cat("[", carryCell, "], 1"));
         for (int i = 0; i < chunks; i++) {
-            code_ << "    ld c, [" << rhsT[i] << "]\n    not c\n    mov a, 0\n";
+            emit("ld", cat("c, [", rhsT[i], "]"));
+            emit("not", "c");
+            emit("mov", "a, 0");
             emitAddWithCarry("c", "a", carryCell);
-            code_ << "    st [" << rhsT[i] << "], c\n";
+            emit("st", cat("[", rhsT[i], "], c"));
         }
     }
-    code_ << "    st [" << carryCell << "], 0\n";
+    emit("st", cat("[", carryCell, "], 0"));
     for (int i = 0; i < chunks; i++) {
-        code_ << "    ld c, [" << lhsT[i] << "]\n";
-        code_ << "    ld a, [" << rhsT[i] << "]\n";
+        emit("ld", cat("c, [", lhsT[i], "]"));
+        emit("ld", cat("a, [", rhsT[i], "]"));
         emitAddWithCarry("c", "a", carryCell);
-        code_ << "    st [" << lhsT[i] << "], c\n";
+        emit("st", cat("[", lhsT[i], "], c"));
     }
-    for (int i = chunks - 1; i >= 0; i--) code_ << "    ld a, [" << lhsT[i] << "]\n    push a\n";
+    for (int i = chunks - 1; i >= 0; i--) {
+        emit("ld", cat("a, [", lhsT[i], "]"));
+        emit("push", "a");
+    }
 }
 
 // Each chunk is independent - no carry chain needed.
@@ -1128,13 +1171,20 @@ void SaturnCodegen::genWideBitwise(const std::string &op, int chunks) {
         t = allocTemp();
         declareTemp(t);
     }
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << rhsT[i] << "], a\n";
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << lhsT[i] << "], a\n";
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", rhsT[i], "], a"));
+    }
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", lhsT[i], "], a"));
+    }
     for (int i = chunks - 1; i >= 0; i--) {
-        code_ << "    ld c, [" << lhsT[i] << "]\n";
-        code_ << "    ld a, [" << rhsT[i] << "]\n";
-        code_ << "    " << (op == "&" ? "and" : op == "|" ? "or" : "xor") << " c, a\n";
-        code_ << "    mov a, c\n    push a\n";
+        emit("ld", cat("c, [", lhsT[i], "]"));
+        emit("ld", cat("a, [", rhsT[i], "]"));
+        emit(op == "&" ? "and" : op == "|" ? "or" : "xor", "c, a");
+        emit("mov", "a, c");
+        emit("push", "a");
     }
 }
 
@@ -1148,18 +1198,28 @@ void SaturnCodegen::genWideCompare(const std::string &op, int chunks, bool isUns
         t = allocTemp();
         declareTemp(t);
     }
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << rhsT[i] << "], a\n";
-    for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << lhsT[i] << "], a\n";
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", rhsT[i], "], a"));
+    }
+    for (int i = 0; i < chunks; i++) {
+        emit("pop", "a");
+        emit("st", cat("[", lhsT[i], "], a"));
+    }
 
     if (op == "==" || op == "!=") {
         std::string Ldiffer = newLabel(), Ldone = newLabel();
         for (int i = chunks - 1; i >= 0; i--) {
-            code_ << "    ld c, [" << lhsT[i] << "]\n    ld a, [" << rhsT[i] << "]\n";
-            code_ << "    cmp c, a\n    jne " << Ldiffer << "\n";
+            emit("ld", cat("c, [", lhsT[i], "]"));
+            emit("ld", cat("a, [", rhsT[i], "]"));
+            emit("cmp", "c, a");
+            emit("jne", Ldiffer);
         }
-        code_ << "    mov a, " << (op == "==" ? 1 : 0) << "\n    goto " << Ldone << "\n";
-        code_ << Ldiffer << ":\n    mov a, " << (op == "==" ? 0 : 1) << "\n";
-        code_ << Ldone << ":\n";
+        emit("mov", cat("a, ", op == "==" ? 1 : 0));
+        emit("goto", Ldone);
+        emitLabel(Ldiffer);
+        emit("mov", cat("a, ", op == "==" ? 0 : 1));
+        emitLabel(Ldone);
         return;
     }
     // Compare from the most-significant chunk down, short-circuiting once a chunk differs; only
@@ -1168,22 +1228,24 @@ void SaturnCodegen::genWideCompare(const std::string &op, int chunks, bool isUns
     std::string Llt = newLabel(), Lge = newLabel(), Ldone = newLabel();
     for (int i = chunks - 1; i >= 0; i--) {
         bool chunkUnsigned = (i == chunks - 1) ? isUnsigned : true;
-        code_ << "    ld c, [" << lhsT[i] << "]\n    ld a, [" << rhsT[i] << "]\n";
-        code_ << "    cmp c, a\n";
-        code_ << "    " << jccForTrue("<", chunkUnsigned) << " " << Llt << "\n";
+        emit("ld", cat("c, [", lhsT[i], "]"));
+        emit("ld", cat("a, [", rhsT[i], "]"));
+        emit("cmp", "c, a");
+        emit(jccForTrue("<", chunkUnsigned), Llt);
         if (i > 0) {
             // Equal so far: fall through to the next (lower) chunk's comparison. Only a
             // genuine difference (greater, here) short-circuits early.
-            code_ << "    " << jccForTrue(">", chunkUnsigned) << " " << Lge << "\n";
+            emit(jccForTrue(">", chunkUnsigned), Lge);
         } else {
-            code_ << "    goto " << Lge << "\n";
+            emit("goto", Lge);
         }
     }
-    code_ << Llt << ":\n";
-    code_ << "    mov a, " << ((op == "<" || op == "<=") ? 1 : 0) << "\n    goto " << Ldone << "\n";
-    code_ << Lge << ":\n";
-    code_ << "    mov a, " << ((op == "<" || op == "<=") ? 0 : 1) << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Llt);
+    emit("mov", cat("a, ", (op == "<" || op == "<=") ? 1 : 0));
+    emit("goto", Ldone);
+    emitLabel(Lge);
+    emit("mov", cat("a, ", (op == "<" || op == "<=") ? 0 : 1));
+    emitLabel(Ldone);
 }
 
 // Multiply and divide/modulo are not implemented for a wide operand: a genuine multi-chunk
@@ -1216,23 +1278,29 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
         case ir::ExprKind::DerefAssign: {
             int chunks = chunkCount(e.type);
             genExpr(*e.lhs);  // a = pointer value
-            code_ << "    push a\n";
+            emit("push", "a");
             genWideExpr(*e.rhs);
             std::vector<std::string> temps(chunks);
             for (auto &t : temps) {
                 t = allocTemp();
                 declareTemp(t);
             }
-            for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << temps[i] << "], a\n";
-            code_ << "    pop a\n";  // a = the pointer's own address
-            code_ << "    mov c, a\n";
             for (int i = 0; i < chunks; i++) {
-                code_ << "    ld a, [" << temps[i] << "]\n";
-                code_ << "    mov b, c\n";
-                if (i > 0) code_ << "    add b, " << (i * 4) << "\n";
-                code_ << "    st [b], a\n";
+                emit("pop", "a");
+                emit("st", cat("[", temps[i], "], a"));
             }
-            for (int i = chunks - 1; i >= 0; i--) code_ << "    ld a, [" << temps[i] << "]\n    push a\n";
+            emit("pop", "a");  // a = the pointer's own address
+            emit("mov", "c, a");
+            for (int i = 0; i < chunks; i++) {
+                emit("ld", cat("a, [", temps[i], "]"));
+                emit("mov", "b, c");
+                if (i > 0) emit("add", cat("b, ", i * 4));
+                emit("st", "[b], a");
+            }
+            for (int i = chunks - 1; i >= 0; i--) {
+                emit("ld", cat("a, [", temps[i], "]"));
+                emit("push", "a");
+            }
             return;
         }
         case ir::ExprKind::Assign: {
@@ -1245,22 +1313,31 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
             if (e.lhs) {  // slot[idx] = rhs, a wide array element
                 computeElementAddress(e.slot, *e.lhs);  // pushes the element's own address
                 genWideExpr(*e.rhs);
-                for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << temps[i] << "], a\n";
-                code_ << "    pop a\n";  // a = the element's own address
-                code_ << "    mov c, a\n";
+                for (int i = 0; i < chunks; i++) {
+                    emit("pop", "a");
+                    emit("st", cat("[", temps[i], "], a"));
+                }
+                emit("pop", "a");  // a = the element's own address
+                emit("mov", "c, a");
             } else {
                 genWideExpr(*e.rhs);
-                for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << temps[i] << "], a\n";
+                for (int i = 0; i < chunks; i++) {
+                    emit("pop", "a");
+                    emit("st", cat("[", temps[i], "], a"));
+                }
                 emitLoadSlotAddress(e.slot);
-                code_ << "    mov c, a\n";
+                emit("mov", "c, a");
             }
             for (int i = 0; i < chunks; i++) {
-                code_ << "    ld a, [" << temps[i] << "]\n";
-                code_ << "    mov b, c\n";
-                if (i > 0) code_ << "    add b, " << (i * 4) << "\n";
-                code_ << "    st [b], a\n";
+                emit("ld", cat("a, [", temps[i], "]"));
+                emit("mov", "b, c");
+                if (i > 0) emit("add", cat("b, ", i * 4));
+                emit("st", "[b], a");
             }
-            for (int i = chunks - 1; i >= 0; i--) code_ << "    ld a, [" << temps[i] << "]\n    push a\n";
+            for (int i = chunks - 1; i >= 0; i--) {
+                emit("ld", cat("a, [", temps[i], "]"));
+                emit("push", "a");
+            }
             return;
         }
         case ir::ExprKind::Unary: {
@@ -1282,8 +1359,15 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
                     x = allocTemp();
                     declareTemp(x);
                 }
-                for (int i = 0; i < chunks; i++) code_ << "    pop a\n    not a\n    st [" << t[i] << "], a\n";
-                for (int i = chunks - 1; i >= 0; i--) code_ << "    ld a, [" << t[i] << "]\n    push a\n";
+                for (int i = 0; i < chunks; i++) {
+                    emit("pop", "a");
+                    emit("not", "a");
+                    emit("st", cat("[", t[i], "], a"));
+                }
+                for (int i = chunks - 1; i >= 0; i--) {
+                    emit("ld", cat("a, [", t[i], "]"));
+                    emit("push", "a");
+                }
                 return;
             }
             err(e.line, "internal: unary '" + e.op + "' on a wide ('long'/'long long') value isn't "
@@ -1296,20 +1380,27 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
                 genExpr(*e.lhs);
                 std::string Tlo = allocTemp();
                 declareTemp(Tlo);
-                code_ << "    st [" << Tlo << "], a\n";
+                emit("st", cat("[", Tlo, "], a"));
                 std::string Text = allocTemp();
                 declareTemp(Text);
                 if (from.isUnsigned) {
-                    code_ << "    st [" << Text << "], 0\n";
+                    emit("st", cat("[", Text, "], 0"));
                 } else {
                     std::string Lneg = newLabel(), Ldone = newLabel();
-                    code_ << "    cmp a, 0\n    jl " << Lneg << "\n";
-                    code_ << "    st [" << Text << "], 0\n    goto " << Ldone << "\n";
-                    code_ << Lneg << ":\n    st [" << Text << "], 0xFFFFFFFF\n";
-                    code_ << Ldone << ":\n";
+                    emit("cmp", "a, 0");
+                    emit("jl", Lneg);
+                    emit("st", cat("[", Text, "], 0"));
+                    emit("goto", Ldone);
+                    emitLabel(Lneg);
+                    emit("st", cat("[", Text, "], 0xFFFFFFFF"));
+                    emitLabel(Ldone);
                 }
-                for (int i = 0; i < toChunks - 1; i++) code_ << "    ld a, [" << Text << "]\n    push a\n";
-                code_ << "    ld a, [" << Tlo << "]\n    push a\n";
+                for (int i = 0; i < toChunks - 1; i++) {
+                    emit("ld", cat("a, [", Text, "]"));
+                    emit("push", "a");
+                }
+                emit("ld", cat("a, [", Tlo, "]"));
+                emit("push", "a");
                 return;
             }
             int fromChunks = chunkCount(from);
@@ -1319,24 +1410,40 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
                 t = allocTemp();
                 declareTemp(t);
             }
-            for (int i = 0; i < fromChunks; i++) code_ << "    pop a\n    st [" << temps[i] << "], a\n";
+            for (int i = 0; i < fromChunks; i++) {
+                emit("pop", "a");
+                emit("st", cat("[", temps[i], "], a"));
+            }
             if (toChunks <= fromChunks) {
-                for (int i = toChunks - 1; i >= 0; i--) code_ << "    ld a, [" << temps[i] << "]\n    push a\n";
+                for (int i = toChunks - 1; i >= 0; i--) {
+                    emit("ld", cat("a, [", temps[i], "]"));
+                    emit("push", "a");
+                }
                 return;
             }
             std::string Text = allocTemp();
             declareTemp(Text);
             if (from.isUnsigned) {
-                code_ << "    st [" << Text << "], 0\n";
+                emit("st", cat("[", Text, "], 0"));
             } else {
                 std::string Lneg = newLabel(), Ldone = newLabel();
-                code_ << "    ld a, [" << temps[fromChunks - 1] << "]\n    cmp a, 0\n    jl " << Lneg << "\n";
-                code_ << "    st [" << Text << "], 0\n    goto " << Ldone << "\n";
-                code_ << Lneg << ":\n    st [" << Text << "], 0xFFFFFFFF\n";
-                code_ << Ldone << ":\n";
+                emit("ld", cat("a, [", temps[fromChunks - 1], "]"));
+                emit("cmp", "a, 0");
+                emit("jl", Lneg);
+                emit("st", cat("[", Text, "], 0"));
+                emit("goto", Ldone);
+                emitLabel(Lneg);
+                emit("st", cat("[", Text, "], 0xFFFFFFFF"));
+                emitLabel(Ldone);
             }
-            for (int i = 0; i < toChunks - fromChunks; i++) code_ << "    ld a, [" << Text << "]\n    push a\n";
-            for (int i = fromChunks - 1; i >= 0; i--) code_ << "    ld a, [" << temps[i] << "]\n    push a\n";
+            for (int i = 0; i < toChunks - fromChunks; i++) {
+                emit("ld", cat("a, [", Text, "]"));
+                emit("push", "a");
+            }
+            for (int i = fromChunks - 1; i >= 0; i--) {
+                emit("ld", cat("a, [", temps[i], "]"));
+                emit("push", "a");
+            }
             return;
         }
         case ir::ExprKind::Call: {
@@ -1350,20 +1457,26 @@ void SaturnCodegen::genWideExpr(const ir::Expr &e) {
                     totalBytes += widthOfType(e.args[i]->type);  // already real bytes, 4/chunk
                 } else {
                     genExpr(*e.args[i]);
-                    code_ << "    push a\n";
+                    emit("push", "a");
                     totalBytes += 4;
                 }
             }
-            code_ << "    gosbvl " << label(e.func) << "\n";
+            emit("gosbvl", label(e.func));
             int chunks = chunkCount(e.type);
             std::vector<std::string> retTemps(chunks);
             for (auto &t : retTemps) {
                 t = allocTemp();
                 declareTemp(t);
             }
-            for (int i = 0; i < chunks; i++) code_ << "    pop a\n    st [" << retTemps[i] << "], a\n";
-            if (totalBytes > 0) code_ << "    add d0, " << totalBytes << "\n";
-            for (int i = chunks - 1; i >= 0; i--) code_ << "    ld a, [" << retTemps[i] << "]\n    push a\n";
+            for (int i = 0; i < chunks; i++) {
+                emit("pop", "a");
+                emit("st", cat("[", retTemps[i], "], a"));
+            }
+            if (totalBytes > 0) emit("add", cat("d0, ", totalBytes));
+            for (int i = chunks - 1; i >= 0; i--) {
+                emit("ld", cat("a, [", retTemps[i], "]"));
+                emit("push", "a");
+            }
             return;
         }
         case ir::ExprKind::Binary: {

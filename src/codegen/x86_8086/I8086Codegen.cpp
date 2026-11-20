@@ -34,7 +34,7 @@ std::string I8086Codegen::newLabel() { return "L" + std::to_string(labelCounter_
 // `@addr` placement: pads forward to a byte offset from ORG (kI8086BaseAddress) via
 // `times`. NASM's `$` only increases, so placement can only insert forward padding,
 // never reorder.
-void I8086Codegen::emitPlacement(long address) { code_ << "times (" << address << "-($-$$)) db 0\n"; }
+void I8086Codegen::emitPlacement(long address) { emitRaw(cat("times (", address, "-($-$$)) db 0")); }
 
 std::string I8086Codegen::generate(const ir::Program &prog, bool objectMode) {
     const ir::Function *mainFn = nullptr;
@@ -55,11 +55,11 @@ std::string I8086Codegen::generate(const ir::Program &prog, bool objectMode) {
                                                    : std::string();
 
     size_t rangeStart = static_cast<size_t>(code_.tellp());
-    code_ << "BITS 16\n";
+    emitRaw("BITS 16");
     // objectMode: no entry sequence here - the linker synthesizes one after linking. An
     // object's own base is `ORG 0`; placement is the linker's job.
     if (objectMode) {
-        code_ << "ORG 0\n\n";
+        { emitRaw("ORG 0"); emitRaw(""); }
     } else if (dosAbi_) {
         // DOS's own loader already made CS=DS=ES=SS the one segment this process gets
         // (the PSP) and gave it a valid stack, so there's no segment/stack setup here -
@@ -68,26 +68,26 @@ std::string I8086Codegen::generate(const ir::Program &prog, bool objectMode) {
         // at all - see its own "movb"/"and" comments), so AX is reloaded wholesale with
         // `0x4C00`: function 4Ch, exit code 0 - main's own return value doesn't survive
         // as a real DOS exit code this way, only up until this mov.
-        code_ << "ORG 0x" << std::hex << kI8086DosBaseAddress << std::dec << "\n\n";
-        code_ << "_start:\n";
-        code_ << "    call " << label(mainFn) << "\n";
-        code_ << "    mov ax, 0x4C00\n";
-        code_ << "    int 0x21\n\n";
+        { emitRaw(cat("ORG 0x", std::hex, kI8086DosBaseAddress, std::dec)); emitRaw(""); }
+        emitLabel("_start");
+        emit("call", label(mainFn));
+        emit("mov", "ax, 0x4C00");
+        { emit("int", "0x21"); emitRaw(""); }
         codeRanges.push_back({mainFn->sourceFile, rangeStart, static_cast<size_t>(code_.tellp())});
     } else {
-        code_ << "ORG 0x" << std::hex << kI8086BaseAddress << std::dec << "\n\n";
-        code_ << "_start:\n";
-        code_ << "    cli\n";
-        code_ << "    xor ax, ax\n";
-        code_ << "    mov ds, ax\n";
-        code_ << "    mov es, ax\n";
-        code_ << "    mov ss, ax\n";
-        code_ << "    mov sp, 0xFFFE\n";  // top of the flat 64KB segment this program lives in
-        code_ << "    sti\n";
-        code_ << "    call " << label(mainFn) << "\n";
-        code_ << "    hlt\n";
-        code_ << "_hang:\n";
-        code_ << "    jmp _hang\n\n";
+        { emitRaw(cat("ORG 0x", std::hex, kI8086BaseAddress, std::dec)); emitRaw(""); }
+        emitLabel("_start");
+        emit("cli");
+        emit("xor", "ax, ax");
+        emit("mov", "ds, ax");
+        emit("mov", "es, ax");
+        emit("mov", "ss, ax");
+        emit("mov", "sp, 0xFFFE");  // top of the flat 64KB segment this program lives in
+        emit("sti");
+        emit("call", label(mainFn));
+        emit("hlt");
+        emitLabel("_hang");
+        { emit("jmp", "_hang"); emitRaw(""); }
         codeRanges.push_back({mainFn->sourceFile, rangeStart, static_cast<size_t>(code_.tellp())});
     }
 
@@ -176,7 +176,7 @@ std::map<std::string, std::string> I8086Codegen::perFileAsm() const { return per
 // instructions regardless of local count, giving each activation its own frame.
 void I8086Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
-    code_ << curFunctionLabel_ << ":\n";
+    emitLabel(curFunctionLabel_);
     // The body is generated first so the prologue can reserve one word below the Locals
     // for each nesting level of wideScope().
     curFrameSize_ = fn.func->frameSize;
@@ -187,17 +187,17 @@ void I8086Codegen::genFunction(const ir::FunctionBody &fn) {
     genStmt(*fn.body);
     std::swap(body, code_);
     int frame = curFrameSize_ + 2 * maxWideScopeDepth_;
-    code_ << "    push bp\n    mov bp, sp\n";
-    if (frame > 0) code_ << "    sub sp, " << frame << "\n";
+    { emit("push", "bp"); emit("mov", "bp, sp"); }
+    if (frame > 0) emit("sub", cat("sp, ", frame));
     std::string bodyText = body.str();
     const std::string placeholder = kFrameBottomPlaceholder;
     for (size_t at = bodyText.find(placeholder); at != std::string::npos; at = bodyText.find(placeholder, at)) {
         bodyText.replace(at, placeholder.size(), std::to_string(frame));
     }
-    code_ << bodyText;
+    code_ << bodyText;  // already-built multi-line blob, already newline-terminated
 
-    code_ << "    mov sp, bp\n    pop bp\n";
-    code_ << "    ret\n\n";
+    { emit("mov", "sp, bp"); emit("pop", "bp"); }
+    { emit("ret"); emitRaw(""); }
 }
 
 bool I8086Codegen::involvesWide(const ir::Expr &e) const {
@@ -215,14 +215,14 @@ void I8086Codegen::wideScope(const std::function<void()> &gen) {
     int cell = curFrameSize_ + 2 * (wideScopeDepth_ + 1);
     wideScopeDepth_++;
     maxWideScopeDepth_ = std::max(maxWideScopeDepth_, wideScopeDepth_);
-    code_ << "    mov [bp-" << cell << "], sp\n";
+    emit("mov", cat("[bp-", cell, "], sp"));
     gen();
-    code_ << "    mov sp, [bp-" << cell << "]\n";
+    emit("mov", cat("sp, [bp-", cell, "]"));
     wideScopeDepth_--;
 }
 
 void I8086Codegen::resetStackToFrame() {
-    code_ << "    lea sp, [bp-" << kFrameBottomPlaceholder << "]\n";
+    emit("lea", cat("sp, [bp-", kFrameBottomPlaceholder, "]"));
 }
 
 void I8086Codegen::genTruthValue(const ir::Expr &e, bool atStatement) {
@@ -252,14 +252,14 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
             genTruthValue(*s.cond, /*atStatement=*/true);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp ax, 0\n    je " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            { emit("cmp", "ax, 0"); emit("je", (s.elseStmt ? Lelse : Ldone)); }
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
@@ -268,26 +268,26 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
             // continue runs the post-statement (desugared for-loop) before retesting,
             // if there is one; otherwise it jumps straight back to the condition.
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genTruthValue(*s.cond, /*atStatement=*/true);
-            code_ << "    cmp ax, 0\n    je " << Lend << "\n";
+            { emit("cmp", "ax, 0"); emit("je", Lend); }
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -298,18 +298,18 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
                     // down below, so copy it into the fixed __wret scratch first; safe
                     // since the caller consumes __wret immediately after the call returns.
                     int n = widthOfType(s.initOrReturnOrExpr->type) / 2;
-                    code_ << "    mov si, ax\n";  // si = source address value
+                    emit("mov", "si, ax");  // si = source address value
                     for (int i = 0; i < n; i++) {
                         // Only bx/bp can address memory here, so bx is repointed per base.
-                        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * i) << "]\n";
-                        code_ << "    mov bx, __wret\n    mov [bx+" << (2 * i) << "], ax\n";
+                        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+                        { emit("mov", "bx, __wret"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
                     }
-                    code_ << "    mov ax, __wret\n";
+                    emit("mov", "ax, __wret");
                 }
             }
             // Early exit: inline the same frame teardown genFunction()'s epilogue does.
-            code_ << "    mov sp, bp\n    pop bp\n";
-            code_ << "    ret\n";
+            { emit("mov", "sp, bp"); emit("pop", "bp"); }
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -319,12 +319,12 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
                 if (isWide(s.declSlot->type)) {
                     int n = widthOfType(s.declSlot->type) / 2;
                     genExpr(*s.initOrReturnOrExpr);  // ax = source address
-                    code_ << "    mov di, ax\n";
+                    emit("mov", "di, ax");
                     genWideSlotAddr(s.declSlot);  // ax = destination address
-                    code_ << "    mov si, ax\n";
+                    emit("mov", "si, ax");
                     for (int i = 0; i < n; i++) {
-                        code_ << "    mov bx, di\n    mov ax, [bx+" << (2 * i) << "]\n";
-                        code_ << "    mov bx, si\n    mov [bx+" << (2 * i) << "], ax\n";
+                        { emit("mov", "bx, di"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+                        { emit("mov", "bx, si"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
                     }
                     resetStackToFrame();
                 } else if (involvesWide(*s.initOrReturnOrExpr)) {
@@ -349,16 +349,16 @@ void I8086Codegen::genStmt(const ir::Stmt &s) {
             return;
         case ir::StmtKind::Asm: {
             // Verbatim passthrough: emitted exactly as written, no reformatting.
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitRaw(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -374,13 +374,13 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
                 int n = widthOfType(e.type) / 2;
                 auto v = static_cast<uint64_t>(e.intValue);
                 for (int i = n - 1; i >= 0; i--) {
-                    code_ << "    mov ax, " << static_cast<uint16_t>(v >> (16 * i)) << "\n";
-                    code_ << "    push ax\n";
+                    emit("mov", cat("ax, ", static_cast<uint16_t>(v >> (16 * i))));
+                    emit("push", "ax");
                 }
-                code_ << "    mov ax, sp\n";
+                emit("mov", "ax, sp");
                 return;
             }
-            code_ << "    mov ax, " << e.intValue << "\n";
+            emit("mov", cat("ax, ", e.intValue));
             return;
         }
         case ir::ExprKind::Var: {
@@ -403,33 +403,33 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
                 // (genWideAdd/Mul/Compare) uses si/di as scratch, which would clobber
                 // a destination address stashed there first.
                 genExpr(*e.rhs);       // ax = source address
-                code_ << "    mov bx, ax\n";
+                emit("mov", "bx, ax");
                 copyWideBlock(n, n, /*isUnsignedExt=*/false);  // ax = fresh copy's address
-                code_ << "    mov di, ax\n";  // di = fresh copy's own address
+                emit("mov", "di, ax");  // di = fresh copy's own address
                 // An indexed destination needs the element's own address (bx, from
                 // computeElementAddr); an unindexed one uses genWideSlotAddr instead.
                 if (e.lhs) {
                     computeElementAddr(e.slot, *e.lhs);
-                    code_ << "    mov si, bx\n";
+                    emit("mov", "si, bx");
                 } else {
                     genWideSlotAddr(e.slot);
-                    code_ << "    mov si, ax\n";
+                    emit("mov", "si, ax");
                 }
                 // Copy the fresh stack copy (di) into the real destination (si), then
                 // free the stack copy's space.
                 for (int i = 0; i < n; i++) {
-                    code_ << "    mov bx, di\n    mov ax, [bx+" << (2 * i) << "]\n";
-                    code_ << "    mov bx, si\n    mov [bx+" << (2 * i) << "], ax\n";
+                    { emit("mov", "bx, di"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+                    { emit("mov", "bx, si"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
                 }
-                code_ << "    add sp, " << (2 * n) << "\n";
-                code_ << "    mov ax, si\n";
+                emit("add", cat("sp, ", (2 * n)));
+                emit("mov", "ax, si");
                 return;
             }
             if (e.lhs) {  // slot[idx] = rhs
                 std::string memOperand = computeElementAddr(e.slot, *e.lhs);
-                code_ << "    push bx\n";
+                emit("push", "bx");
                 genExpr(*e.rhs);
-                code_ << "    pop bx\n";
+                emit("pop", "bx");
                 storeOperand(memOperand, e.slot->type);
                 return;
             }
@@ -447,18 +447,18 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
             // so no address needs to be held across rhs's own evaluation.
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // ax = rhs
-            code_ << "    mov bx, ax\n";
+            emit("mov", "bx, ax");
             loadOperand(mem, e.type);  // ax = old
-            if (e.yieldOld) code_ << "    push ax\n";
+            if (e.yieldOld) emit("push", "ax");
             genCompoundOp(e.op, e.type);
             narrowAxTo(e.type);
             storeOperand(mem, e.type);
-            if (e.yieldOld) code_ << "    pop ax\n";
+            if (e.yieldOld) emit("pop", "ax");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // ax = pointer value
-            code_ << "    mov bx, ax\n";  // bx = address
+            emit("mov", "bx, ax");  // bx = address
             genCompoundThroughBx(e);
             return;
         }
@@ -466,12 +466,12 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
             genTruthValue(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp ax, 0\n    je " << Lelse << "\n";
+            { emit("cmp", "ax, 0"); emit("je", Lelse); }
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
@@ -482,23 +482,23 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
             if (isWide(e.type)) {
                 int n = widthOfType(e.type) / 2;
                 genExpr(*e.rhs);  // ax = source address
-                code_ << "    mov bx, ax\n";
+                emit("mov", "bx, ax");
                 copyWideBlock(n, n, /*isUnsignedExt=*/false);  // ax = fresh protected copy's address
-                code_ << "    mov di, ax\n";
+                emit("mov", "di, ax");
                 genExpr(*e.lhs);  // ax = pointer value = destination address
-                code_ << "    mov si, ax\n";
+                emit("mov", "si, ax");
                 for (int i = 0; i < n; i++) {
-                    code_ << "    mov bx, di\n    mov ax, [bx+" << (2 * i) << "]\n";
-                    code_ << "    mov bx, si\n    mov [bx+" << (2 * i) << "], ax\n";
+                    { emit("mov", "bx, di"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+                    { emit("mov", "bx, si"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
                 }
-                code_ << "    add sp, " << (2 * n) << "\n";
-                code_ << "    mov ax, si\n";
+                emit("add", cat("sp, ", (2 * n)));
+                emit("mov", "ax, si");
                 return;
             }
             genExpr(*e.lhs);  // ax = pointer value
-            code_ << "    mov bx, ax\n    push bx\n";
+            { emit("mov", "bx, ax"); emit("push", "bx"); }
             genExpr(*e.rhs);  // ax = value to store
-            code_ << "    pop bx\n";
+            emit("pop", "bx");
             storeOperand("[bx]", e.type);
             return;
         }
@@ -506,10 +506,10 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
             if (e.op == "-") {
                 genExpr(*e.rhs);
                 if (isWide(e.rhs->type)) {
-                    code_ << "    mov bx, ax\n";
+                    emit("mov", "bx, ax");
                     genWideNegate(widthOfType(e.rhs->type) / 2);
                 } else {
-                    code_ << "    neg ax\n";
+                    emit("neg", "ax");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
@@ -519,19 +519,19 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
                 // so there's nothing further to load.
                 genExpr(*e.rhs);  // ax = pointer value
                 if (isWide(e.type)) return;
-                code_ << "    mov bx, ax\n";
+                emit("mov", "bx, ax");
                 loadOperand("[bx]", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
                 if (isWide(e.rhs->type)) {
-                    code_ << "    mov bx, ax\n";
+                    emit("mov", "bx, ax");
                     for (int i = 0; i < widthOfType(e.rhs->type) / 2; i++) {
-                        code_ << "    mov ax, [bx+" << (2 * i) << "]\n    not ax\n";
-                        code_ << "    mov [bx+" << (2 * i) << "], ax\n";
+                        { emit("mov", cat("ax, [bx+", (2 * i), "]")); emit("not", "ax"); }
+                        emit("mov", cat("[bx+", (2 * i), "], ax"));
                     }
-                    code_ << "    mov ax, bx\n";
+                    emit("mov", "ax, bx");
                 } else {
-                    code_ << "    not ax\n";
+                    emit("not", "ax");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -551,31 +551,31 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
                     // so each argument's real copy is written at (sp before it ran) -
                     // n words, and sp is reset there, reclaiming the temp.
                     int n = widthOfType(e.args[i]->type) / 2;
-                    code_ << "    mov [__wargsp], sp\n";
+                    emit("mov", "[__wargsp], sp");
                     genExpr(*e.args[i]);  // ax = this argument's own address
-                    code_ << "    mov si, ax\n";
-                    code_ << "    mov ax, [__wargsp]\n    sub ax, " << (2 * n) << "\n    mov di, ax\n";
+                    emit("mov", "si, ax");
+                    { emit("mov", "ax, [__wargsp]"); emit("sub", cat("ax, ", (2 * n))); emit("mov", "di, ax"); }
                     for (int w = 0; w < n; w++) {
-                        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * w) << "]\n";
-                        code_ << "    mov bx, di\n    mov [bx+" << (2 * w) << "], ax\n";
+                        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * w), "]")); }
+                        { emit("mov", "bx, di"); emit("mov", cat("[bx+", (2 * w), "], ax")); }
                     }
-                    code_ << "    mov sp, di\n";
+                    emit("mov", "sp, di");
                     totalBytes += 2 * n;
                 } else {
                     genExpr(*e.args[i]);
-                    code_ << "    push ax\n";
+                    emit("push", "ax");
                     totalBytes += 2;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
-            if (totalBytes > 0) code_ << "    add sp, " << totalBytes << "\n";
+            emit("call", label(e.func));
+            if (totalBytes > 0) emit("add", cat("sp, ", totalBytes));
             return;
         }
         case ir::ExprKind::CallPtr: {
             // e.args is always empty (IRBuilder rejects arguments on this kind).
             // "call ax" is a real near-indirect call through a register (FF /2).
             genExpr(*e.lhs);  // ax = the callee's own entry address
-            code_ << "    call ax\n";
+            emit("call", "ax");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -584,7 +584,7 @@ void I8086Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Intrinsic: {
             // Real 8086 interrupt enable/disable (sti/cli).
-            code_ << "    " << (e.op == "ion" ? "sti" : "cli") << "\n";
+            emit((e.op == "ion" ? "sti" : "cli"));
             return;
         }
         case ir::ExprKind::Convert: {
@@ -608,69 +608,69 @@ std::string I8086Codegen::computeElementAddr(const ir::Slot *slot, const ir::Exp
     int shift = elemShift(slot->type);
     if (shift >= 0) {
         // shl only takes a literal count of 1 (or cl) - a wider shift is that many in a row.
-        for (int i = 0; i < shift; i++) code_ << "    shl ax, 1\n";
+        for (int i = 0; i < shift; i++) emit("shl", "ax, 1");
     } else {
         scaleIndexByWidth(slot->type);  // non-power-of-two width (a struct's)
     }
-    code_ << "    mov bx, ax\n";
+    emit("mov", "bx, ax");
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    add bx, " << label(slot) << "\n";
+            emit("add", cat("bx, ", label(slot)));
         } else {
-            code_ << "    lea ax, " << addr(slot) << "\n    add bx, ax\n";
+            { emit("lea", cat("ax, ", addr(slot))); emit("add", "bx, ax"); }
         }
     } else {
-        code_ << "    add bx, " << operandOf(slot) << "\n";
+        emit("add", cat("bx, ", operandOf(slot)));
     }
     return "[bx]";
 }
 
 void I8086Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add ax, bx\n"; return; }
-    if (op == "-") { code_ << "    sub ax, bx\n"; return; }
-    if (op == "*") { code_ << "    " << (isUnsigned ? "mul" : "imul") << " bx\n"; return; }  // dx:ax = ax*bx
+    if (op == "+") { emit("add", "ax, bx"); return; }
+    if (op == "-") { emit("sub", "ax, bx"); return; }
+    if (op == "*") { emit((isUnsigned ? "mul" : "imul"), "bx"); return; }  // dx:ax = ax*bx
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "or" : "xor";
-        code_ << "    " << insn << " ax, bx\n";
+        emit(insn, "ax, bx");
         return;
     }
     if (op == "<<" || op == ">>") {
-        code_ << "    mov cx, bx\n";
-        code_ << "    " << (op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar")) << " ax, cl\n";
+        emit("mov", "cx, bx");
+        emit((op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar")), "ax, cl");
         return;
     }
     // "/" or "%": div/idiv only forbid ax/dx (the dividend) as the divisor.
-    code_ << "    " << (isUnsigned ? "xor dx, dx\n" : "cwd\n");
-    code_ << "    " << (isUnsigned ? "div" : "idiv") << " bx\n";
-    if (op == "%") code_ << "    mov ax, dx\n";
+    emit((isUnsigned ? "xor dx, dx\n" : "cwd\n"));
+    emit((isUnsigned ? "div" : "idiv"), "bx");
+    if (op == "%") emit("mov", "ax, dx");
 }
 
 // bx must already hold the resolved address. Only `[bx]` is a valid memory base here,
 // so the address is stashed on the stack (not held in a register) across rhs's own
 // evaluation, which may use any register.
 void I8086Codegen::genCompoundThroughBx(const ir::Expr &e) {
-    code_ << "    push bx\n";  // stash address
+    emit("push", "bx");  // stash address
     genExpr(*e.rhs);            // ax = rhs
-    code_ << "    push ax\n";    // stash rhs
-    code_ << "    pop cx\n";      // cx = rhs
-    code_ << "    pop bx\n";       // bx = address
+    emit("push", "ax");    // stash rhs
+    emit("pop", "cx");      // cx = rhs
+    emit("pop", "bx");       // bx = address
     loadOperand("[bx]", e.type);    // ax = old
-    code_ << "    push bx\n";        // re-stash address for the store below
-    if (e.yieldOld) code_ << "    push ax\n";  // stash old too
-    code_ << "    mov bx, cx\n";                // bx = rhs
+    emit("push", "bx");        // re-stash address for the store below
+    if (e.yieldOld) emit("push", "ax");  // stash old too
+    emit("mov", "bx, cx");                // bx = rhs
     genCompoundOp(e.op, e.type);                  // ax = new (raw)
     narrowAxTo(e.type);
     if (e.yieldOld) {
-        code_ << "    mov cx, ax\n";  // cx = new
-        code_ << "    pop ax\n";       // ax = old
-        code_ << "    pop bx\n";        // bx = address
-        code_ << "    mov dx, ax\n";     // dx = old (preserved across the store below)
-        code_ << "    mov ax, cx\n";      // ax = new (storeOperand always stores from ax)
+        emit("mov", "cx, ax");  // cx = new
+        emit("pop", "ax");       // ax = old
+        emit("pop", "bx");        // bx = address
+        emit("mov", "dx, ax");     // dx = old (preserved across the store below)
+        emit("mov", "ax, cx");      // ax = new (storeOperand always stores from ax)
         storeOperand("[bx]", e.type);
-        code_ << "    mov ax, dx\n";        // ax = old (final result)
+        emit("mov", "ax, dx");        // ax = old (final result)
     } else {
-        code_ << "    pop bx\n";  // bx = address
+        emit("pop", "bx");  // bx = address
         storeOperand("[bx]", e.type);  // ax already = new
     }
 }
@@ -679,7 +679,7 @@ void I8086Codegen::genIndex(const ir::Expr &e) {
     std::string memOperand = computeElementAddr(e.slot, *e.lhs);  // bx = element address
     if (isWide(e.slot->type)) {
         // Every wide expression leaves its address in ax - bx already holds it.
-        code_ << "    mov ax, bx\n";
+        emit("mov", "ax, bx");
         return;
     }
     loadOperand(memOperand, e.slot->type);
@@ -691,9 +691,9 @@ void I8086Codegen::genIndex(const ir::Expr &e) {
 void I8086Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    mov ax, " << label(operand.slot) << "\n";
+            emit("mov", cat("ax, ", label(operand.slot)));
         } else {
-            code_ << "    lea ax, " << addr(operand.slot) << "\n";
+            emit("lea", cat("ax, ", addr(operand.slot)));
         }
         return;
     }
@@ -702,24 +702,24 @@ void I8086Codegen::genAddrOf(const ir::Expr &operand) {
         {
             int shift = elemShift(operand.slot->type);
             if (shift >= 0) {
-                for (int i = 0; i < shift; i++) code_ << "    shl ax, 1\n";
+                for (int i = 0; i < shift; i++) emit("shl", "ax, 1");
             } else {
                 scaleIndexByWidth(operand.slot->type);  // non-power-of-two width (a struct's)
             }
         }
         if (operand.slot->arraySize > 0) {
             if (operand.slot->kind == ir::SlotKind::Global) {
-                code_ << "    add ax, " << label(operand.slot) << "\n";
+                emit("add", cat("ax, ", label(operand.slot)));
             } else {
-                code_ << "    mov bx, ax\n    lea ax, " << addr(operand.slot) << "\n    add ax, bx\n";
+                { emit("mov", "bx, ax"); emit("lea", cat("ax, ", addr(operand.slot))); emit("add", "ax, bx"); }
             }
         } else {
-            code_ << "    add ax, " << operandOf(operand.slot) << "\n";
+            emit("add", cat("ax, ", operandOf(operand.slot)));
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    mov ax, " << label(operand.func) << "\n";
+        emit("mov", cat("ax, ", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -731,9 +731,9 @@ void I8086Codegen::narrowAxTo(Type to) {
         // No movzx/movsx on real 8086, and no "ah" operand in this dialect - zero-extend
         // by masking out bits above AL; sign-extend with CBW (AL into AH:AX).
         if (to.isUnsigned) {
-            code_ << "    and ax, 0x00FF\n";
+            emit("and", "ax, 0x00FF");
         } else {
-            code_ << "    cbw\n";
+            emit("cbw");
         }
     }
     // 2 bytes: ax already holds the full value. A wide type never reaches here.
@@ -743,22 +743,22 @@ void I8086Codegen::loadOperand(const std::string &mem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
         if (type.isUnsigned) {
-            code_ << "    xor ax, ax\n";  // movb loads al only, never touches ah
-            code_ << "    movb ax, " << mem << "\n";
+            emit("xor", "ax, ax");  // movb loads al only, never touches ah
+            emit("movb", cat("ax, ", mem));
         } else {
-            code_ << "    movb ax, " << mem << "\n";
-            code_ << "    cbw\n";
+            emit("movb", cat("ax, ", mem));
+            emit("cbw");
         }
     } else {
-        code_ << "    mov ax, " << mem << "\n";
+        emit("mov", cat("ax, ", mem));
     }
 }
 
 void I8086Codegen::storeOperand(const std::string &mem, Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    movb " << mem << ", ax\n";
+        emit("movb", cat(mem, ", ax"));
     } else {
-        code_ << "    mov " << mem << ", ax\n";
+        emit("mov", cat(mem, ", ax"));
     }
 }
 
@@ -768,15 +768,15 @@ void I8086Codegen::storeOperand(const std::string &mem, Type type) {
 // the farthest word from bp: ax = bp - frameOffset - (N-1)*2, not bp - frameOffset.
 void I8086Codegen::genWideSlotAddr(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    mov ax, " << label(slot) << "\n";
+        emit("mov", cat("ax, ", label(slot)));
         return;
     }
     if (slot->kind == ir::SlotKind::Param) {
-        code_ << "    lea ax, " << addr(slot) << "\n";
+        emit("lea", cat("ax, ", addr(slot)));
         return;
     }
     int n = widthOfType(slot->type) / 2;
-    code_ << "    lea ax, " << addr(slot, 2 * (n - 1)) << "\n";
+    emit("lea", cat("ax, ", addr(slot, 2 * (n - 1))));
 }
 
 // Builds a fresh toN-word low-to-high block on the stack from the fromN-word block
@@ -787,19 +787,19 @@ void I8086Codegen::genWideSlotAddr(const ir::Slot *slot) {
 void I8086Codegen::copyWideBlock(int fromN, int toN, bool isUnsignedExt) {
     int copyN = fromN < toN ? fromN : toN;
     if (toN > fromN) {
-        code_ << "    mov cx, [bx+" << (2 * (fromN - 1)) << "]\n";  // cx = old MSW
+        emit("mov", cat("cx, [bx+", (2 * (fromN - 1)), "]"));  // cx = old MSW
         if (isUnsignedExt) {
-            code_ << "    xor dx, dx\n";
+            emit("xor", "dx, dx");
         } else {
-            code_ << "    mov ax, cx\n    cwd\n";  // dx = sign-extension of old MSW
+            { emit("mov", "ax, cx"); emit("cwd"); }  // dx = sign-extension of old MSW
         }
-        for (int i = 0; i < toN - fromN; i++) code_ << "    push dx\n";
+        for (int i = 0; i < toN - fromN; i++) emit("push", "dx");
     }
     for (int i = copyN - 1; i >= 0; i--) {
-        code_ << "    mov cx, [bx+" << (2 * i) << "]\n";
-        code_ << "    push cx\n";
+        emit("mov", cat("cx, [bx+", (2 * i), "]"));
+        emit("push", "cx");
     }
-    code_ << "    mov ax, sp\n";
+    emit("mov", "ax, sp");
 }
 
 // IRBuilder already promotes narrower operands before Binary/Unary sees them, so the
@@ -812,7 +812,7 @@ void I8086Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         wideScope([&] {
             genExpr(*e.lhs);
-            code_ << "    mov bx, ax\n    mov ax, [bx]\n";  // least-significant word only
+            { emit("mov", "bx, ax"); emit("mov", "ax, [bx]"); }  // least-significant word only
         });
         narrowAxTo(to);
         return;
@@ -821,18 +821,18 @@ void I8086Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && toWide) {
         int fromN = widthOfType(from) / 2, toN = widthOfType(to) / 2;
         if (fromN == toN) return;  // same width - bit pattern unchanged
-        code_ << "    mov bx, ax\n";
+        emit("mov", "bx, ax");
         copyWideBlock(fromN, toN, from.isUnsigned);
     } else if (!fromWide && toWide) {
         int toN = widthOfType(to) / 2;
         if (from.isUnsigned) {
-            code_ << "    xor dx, dx\n";
+            emit("xor", "dx, dx");
         } else {
-            code_ << "    cwd\n";
+            emit("cwd");
         }
-        for (int i = 0; i < toN - 2; i++) code_ << "    push dx\n";
-        code_ << "    push dx\n    push ax\n";
-        code_ << "    mov ax, sp\n";
+        for (int i = 0; i < toN - 2; i++) emit("push", "dx");
+        { emit("push", "dx"); emit("push", "ax"); }
+        emit("mov", "ax, sp");
     } else {
         narrowAxTo(to);
     }
@@ -842,11 +842,11 @@ void I8086Codegen::genConvert(const ir::Expr &e) {
 // rippling through the rest.
 void I8086Codegen::genWideNegate(int n) {
     for (int i = 0; i < n; i++) {
-        code_ << "    mov ax, [bx+" << (2 * i) << "]\n    not ax\n    mov [bx+" << (2 * i) << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * i), "]")); emit("not", "ax"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
     }
-    code_ << "    mov ax, [bx]\n    add ax, 1\n    mov [bx], ax\n";
+    { emit("mov", "ax, [bx]"); emit("add", "ax, 1"); emit("mov", "[bx], ax"); }
     for (int i = 1; i < n; i++) {
-        code_ << "    mov ax, [bx+" << (2 * i) << "]\n    adc ax, 0\n    mov [bx+" << (2 * i) << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * i), "]")); emit("adc", "ax, 0"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
     }
 }
 
@@ -856,19 +856,19 @@ void I8086Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
     genExpr(lhs);
     // si holds the address as a value (not a bracket base), so rhs's own evaluation
     // (which may push its own scratch, moving sp) can't disturb it.
-    code_ << "    mov si, ax\n";
+    emit("mov", "si, ax");
     genExpr(rhs);
-    code_ << "    mov di, ax\n";  // di = rhs address
-    code_ << "    sub sp, " << (2 * n) << "\n";
+    emit("mov", "di, ax");  // di = rhs address
+    emit("sub", cat("sp, ", (2 * n)));
     // Only bx/bp can address memory here, so bx is repointed per base via `mov`
     // (never `add`, since `mov` doesn't touch FLAGS - preserving the carry chain).
     for (int i = 0; i < n; i++) {
-        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * i) << "]\n";
-        code_ << "    mov bx, di\n    mov cx, [bx+" << (2 * i) << "]\n";
-        code_ << "    " << (i == 0 ? (isAdd ? "add" : "sub") : (isAdd ? "adc" : "sbb")) << " ax, cx\n";
-        code_ << "    mov bx, sp\n    mov [bx+" << (2 * i) << "], ax\n";
+        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+        { emit("mov", "bx, di"); emit("mov", cat("cx, [bx+", (2 * i), "]")); }
+        emit((i == 0 ? (isAdd ? "add" : "sub") : (isAdd ? "adc" : "sbb")), "ax, cx");
+        { emit("mov", "bx, sp"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
     }
-    code_ << "    mov ax, sp\n";
+    emit("mov", "ax, sp");
 }
 
 // long/long long multiply: schoolbook O(n^2) cross-multiply with hardware MUL for
@@ -876,36 +876,35 @@ void I8086Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
 void I8086Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     int n = widthOfType(lhs.type) / 2;
     genExpr(lhs);
-    code_ << "    mov si, ax\n";  // si = lhs address, held across rhs's own evaluation
+    emit("mov", "si, ax");  // si = lhs address, held across rhs's own evaluation
     genExpr(rhs);
-    code_ << "    mov di, ax\n";  // di = rhs address
-    code_ << "    sub sp, " << (2 * n) << "\n";
-    code_ << "    mov bx, sp\n";
-    code_ << "    mov ax, 0\n";
-    for (int i = 0; i < n; i++) code_ << "    mov [bx+" << (2 * i) << "], ax\n";
+    emit("mov", "di, ax");  // di = rhs address
+    emit("sub", cat("sp, ", (2 * n)));
+    emit("mov", "bx, sp");
+    emit("mov", "ax, 0");
+    for (int i = 0; i < n; i++) emit("mov", cat("[bx+", (2 * i), "], ax"));
     for (int i = 0; i < n; i++) {
         for (int j = 0; j < n - i; j++) {
             // bx is repointed per base via `mov` (not `add`, which would disturb FLAGS).
-            code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * i) << "]\n";
-            code_ << "    mov bx, di\n    mov cx, [bx+" << (2 * j) << "]\n";
-            code_ << "    mul cx\n";  // dx:ax = word_i(lhs) * word_j(rhs)
+            { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+            { emit("mov", "bx, di"); emit("mov", cat("cx, [bx+", (2 * j), "]")); }
+            emit("mul", "cx");  // dx:ax = word_i(lhs) * word_j(rhs)
             // Add dx:ax into the result at word i+j, carry rippling up through the rest.
-            code_ << "    mov bx, sp\n";
-            code_ << "    mov cx, [bx+" << (2 * (i + j)) << "]\n";
-            code_ << "    add cx, ax\n";
-            code_ << "    mov [bx+" << (2 * (i + j)) << "], cx\n";
+            emit("mov", "bx, sp");
+            emit("mov", cat("cx, [bx+", (2 * (i + j)), "]"));
+            emit("add", "cx, ax");
+            emit("mov", cat("[bx+", (2 * (i + j)), "], cx"));
             if (i + j + 1 < n) {
-                code_ << "    mov cx, [bx+" << (2 * (i + j + 1)) << "]\n";
-                code_ << "    adc cx, dx\n";
-                code_ << "    mov [bx+" << (2 * (i + j + 1)) << "], cx\n";
+                emit("mov", cat("cx, [bx+", (2 * (i + j + 1)), "]"));
+                emit("adc", "cx, dx");
+                emit("mov", cat("[bx+", (2 * (i + j + 1)), "], cx"));
                 for (int k = i + j + 2; k < n; k++) {
-                    code_ << "    mov cx, [bx+" << (2 * k) << "]\n    adc cx, 0\n    mov [bx+" << (2 * k)
-                          << "], cx\n";
+                    { emit("mov", cat("cx, [bx+", (2 * k), "]")); emit("adc", "cx, 0"); emit("mov", cat("[bx+", (2 * k), "], cx")); }
                 }
             }
         }
     }
-    code_ << "    mov ax, sp\n";
+    emit("mov", "ax, sp");
 }
 
 // Classic bit-serial shift/compare/subtract long division, generalized to N words
@@ -926,23 +925,23 @@ void I8086Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool 
     emitWideDivModSubroutine(n);
     std::string blk = "__wdm" + std::to_string(n) + "_blk";
     genExpr(lhs);
-    code_ << "    mov si, ax\n";  // lhs address
+    emit("mov", "si, ax");  // lhs address
     genExpr(rhs);
-    code_ << "    mov di, ax\n";  // rhs address
-    code_ << "    mov ax, " << (isUnsigned ? 1 : 0) << "\n";
-    code_ << "    mov bx, " << blk << "\n    mov [bx+" << (2 * (4 * n + 3)) << "], ax\n";
+    emit("mov", "di, ax");  // rhs address
+    emit("mov", cat("ax, ", (isUnsigned ? 1 : 0)));
+    { emit("mov", cat("bx, ", blk)); emit("mov", cat("[bx+", (2 * (4 * n + 3)), "], ax")); }
     for (int w = 0; w < n; w++) {
-        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * w) << "]\n";
-        code_ << "    mov bx, " << blk << "\n    mov [bx+" << (2 * w) << "], ax\n";
+        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * w), "]")); }
+        { emit("mov", cat("bx, ", blk)); emit("mov", cat("[bx+", (2 * w), "], ax")); }
     }
     for (int w = 0; w < n; w++) {
-        code_ << "    mov bx, di\n    mov ax, [bx+" << (2 * w) << "]\n";
-        code_ << "    mov bx, " << blk << "\n    mov [bx+" << (2 * (n + w)) << "], ax\n";
+        { emit("mov", "bx, di"); emit("mov", cat("ax, [bx+", (2 * w), "]")); }
+        { emit("mov", cat("bx, ", blk)); emit("mov", cat("[bx+", (2 * (n + w)), "], ax")); }
     }
-    code_ << "    call __wdivmod" << n << "\n";
+    emit("call", cat("__wdivmod", n));
     int resultOff = wantRemainder ? (2 * n) : (3 * n);
-    code_ << "    mov bx, " << blk << "\n    lea ax, [bx+" << (2 * resultOff) << "]\n";
-    code_ << "    mov bx, ax\n";
+    { emit("mov", cat("bx, ", blk)); emit("lea", cat("ax, [bx+", (2 * resultOff), "]")); }
+    emit("mov", "bx, ax");
     copyWideBlock(n, n, /*isUnsignedExt=*/false);  // fresh copy, since __wdmN_blk may be reused by a later division
 }
 
@@ -963,122 +962,113 @@ void I8086Codegen::emitWideDivModSubroutine(int n) {
     callerCode << code_.str();
     code_.str("");
     code_.clear();
-    code_ << "__wdivmod" << n << ":\n";
-    code_ << "    mov bx, " << blk << "\n";
+    emitLabel(cat("__wdivmod", n));
+    emit("mov", cat("bx, ", blk));
     int signLhsOff = 4 * n + 1, signRhsOff = 4 * n + 2, unsOff = 4 * n + 3;
-    code_ << "    mov ax, 0\n";
-    for (int w = 0; w < n; w++) code_ << "    mov [bx+" << (2 * (2 * n + w)) << "], ax\n";  // r = 0
-    for (int w = 0; w < n; w++) code_ << "    mov [bx+" << (2 * (3 * n + w)) << "], ax\n";  // q = 0
-    code_ << "    mov ax, " << (16 * n) << "\n    mov [bx+" << (2 * 4 * n) << "], ax\n";    // cnt
+    emit("mov", "ax, 0");
+    for (int w = 0; w < n; w++) emit("mov", cat("[bx+", (2 * (2 * n + w)), "], ax"));  // r = 0
+    for (int w = 0; w < n; w++) emit("mov", cat("[bx+", (2 * (3 * n + w)), "], ax"));  // q = 0
+    { emit("mov", cat("ax, ", (16 * n))); emit("mov", cat("[bx+", (2 * 4 * n), "], ax")); }    // cnt
     std::string LskipSignEntry = newLabel();
-    code_ << "    mov ax, [bx+" << (2 * unsOff) << "]\n    cmp ax, 0\n    jne " << LskipSignEntry << "\n";
+    { emit("mov", cat("ax, [bx+", (2 * unsOff), "]")); emit("cmp", "ax, 0"); emit("jne", LskipSignEntry); }
     {
         std::string LskipNegN = newLabel(), LskipNegD = newLabel();
-        code_ << "    mov ax, [bx+" << (2 * (n - 1)) << "]\n    cmp ax, 0\n    mov cx, 0\n    jge " << LskipNegN
-              << "\n    mov cx, 1\n" << LskipNegN << ":\n    mov [bx+" << (2 * signLhsOff) << "], cx\n";
-        code_ << "    mov ax, [bx+" << (2 * (2 * n - 1)) << "]\n    cmp ax, 0\n    mov cx, 0\n    jge " << LskipNegD
-              << "\n    mov cx, 1\n" << LskipNegD << ":\n    mov [bx+" << (2 * signRhsOff) << "], cx\n";
+        { emit("mov", cat("ax, [bx+", (2 * (n - 1)), "]")); emit("cmp", "ax, 0"); emit("mov", "cx, 0"); emit("jge", LskipNegN); emit("mov", "cx, 1"); emitLabel(LskipNegN); emit("mov", cat("[bx+", (2 * signLhsOff), "], cx")); }
+        { emit("mov", cat("ax, [bx+", (2 * (2 * n - 1)), "]")); emit("cmp", "ax, 0"); emit("mov", "cx, 0"); emit("jge", LskipNegD); emit("mov", "cx, 1"); emitLabel(LskipNegD); emit("mov", cat("[bx+", (2 * signRhsOff), "], cx")); }
         genWideNegateIf(0, n, signLhsOff);
         genWideNegateIf(n, n, signRhsOff);
     }
-    code_ << LskipSignEntry << ":\n";
+    emitLabel(LskipSignEntry);
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov ax, [bx+" << (2 * 4 * n) << "]\n    cmp ax, 0\n";
+    emitLabel(Lloop);
+    { emit("mov", cat("ax, [bx+", (2 * 4 * n), "]")); emit("cmp", "ax, 0"); }
     // jne-around-a-near-jmp reaches Ldone regardless of distance, since a 4-word
     // loop body can exceed a short jump's +-127-byte range.
     {
         std::string Lcontinue = newLabel();
-        code_ << "    jne " << Lcontinue << "\n    jmp " << Ldone << "\n" << Lcontinue << ":\n";
+        { emit("jne", Lcontinue); emit("jmp", Ldone); emitLabel(Lcontinue); }
     }
-    code_ << "    sub ax, 1\n    mov [bx+" << (2 * 4 * n) << "], ax\n";
+    { emit("sub", "ax, 1"); emit("mov", cat("[bx+", (2 * 4 * n), "], ax")); }
     // n <<= 1, capturing its old top bit via the carry flag (shl/rcl chain, same as
     // genWideShift); `jc` reads that pending carry into cx as a plain 0/1.
-    code_ << "    mov ax, [bx+0]\n    shl ax, 1\n    mov [bx+0], ax\n";
+    { emit("mov", "ax, [bx+0]"); emit("shl", "ax, 1"); emit("mov", "[bx+0], ax"); }
     for (int w = 1; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * w) << "]\n    rcl ax, 1\n    mov [bx+" << (2 * w) << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * w), "]")); emit("rcl", "ax, 1"); emit("mov", cat("[bx+", (2 * w), "], ax")); }
     }
     std::string Lcarry0 = newLabel(), Lcarry1 = newLabel();
-    code_ << "    jc " << Lcarry1 << "\n    mov cx, 0\n    jmp " << Lcarry0 << "\n";
-    code_ << Lcarry1 << ":\n    mov cx, 1\n" << Lcarry0 << ":\n";  // cx = n's own old top bit (the one shifted out)
+    { emit("jc", Lcarry1); emit("mov", "cx, 0"); emit("jmp", Lcarry0); }
+    { emitLabel(Lcarry1); emit("mov", "cx, 1"); emitLabel(Lcarry0); }  // cx = n's own old top bit (the one shifted out)
     // r = (r << 1) | cx
-    code_ << "    mov ax, [bx+" << (2 * 2 * n) << "]\n    shl ax, 1\n    or ax, cx\n    mov [bx+" << (2 * 2 * n)
-          << "], ax\n";
+    { emit("mov", cat("ax, [bx+", (2 * 2 * n), "]")); emit("shl", "ax, 1"); emit("or", "ax, cx"); emit("mov", cat("[bx+", (2 * 2 * n), "], ax")); }
     for (int w = 1; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * (2 * n + w)) << "]\n    rcl ax, 1\n    mov [bx+" << (2 * (2 * n + w))
-              << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * (2 * n + w)), "]")); emit("rcl", "ax, 1"); emit("mov", cat("[bx+", (2 * (2 * n + w)), "], ax")); }
     }
     // if (r >= d) { r -= d; quotient bit = 1 } else { quotient bit = 0 } - always an unsigned
     // magnitude compare, N words, most significant first.
     for (int k = n - 1; k >= 0; k--) {
-        code_ << "    mov ax, [bx+" << (2 * (2 * n + k)) << "]\n";
-        code_ << "    mov cx, [bx+" << (2 * (n + k)) << "]\n";
-        code_ << "    cmp ax, cx\n";
-        code_ << "    ja " << LsubYes << "\n    jb " << LsubNo << "\n";
+        emit("mov", cat("ax, [bx+", (2 * (2 * n + k)), "]"));
+        emit("mov", cat("cx, [bx+", (2 * (n + k)), "]"));
+        emit("cmp", "ax, cx");
+        { emit("ja", LsubYes); emit("jb", LsubNo); }
         // equal at this word - fall through to compare the next, less
         // significant one
     }
-    code_ << "    jmp " << LsubYes << "\n";  // every word equal -> r == d -> subtract
-    code_ << LsubYes << ":\n";
+    emit("jmp", LsubYes);  // every word equal -> r == d -> subtract
+    emitLabel(LsubYes);
     for (int w = 0; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * (2 * n + w)) << "]\n";
-        code_ << "    mov cx, [bx+" << (2 * (n + w)) << "]\n";
-        code_ << "    " << (w == 0 ? "sub" : "sbb") << " ax, cx\n";
-        code_ << "    mov [bx+" << (2 * (2 * n + w)) << "], ax\n";
+        emit("mov", cat("ax, [bx+", (2 * (2 * n + w)), "]"));
+        emit("mov", cat("cx, [bx+", (2 * (n + w)), "]"));
+        emit((w == 0 ? "sub" : "sbb"), "ax, cx");
+        emit("mov", cat("[bx+", (2 * (2 * n + w)), "], ax"));
     }
-    code_ << "    mov cx, 1\n    jmp " << LhiDiff << "\n";
-    code_ << LsubNo << ":\n    mov cx, 0\n";
-    code_ << LhiDiff << ":\n";
+    { emit("mov", "cx, 1"); emit("jmp", LhiDiff); }
+    { emitLabel(LsubNo); emit("mov", "cx, 0"); }
+    emitLabel(LhiDiff);
     // q = (q << 1) | cx
-    code_ << "    mov ax, [bx+" << (2 * 3 * n) << "]\n    shl ax, 1\n    or ax, cx\n    mov [bx+" << (2 * 3 * n)
-          << "], ax\n";
+    { emit("mov", cat("ax, [bx+", (2 * 3 * n), "]")); emit("shl", "ax, 1"); emit("or", "ax, cx"); emit("mov", cat("[bx+", (2 * 3 * n), "], ax")); }
     for (int w = 1; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * (3 * n + w)) << "]\n    rcl ax, 1\n    mov [bx+" << (2 * (3 * n + w))
-              << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * (3 * n + w)), "]")); emit("rcl", "ax, 1"); emit("mov", cat("[bx+", (2 * (3 * n + w)), "], ax")); }
     }
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
     std::string LskipSignExit = newLabel();
-    code_ << "    mov ax, [bx+" << (2 * unsOff) << "]\n    cmp ax, 0\n    jne " << LskipSignExit << "\n";
+    { emit("mov", cat("ax, [bx+", (2 * unsOff), "]")); emit("cmp", "ax, 0"); emit("jne", LskipSignExit); }
     {
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    mov ax, [bx+" << (2 * signLhsOff) << "]\n    mov cx, [bx+" << (2 * signRhsOff) << "]\n";
-        code_ << "    cmp ax, cx\n    je " << LskipNegQ << "\n";
+        { emit("mov", cat("ax, [bx+", (2 * signLhsOff), "]")); emit("mov", cat("cx, [bx+", (2 * signRhsOff), "]")); }
+        { emit("cmp", "ax, cx"); emit("je", LskipNegQ); }
         genWideNegateAt(3 * n, n);
-        code_ << LskipNegQ << ":\n";
-        code_ << "    mov ax, [bx+" << (2 * signLhsOff) << "]\n    cmp ax, 0\n    je " << LskipNegR << "\n";
+        emitLabel(LskipNegQ);
+        { emit("mov", cat("ax, [bx+", (2 * signLhsOff), "]")); emit("cmp", "ax, 0"); emit("je", LskipNegR); }
         genWideNegateAt(2 * n, n);
-        code_ << LskipNegR << ":\n";
+        emitLabel(LskipNegR);
     }
-    code_ << LskipSignExit << ":\n";
-    code_ << "    ret\n";
+    emitLabel(LskipSignExit);
+    emit("ret");
     trailer_.push_back(code_.str());
     code_.str("");
     code_.clear();
-    code_ << callerCode.str();
+    emitRaw(callerCode.str());
 }
 
 // Negates the N words at scratch offset wordOffset (bx = scratch base) only if the
 // flag word at flagOffset is non-zero.
 void I8086Codegen::genWideNegateIf(int wordOffset, int n, int flagOffset) {
     std::string Lskip = newLabel();
-    code_ << "    mov ax, [bx+" << (2 * flagOffset) << "]\n    cmp ax, 0\n    je " << Lskip << "\n";
+    { emit("mov", cat("ax, [bx+", (2 * flagOffset), "]")); emit("cmp", "ax, 0"); emit("je", Lskip); }
     genWideNegateAt(wordOffset, n);
-    code_ << Lskip << ":\n";
+    emitLabel(Lskip);
 }
 
 // Negates the N words at scratch offset wordOffset (bx = scratch base) in place.
 void I8086Codegen::genWideNegateAt(int wordOffset, int n) {
     for (int w = 0; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * (wordOffset + w)) << "]\n    not ax\n    mov [bx+"
-              << (2 * (wordOffset + w)) << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * (wordOffset + w)), "]")); emit("not", "ax"); emit("mov", cat("[bx+", (2 * (wordOffset + w)), "], ax")); }
     }
-    code_ << "    mov ax, [bx+" << (2 * wordOffset) << "]\n    add ax, 1\n    mov [bx+" << (2 * wordOffset)
-          << "], ax\n";
+    { emit("mov", cat("ax, [bx+", (2 * wordOffset), "]")); emit("add", "ax, 1"); emit("mov", cat("[bx+", (2 * wordOffset), "], ax")); }
     for (int w = 1; w < n; w++) {
-        code_ << "    mov ax, [bx+" << (2 * (wordOffset + w)) << "]\n    adc ax, 0\n    mov [bx+"
-              << (2 * (wordOffset + w)) << "], ax\n";
+        { emit("mov", cat("ax, [bx+", (2 * (wordOffset + w)), "]")); emit("adc", "ax, 0"); emit("mov", cat("[bx+", (2 * (wordOffset + w)), "], ax")); }
     }
 }
 
@@ -1088,27 +1078,24 @@ void I8086Codegen::genWideNegateAt(int wordOffset, int n) {
 void I8086Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     int n = widthOfType(lhs.type) / 2;
     genExpr(lhs);
-    code_ << "    mov si, ax\n";  // si = value's address, held across rhs's own evaluation
+    emit("mov", "si, ax");  // si = value's address, held across rhs's own evaluation
     genExpr(rhs);                  // ax = shift count
-    code_ << "    mov cx, ax\n";
+    emit("mov", "cx, ax");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    cmp cx, 0\n    je " << Ldone << "\n    sub cx, 1\n";
+    { emitLabel(Lloop); emit("cmp", "cx, 0"); emit("je", Ldone); emit("sub", "cx, 1"); }
     if (isLeft) {
-        code_ << "    mov bx, si\n    mov ax, [bx+0]\n    shl ax, 1\n    mov [bx+0], ax\n";
+        { emit("mov", "bx, si"); emit("mov", "ax, [bx+0]"); emit("shl", "ax, 1"); emit("mov", "[bx+0], ax"); }
         for (int w = 1; w < n; w++) {
-            code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * w) << "]\n    rcl ax, 1\n    mov [bx+" << (2 * w)
-                  << "], ax\n";
+            { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * w), "]")); emit("rcl", "ax, 1"); emit("mov", cat("[bx+", (2 * w), "], ax")); }
         }
     } else {
-        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * (n - 1)) << "]\n    "
-              << (isUnsigned ? "shr" : "sar") << " ax, 1\n    mov [bx+" << (2 * (n - 1)) << "], ax\n";
+        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * (n - 1)), "]")); emit((isUnsigned ? "shr" : "sar"), "ax, 1"); emit("mov", cat("[bx+", (2 * (n - 1)), "], ax")); }
         for (int w = n - 2; w >= 0; w--) {
-            code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * w) << "]\n    rcr ax, 1\n    mov [bx+" << (2 * w)
-                  << "], ax\n";
+            { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * w), "]")); emit("rcr", "ax, 1"); emit("mov", cat("[bx+", (2 * w), "], ax")); }
         }
     }
-    code_ << "    jmp " << Lloop << "\n" << Ldone << ":\n";
-    code_ << "    mov ax, si\n";
+    { emit("jmp", Lloop); emitLabel(Ldone); }
+    emit("mov", "ax, si");
 }
 
 // long/long long comparison: compares the most significant word first with the
@@ -1117,48 +1104,48 @@ void I8086Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool i
 void I8086Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     int n = widthOfType(lhs.type) / 2;
     genExpr(lhs);
-    code_ << "    mov si, ax\n";  // si = lhs address, held across rhs's own evaluation
+    emit("mov", "si, ax");  // si = lhs address, held across rhs's own evaluation
     genExpr(rhs);
-    code_ << "    mov di, ax\n";
+    emit("mov", "di, ax");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         for (int k = 0; k < n; k++) {
-            code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * k) << "]\n";
-            code_ << "    mov bx, di\n    mov cx, [bx+" << (2 * k) << "]\n";
-            code_ << "    cmp ax, cx\n    jne " << Lfalse << "\n";
+            { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * k), "]")); }
+            { emit("mov", "bx, di"); emit("mov", cat("cx, [bx+", (2 * k), "]")); }
+            { emit("cmp", "ax, cx"); emit("jne", Lfalse); }
         }
-        code_ << "    mov ax, " << (op == "==" ? "1" : "0") << "\n    jmp " << Ldone << "\n";
-        code_ << Lfalse << ":\n    mov ax, " << (op == "==" ? "0" : "1") << "\n";
-        code_ << Ldone << ":\n";
+        { emit("mov", cat("ax, ", (op == "==" ? "1" : "0"))); emit("jmp", Ldone); }
+        { emitLabel(Lfalse); emit("mov", cat("ax, ", (op == "==" ? "0" : "1"))); }
+        emitLabel(Ldone);
         return;
     }
     bool resultIfLess = (op == "<" || op == "<=");
     bool resultIfGreater = (op == ">" || op == ">=");
     for (int k = n - 1; k >= 0; k--) {
-        code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * k) << "]\n";
-        code_ << "    mov bx, di\n    mov cx, [bx+" << (2 * k) << "]\n";
-        code_ << "    cmp ax, cx\n";
+        { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * k), "]")); }
+        { emit("mov", "bx, di"); emit("mov", cat("cx, [bx+", (2 * k), "]")); }
+        emit("cmp", "ax, cx");
         std::string lessJcc = (k == n - 1 && !isUnsigned) ? "jl" : "jb";
         std::string greaterJcc = (k == n - 1 && !isUnsigned) ? "jg" : "ja";
-        code_ << "    " << lessJcc << " " << (resultIfLess ? Ltrue : Lfalse) << "\n";
-        code_ << "    " << greaterJcc << " " << (resultIfGreater ? Ltrue : Lfalse) << "\n";
+        emit(lessJcc, (resultIfLess ? Ltrue : Lfalse));
+        emit(greaterJcc, (resultIfGreater ? Ltrue : Lfalse));
     }
     // Every word equal.
-    code_ << "    mov ax, " << ((op == "<=" || op == ">=") ? "1" : "0") << "\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov ax, 1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mov ax, 0\n";
-    code_ << Ldone << ":\n";
+    { emit("mov", cat("ax, ", ((op == "<=" || op == ">=") ? "1" : "0"))); emit("jmp", Ldone); }
+    { emitLabel(Ltrue); emit("mov", "ax, 1"); emit("jmp", Ldone); }
+    { emitLabel(Lfalse); emit("mov", "ax, 0"); }
+    emitLabel(Ldone);
 }
 
 void I8086Codegen::genLocalArrayInit(const ir::Slot *slot) {
     int w = widthOfType(slot->type);
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
-        code_ << "    mov ax, " << arrayElemText(slot->arrayInit[i]) << "\n";
+        emit("mov", cat("ax, ", arrayElemText(slot->arrayInit[i])));
         std::string dst = addr(slot, w * static_cast<int>(i));
         if (w == 1) {
-            code_ << "    movb " << dst << ", ax\n";
+            emit("movb", cat(dst, ", ax"));
         } else {
-            code_ << "    mov " << dst << ", ax\n";
+            emit("mov", cat(dst, ", ax"));
         }
     }
 }
@@ -1176,13 +1163,13 @@ void I8086Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push ax\n";
+        emit("push", "ax");
         genExpr(*e.rhs);
-        code_ << "    pop bx\n";
+        emit("pop", "bx");
         if (op == "+") {
-            code_ << "    add ax, bx\n";
+            emit("add", "ax, bx");
         } else {
-            code_ << "    sub bx, ax\n    mov ax, bx\n";
+            { emit("sub", "bx, ax"); emit("mov", "ax, bx"); }
         }
         return;
     }
@@ -1207,24 +1194,24 @@ void I8086Codegen::genBinary(const ir::Expr &e) {
         if (wide) {
             int n = widthOfType(operandType) / 2;
             genExpr(*e.lhs);
-            code_ << "    mov si, ax\n";  // si = lhs address, held across rhs's own evaluation
+            emit("mov", "si, ax");  // si = lhs address, held across rhs's own evaluation
             genExpr(*e.rhs);
-            code_ << "    mov di, ax\n";
-            code_ << "    sub sp, " << (2 * n) << "\n";
+            emit("mov", "di, ax");
+            emit("sub", cat("sp, ", (2 * n)));
             for (int i = 0; i < n; i++) {
-                code_ << "    mov bx, si\n    mov ax, [bx+" << (2 * i) << "]\n";
-                code_ << "    mov bx, di\n    mov cx, [bx+" << (2 * i) << "]\n";
-                code_ << "    " << insn << " ax, cx\n";
-                code_ << "    mov bx, sp\n    mov [bx+" << (2 * i) << "], ax\n";
+                { emit("mov", "bx, si"); emit("mov", cat("ax, [bx+", (2 * i), "]")); }
+                { emit("mov", "bx, di"); emit("mov", cat("cx, [bx+", (2 * i), "]")); }
+                emit(insn, "ax, cx");
+                { emit("mov", "bx, sp"); emit("mov", cat("[bx+", (2 * i), "], ax")); }
             }
-            code_ << "    mov ax, sp\n";
+            emit("mov", "ax, sp");
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push ax\n";
+        emit("push", "ax");
         genExpr(*e.rhs);
-        code_ << "    pop bx\n";
-        code_ << "    " << insn << " ax, bx\n";
+        emit("pop", "bx");
+        emit(insn, "ax, bx");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -1234,12 +1221,12 @@ void I8086Codegen::genBinary(const ir::Expr &e) {
         }
         // Real hardware variable-count shift: shl/shr/sar take the count from cl.
         genExpr(*e.lhs);
-        code_ << "    push ax\n";
+        emit("push", "ax");
         genExpr(*e.rhs);
-        code_ << "    mov cx, ax\n";
-        code_ << "    pop ax\n";
+        emit("mov", "cx, ax");
+        emit("pop", "ax");
         const char *insn = op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar");
-        code_ << "    " << insn << " ax, cl\n";
+        emit(insn, "ax, cl");
         return;
     }
     if (op == "&&") {
@@ -1272,48 +1259,48 @@ void I8086Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
 // semantics directly. isUnsigned is already baked into jumpIfTrue by the caller.
 void I8086Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &jumpIfTrue, bool) {
     genExpr(lhs);
-    code_ << "    push ax\n";
+    emit("push", "ax");
     genExpr(rhs);
-    code_ << "    pop bx\n";
-    code_ << "    cmp bx, ax\n";
+    emit("pop", "bx");
+    emit("cmp", "bx, ax");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jumpIfTrue << " " << Ltrue << "\n";
-    code_ << "    mov ax, 0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov ax, 1\n";
-    code_ << Ldone << ":\n";
+    emit(jumpIfTrue, Ltrue);
+    { emit("mov", "ax, 0"); emit("jmp", Ldone); }
+    { emitLabel(Ltrue); emit("mov", "ax, 1"); }
+    emitLabel(Ldone);
 }
 
 void I8086Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genTruthValue(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp ax, 0\n    je " << Lfalse << "\n";
+    { emit("cmp", "ax, 0"); emit("je", Lfalse); }
     genTruthValue(rhs);
-    code_ << "    cmp ax, 0\n    je " << Lfalse << "\n";
-    code_ << "    jmp " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    mov ax, 0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov ax, 1\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "ax, 0"); emit("je", Lfalse); }
+    emit("jmp", Ltrue);
+    { emitLabel(Lfalse); emit("mov", "ax, 0"); emit("jmp", Ldone); }
+    { emitLabel(Ltrue); emit("mov", "ax, 1"); }
+    emitLabel(Ldone);
 }
 
 void I8086Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genTruthValue(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmp ax, 0\n    jne " << Ltrue << "\n";
+    { emit("cmp", "ax, 0"); emit("jne", Ltrue); }
     genTruthValue(rhs);
-    code_ << "    cmp ax, 0\n    jne " << Ltrue << "\n";
-    code_ << "    jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    mov ax, 1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mov ax, 0\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "ax, 0"); emit("jne", Ltrue); }
+    emit("jmp", Lfalse);
+    { emitLabel(Ltrue); emit("mov", "ax, 1"); emit("jmp", Ldone); }
+    { emitLabel(Lfalse); emit("mov", "ax, 0"); }
+    emitLabel(Ldone);
 }
 
 void I8086Codegen::genLogicalNot(const ir::Expr &rhs) {
     genTruthValue(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp ax, 0\n    je " << Ltrue << "\n";
-    code_ << "    mov ax, 0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov ax, 1\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "ax, 0"); emit("je", Ltrue); }
+    { emit("mov", "ax, 0"); emit("jmp", Ldone); }
+    { emitLabel(Ltrue); emit("mov", "ax, 1"); }
+    emitLabel(Ldone);
 }
 
 
@@ -1321,29 +1308,29 @@ void I8086Codegen::genLogicalNot(const ir::Expr &rhs) {
 // iff every word was zero (every wide helper leaves an address in ax, not a value).
 void I8086Codegen::genWideTruthify(Type t) {
     int n = widthOfType(t) / 2;
-    code_ << "    mov bx, ax\n    mov ax, [bx]\n";
+    { emit("mov", "bx, ax"); emit("mov", "ax, [bx]"); }
     for (int i = 1; i < n; i++) {
-        code_ << "    mov cx, [bx+" << (2 * i) << "]\n    or ax, cx\n";
+        { emit("mov", cat("cx, [bx+", (2 * i), "]")); emit("or", "ax, cx"); }
     }
 }
 
 void I8086Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push ax\n";
+    emit("push", "ax");
     genExpr(rhs);
-    code_ << "    pop bx\n";
-    code_ << "    " << (isUnsigned ? "mul" : "imul") << " bx\n";  // dx:ax = ax*bx; keep ax
+    emit("pop", "bx");
+    emit((isUnsigned ? "mul" : "imul"), "bx");  // dx:ax = ax*bx; keep ax
 }
 
 void I8086Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push ax\n";
+    emit("push", "ax");
     genExpr(rhs);
-    code_ << "    mov bx, ax\n";  // bx = divisor
-    code_ << "    pop ax\n";      // ax = dividend
-    code_ << "    " << (isUnsigned ? "xor dx, dx\n" : "cwd\n");
-    code_ << "    " << (isUnsigned ? "div" : "idiv") << " bx\n";  // ax = quotient, dx = remainder
-    if (wantRemainder) code_ << "    mov ax, dx\n";
+    emit("mov", "bx, ax");  // bx = divisor
+    emit("pop", "ax");      // ax = dividend
+    emit((isUnsigned ? "xor dx, dx\n" : "cwd\n"));
+    emit((isUnsigned ? "div" : "idiv"), "bx");  // ax = quotient, dx = remainder
+    if (wantRemainder) emit("mov", "ax, dx");
 }
 
 // A from-scratch x86 instruction encoder, no external assembler needed.

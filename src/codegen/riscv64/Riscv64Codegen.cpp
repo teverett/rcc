@@ -22,19 +22,20 @@ constexpr uint64_t kBaseAddress = kRiscv64BaseAddress;
 // Riscv64LinkerFactory.cpp's own kEntryAsm.
 constexpr uint32_t kInitialSP = 0x80100000u;
 
+}  // namespace
+
 // A frame offset or `-frameSize` can exceed `addi`'s own 12-bit signed
 // range for a large local array, so this one spot routes through `s1`
 // (this dialect's scratch register, same role as riscv32's own) when the
 // plain immediate wouldn't fit.
-void addImm(std::ostringstream &code, const std::string &dst, const std::string &src, int32_t v) {
+void Riscv64Codegen::addImm(const std::string &dst, const std::string &src, int32_t v) {
     if (v >= -2048 && v <= 2047) {
-        code << "    addi " << dst << "," << src << "," << v << "\n";
+        emit("addi", cat(dst, ",", src, ",", v));
         return;
     }
-    code << "    li s1," << v << "\n";
-    code << "    add " << dst << "," << src << ",s1\n";
+    emit("li", cat("s1,", v));
+    emit("add", cat(dst, ",", src, ",s1"));
 }
-}  // namespace
 
 std::string Riscv64Codegen::arrayElemText(const ir::ArrayInitElem &e) {
     if (!e.isSymbol) return std::to_string(e.value);
@@ -66,17 +67,17 @@ void Riscv64Codegen::declareArray(const std::string &lbl, const std::vector<ir::
 // `srli` by 32) is needed here but not for a plain signed-int literal
 // (loadImm32()).
 void Riscv64Codegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    lui " << reg << "," << lbl << "\n";
-    code_ << "    addi " << reg << "," << reg << "," << lbl << "\n";
-    code_ << "    slli " << reg << "," << reg << ",32\n";
-    code_ << "    srli " << reg << "," << reg << ",32\n";
+    emit("lui", cat(reg, ",", lbl));
+    emit("addi", cat(reg, ",", reg, ",", lbl));
+    emit("slli", cat(reg, ",", reg, ",32"));
+    emit("srli", cat(reg, ",", reg, ",32"));
 }
 
-void Riscv64Codegen::loadImm32(const std::string &reg, int32_t v) { code_ << "    li " << reg << "," << v << "\n"; }
+void Riscv64Codegen::loadImm32(const std::string &reg, int32_t v) { emit("li", cat(reg, ",", v)); }
 
 void Riscv64Codegen::canonicalizeAddress(const std::string &reg) {
-    code_ << "    slli " << reg << "," << reg << ",32\n";
-    code_ << "    srli " << reg << "," << reg << ",32\n";
+    emit("slli", cat(reg, ",", reg, ",32"));
+    emit("srli", cat(reg, ",", reg, ",32"));
 }
 
 // Builds the low 32 bits (cleaned to a genuine zero-extended quantity) and the high 32 bits
@@ -88,10 +89,11 @@ void Riscv64Codegen::loadImm64(const std::string &reg, uint64_t v) {
         return;
     }
     loadImm32(reg, static_cast<int32_t>(static_cast<uint32_t>(v & 0xFFFFFFFFu)));
-    code_ << "    slli " << reg << "," << reg << ",32\n    srli " << reg << "," << reg << ",32\n";
+    emit("slli", cat(reg, ",", reg, ",32"));
+    emit("srli", cat(reg, ",", reg, ",32"));
     loadImm32("t4", static_cast<int32_t>(static_cast<uint32_t>((v >> 32) & 0xFFFFFFFFu)));
-    code_ << "    slli t4,t4,32\n";
-    code_ << "    or " << reg << "," << reg << ",t4\n";
+    emit("slli", "t4,t4,32");
+    emit("or", cat(reg, ",", reg, ",t4"));
 }
 
 void Riscv64Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
@@ -100,7 +102,7 @@ void Riscv64Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) 
         return;
     }
     int offset = slot->kind == ir::SlotKind::Param ? slot->frameOffset : -ir::localLowOffset(*slot, typeWidths());
-    addImm(code_, reg, "fp", offset);
+    addImm(reg, "fp", offset);
 }
 
 std::string Riscv64Codegen::generate(const ir::Program &prog, bool objectMode) {
@@ -108,16 +110,20 @@ std::string Riscv64Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         // `kInitialSP`'s bit 31 is set, so `li`'s own sign-extending
         // `lui`/`addi` must be zero-extended afterward, same as
         // loadAddress()'s own sequence above.
-        code_ << "    li sp," << static_cast<int32_t>(kInitialSP) << "\n";
-        code_ << "    slli sp,sp,32\n    srli sp,sp,32\n";
-        code_ << "    call " << label(mainFn) << "\n";
-        code_ << "halt:\n    j halt\n\n";
+        emit("li", cat("sp,", static_cast<int32_t>(kInitialSP)));
+        emit("slli", "sp,sp,32");
+        emit("srli", "sp,sp,32");
+        emit("call", label(mainFn));
+        emitLabel("halt");
+        emit("j", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -173,24 +179,28 @@ std::map<std::string, std::string> Riscv64Codegen::perFileAsm() const { return p
 // and Arm64Codegen.h's `currentParamBase_`/`kParamExtra` for what that
 // adjustment looks like when it can't be avoided this way).
 void Riscv64Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    addi sp,sp,-4\n    sw ra,sp,0\n";
-    code_ << "    addi sp,sp,-4\n    sw fp,sp,0\n";
-    code_ << "    add fp,sp,zero\n";
-    if (fn.func->frameSize > 0) addImm(code_, "sp", "sp", -fn.func->frameSize);
+    emitLabel(label(fn.func));
+    emit("addi", "sp,sp,-4");
+    emit("sw", "ra,sp,0");
+    emit("addi", "sp,sp,-4");
+    emit("sw", "fp,sp,0");
+    emit("add", "fp,sp,zero");
+    if (fn.func->frameSize > 0) addImm("sp", "sp", -fn.func->frameSize);
 
     genStmt(*fn.body);
 
     genEpilogue();
-    code_ << "\n";
+    emitRaw("");
 }
 
 void Riscv64Codegen::genEpilogue() {
-    code_ << "    add sp,fp,zero\n";
-    code_ << "    lwu s1,sp,0\n    addi sp,sp,4\n";
-    code_ << "    lwu ra,sp,0\n    addi sp,sp,4\n";
-    code_ << "    add fp,s1,zero\n";
-    code_ << "    ret\n";
+    emit("add", "sp,fp,zero");
+    emit("lwu", "s1,sp,0");
+    emit("addi", "sp,sp,4");
+    emit("lwu", "ra,sp,0");
+    emit("addi", "sp,sp,4");
+    emit("add", "fp,s1,zero");
+    emit("ret");
 }
 
 void Riscv64Codegen::genStmt(const ir::Stmt &s) {
@@ -203,40 +213,40 @@ void Riscv64Codegen::genStmt(const ir::Stmt &s) {
             genExpr(*s.cond);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0,zero," << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("beq", cat("t0,zero,", s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    j " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("j", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            code_ << "    beq t0,zero," << Lend << "\n";
+            emit("beq", cat("t0,zero,", Lend));
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    j " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("j", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    j " << loopLabels_.back().second << "\n";
+            emit("j", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    j " << loopLabels_.back().first << "\n";
+            emit("j", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -261,16 +271,15 @@ void Riscv64Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    j " << irLabel(s.labelId) << "\n";
+            emit("j", irLabel(s.labelId));
             return;
         }
     }
@@ -301,9 +310,11 @@ void Riscv64Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // t2 = target address
-                code_ << "    addi sp,sp,-8\n    sd t2,sp,0\n";
+                emit("addi", "sp,sp,-8");
+                emit("sd", "t2,sp,0");
                 genExpr(*e.rhs);
-                code_ << "    ld t2,sp,0\n    addi sp,sp,8\n";
+                emit("ld", "t2,sp,0");
+                emit("addi", "sp,sp,8");
                 storeOperand("t2", e.slot->type);
                 return;
             }
@@ -324,7 +335,7 @@ void Riscv64Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    add t2,t0,zero\n";
+            emit("add", "t2,t0,zero");
             canonicalizeAddress("t2");
             genCompoundThroughT2(e);
             return;
@@ -333,19 +344,21 @@ void Riscv64Codegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq t0,zero," << Lelse << "\n";
+            emit("beq", cat("t0,zero,", Lelse));
             genExpr(*e.rhs);
-            code_ << "    j " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("j", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+            emit("addi", "sp,sp,-8");
+            emit("sd", "t0,sp,0");
             genExpr(*e.rhs);
-            code_ << "    ld t2,sp,0\n    addi sp,sp,8\n";
+            emit("ld", "t2,sp,0");
+            emit("addi", "sp,sp,8");
             canonicalizeAddress("t2");
             storeOperand("t2", e.type);
             return;
@@ -353,18 +366,18 @@ void Riscv64Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
-                code_ << "    sub t0,zero,t0\n";
+                emit("sub", "t0,zero,t0");
                 narrowT0To(e.rhs->type);
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // t0 = pointer value
-                code_ << "    add t2,t0,zero\n";
+                emit("add", "t2,t0,zero");
                 canonicalizeAddress("t2");
                 loadOperand("t2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    xori t0,t0,-1\n";
+                emit("xori", "t0,t0,-1");
                 narrowT0To(e.rhs->type);
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -384,22 +397,24 @@ void Riscv64Codegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+                    emit("addi", "sp,sp,-8");
+                    emit("sd", "t0,sp,0");
                     totalBytes += 8;
                 } else {
-                    code_ << "    addi sp,sp,-4\n    sw t0,sp,0\n";
+                    emit("addi", "sp,sp,-4");
+                    emit("sw", "t0,sp,0");
                     totalBytes += 4;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
-            if (totalBytes > 0) addImm(code_, "sp", "sp", totalBytes);
+            emit("call", label(e.func));
+            if (totalBytes > 0) addImm("sp", "sp", totalBytes);
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // t0 = the callee's own entry address
-            code_ << "    add t2,t0,zero\n";
+            emit("add", "t2,t0,zero");
             canonicalizeAddress("t2");
-            code_ << "    jalr ra,t2\n";
+            emit("jalr", "ra,t2");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -427,20 +442,20 @@ void Riscv64Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr)
     genExpr(idxExpr);  // t0 = index
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    slli t0,t0," << shift << "\n";
+        emit("slli", cat("t0,t0,", shift));
     } else if (shift < 0) {
         loadImm32("t3", widthOfType(slot->type));
-        code_ << "    mul t0,t0,t3\n";
+        emit("mul", "t0,t0,t3");
     }
     if (slot->arraySize > 0) {
         loadSlotAddr("t2", slot);
-        code_ << "    add t2,t2,t0\n";
+        emit("add", "t2,t2,t0");
     } else {
         loadSlotAddr("t1", slot);
         int baseW = widthOfType(slot->type);
         const char *loadInsn = baseW == 1 ? "lbu" : baseW == 2 ? "lhu" : baseW == 4 ? "lwu" : "ld";
-        code_ << "    " << loadInsn << " t1,t1,0\n";  // t1 = the pointer variable's own stored value
-        code_ << "    add t2,t1,t0\n";
+        emit(loadInsn, "t1,t1,0");  // t1 = the pointer variable's own stored value
+        emit("add", "t2,t1,t0");
     }
 }
 
@@ -461,15 +476,15 @@ void Riscv64Codegen::genLocalArrayInit(const ir::Slot *slot) {
         } else {
             loadImm32("t0", static_cast<int32_t>(static_cast<uint32_t>(elem.value)));
         }
-        addImm(code_, "t2", "fp", offset);
+        addImm("t2", "fp", offset);
         if (w == 1) {
-            code_ << "    sb t0,t2,0\n";
+            emit("sb", "t0,t2,0");
         } else if (w == 2) {
-            code_ << "    sh t0,t2,0\n";
+            emit("sh", "t0,t2,0");
         } else if (w == 4) {
-            code_ << "    sw t0,t2,0\n";
+            emit("sw", "t0,t2,0");
         } else {
-            code_ << "    sd t0,t2,0\n";
+            emit("sd", "t0,t2,0");
         }
     }
 }
@@ -477,17 +492,17 @@ void Riscv64Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void Riscv64Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr("t2", operand.slot);
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress("t2", label(operand.func));
-        code_ << "    add t0,t2,zero\n";
+        emit("add", "t0,t2,zero");
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -496,26 +511,26 @@ void Riscv64Codegen::genAddrOf(const ir::Expr &operand) {
 void Riscv64Codegen::loadOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "lbu" : "lb") << " t0," << addrReg << ",0\n";
+        emit(type.isUnsigned ? "lbu" : "lb", cat("t0,", addrReg, ",0"));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "lhu" : "lh") << " t0," << addrReg << ",0\n";
+        emit(type.isUnsigned ? "lhu" : "lh", cat("t0,", addrReg, ",0"));
     } else if (w == 4) {
-        code_ << "    " << (type.isUnsigned ? "lwu" : "lw") << " t0," << addrReg << ",0\n";
+        emit(type.isUnsigned ? "lwu" : "lw", cat("t0,", addrReg, ",0"));
     } else {
-        code_ << "    ld t0," << addrReg << ",0\n";
+        emit("ld", cat("t0,", addrReg, ",0"));
     }
 }
 
 void Riscv64Codegen::storeOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    sb t0," << addrReg << ",0\n";
+        emit("sb", cat("t0,", addrReg, ",0"));
     } else if (w == 2) {
-        code_ << "    sh t0," << addrReg << ",0\n";
+        emit("sh", cat("t0,", addrReg, ",0"));
     } else if (w == 4) {
-        code_ << "    sw t0," << addrReg << ",0\n";
+        emit("sw", cat("t0,", addrReg, ",0"));
     } else {
-        code_ << "    sd t0," << addrReg << ",0\n";
+        emit("sd", cat("t0,", addrReg, ",0"));
     }
 }
 
@@ -523,8 +538,8 @@ void Riscv64Codegen::narrowT0To(Type to) {
     int w = widthOfType(to);
     if (w == 8) return;
     int shiftAmt = 64 - 8 * w;
-    code_ << "    slli t0,t0," << shiftAmt << "\n";
-    code_ << "    " << (to.isUnsigned ? "srli" : "srai") << " t0,t0," << shiftAmt << "\n";
+    emit("slli", cat("t0,t0,", shiftAmt));
+    emit(to.isUnsigned ? "srli" : "srai", cat("t0,t0,", shiftAmt));
 }
 
 // Crosses the native-`int`/`long` (or pointer) boundary, or re-narrows a same-side Convert.
@@ -540,8 +555,8 @@ void Riscv64Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         narrowT0To(to);
     } else if (!fromWide && toWide) {
-        code_ << "    slli t0,t0,32\n";
-        code_ << "    " << (from.isUnsigned ? "srli" : "srai") << " t0,t0,32\n";
+        emit("slli", "t0,t0,32");
+        emit(from.isUnsigned ? "srli" : "srai", "t0,t0,32");
     } else if (!fromWide && !toWide) {
         narrowT0To(to);
     }
@@ -553,10 +568,12 @@ void Riscv64Codegen::genBinary(const ir::Expr &e) {
     bool isUnsigned = operandType.isUnsigned;
     if (op == "+" || op == "-") {
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+        emit("addi", "sp,sp,-8");
+        emit("sd", "t0,sp,0");
         genExpr(*e.rhs);
-        code_ << "    ld t1,sp,0\n    addi sp,sp,8\n";  // t1 = lhs, t0 = rhs
-        code_ << "    " << (op == "+" ? "add t0,t1,t0\n" : "sub t0,t1,t0\n");
+        emit("ld", "t1,sp,0");
+        emit("addi", "sp,sp,8");  // t1 = lhs, t0 = rhs
+        emit(op == "+" ? "add" : "sub", "t0,t1,t0");
         narrowT0To(operandType);
         return;
     }
@@ -572,21 +589,25 @@ void Riscv64Codegen::genBinary(const ir::Expr &e) {
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = op == "&" ? "and" : op == "|" ? "or" : "xor";
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+        emit("addi", "sp,sp,-8");
+        emit("sd", "t0,sp,0");
         genExpr(*e.rhs);
-        code_ << "    ld t1,sp,0\n    addi sp,sp,8\n";
-        code_ << "    " << insn << " t0,t1,t0\n";
+        emit("ld", "t1,sp,0");
+        emit("addi", "sp,sp,8");
+        emit(insn, "t0,t1,t0");
         narrowT0To(operandType);
         return;
     }
     if (op == "<<" || op == ">>") {
         genExpr(*e.lhs);
-        code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+        emit("addi", "sp,sp,-8");
+        emit("sd", "t0,sp,0");
         genExpr(*e.rhs);  // t0 = shift count
-        code_ << "    add t1,t0,zero\n";
-        code_ << "    ld t0,sp,0\n    addi sp,sp,8\n";  // t0 = value to shift
+        emit("add", "t1,t0,zero");
+        emit("ld", "t0,sp,0");
+        emit("addi", "sp,sp,8");  // t0 = value to shift
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         narrowT0To(operandType);
         return;
     }
@@ -606,10 +627,12 @@ void Riscv64Codegen::genBinary(const ir::Expr &e) {
 // never depend on it; the caller (genBinary()) re-trims the result to `int` width when needed.
 void Riscv64Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+    emit("addi", "sp,sp,-8");
+    emit("sd", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    ld t1,sp,0\n    addi sp,sp,8\n";  // t1 = lhs, t0 = rhs
-    code_ << "    mul t0,t1,t0\n";
+    emit("ld", "t1,sp,0");
+    emit("addi", "sp,sp,8");  // t1 = lhs, t0 = rhs
+    emit("mul", "t0,t1,t0");
 }
 
 // Real RV64M hardware divide/remainder (`div`/`divu`/`rem`/`remu`) directly, at full register
@@ -621,11 +644,13 @@ void Riscv64Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // post-narrow needed, matching AlphaCodegen.cpp's own "/" case in genBinary().
 void Riscv64Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+    emit("addi", "sp,sp,-8");
+    emit("sd", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    ld t1,sp,0\n    addi sp,sp,8\n";  // t1 = lhs (dividend), t0 = rhs (divisor)
+    emit("ld", "t1,sp,0");
+    emit("addi", "sp,sp,8");  // t1 = lhs (dividend), t0 = rhs (divisor)
     const char *insn = wantRemainder ? (isUnsigned ? "remu" : "rem") : (isUnsigned ? "divu" : "div");
-    code_ << "    " << insn << " t0,t1,t0\n";
+    emit(insn, "t0,t1,t0");
 }
 
 // `slt`/`sltu` directly produce the 0/1 boolean needed, no branch required - same scheme as
@@ -635,35 +660,39 @@ void Riscv64Codegen::genCompare(const std::string &op, const ir::Expr &lhs, cons
     bool isUnsigned = lhs.type.isUnsigned;
     const char *sltInsn = isUnsigned ? "sltu" : "slt";
     genExpr(lhs);
-    code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+    emit("addi", "sp,sp,-8");
+    emit("sd", "t0,sp,0");
     genExpr(rhs);
-    code_ << "    ld t1,sp,0\n    addi sp,sp,8\n";  // t1 = lhs, t0 = rhs
+    emit("ld", "t1,sp,0");
+    emit("addi", "sp,sp,8");  // t1 = lhs, t0 = rhs
     if (op == "<") {
-        code_ << "    " << sltInsn << " t0,t1,t0\n";
+        emit(sltInsn, "t0,t1,t0");
         return;
     }
     if (op == ">") {
-        code_ << "    " << sltInsn << " t0,t0,t1\n";
+        emit(sltInsn, "t0,t0,t1");
         return;
     }
     if (op == "<=") {
-        code_ << "    " << sltInsn << " s1,t0,t1\n";
-        code_ << "    addi t0,zero,1\n    xor t0,t0,s1\n";
+        emit(sltInsn, "s1,t0,t1");
+        emit("addi", "t0,zero,1");
+        emit("xor", "t0,t0,s1");
         return;
     }
     if (op == ">=") {
-        code_ << "    " << sltInsn << " s1,t1,t0\n";
-        code_ << "    addi t0,zero,1\n    xor t0,t0,s1\n";
+        emit(sltInsn, "s1,t1,t0");
+        emit("addi", "t0,zero,1");
+        emit("xor", "t0,t0,s1");
         return;
     }
     if (op == "==") {
-        code_ << "    sub s1,t1,t0\n";
-        code_ << "    sltiu t0,s1,1\n";
+        emit("sub", "s1,t1,t0");
+        emit("sltiu", "t0,s1,1");
         return;
     }
     if (op == "!=") {
-        code_ << "    sub s1,t1,t0\n";
-        code_ << "    sltu t0,zero,s1\n";
+        emit("sub", "s1,t1,t0");
+        emit("sltu", "t0,zero,s1");
         return;
     }
     err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
@@ -672,30 +701,36 @@ void Riscv64Codegen::genCompare(const std::string &op, const ir::Expr &lhs, cons
 void Riscv64Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    beq t0,zero," << Lfalse << "\n";
+    emit("beq", cat("t0,zero,", Lfalse));
     genExpr(rhs);
-    code_ << "    beq t0,zero," << Lfalse << "\n";
-    code_ << "    j " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    addi t0,zero,0\n    j " << Ldone << "\n";
-    code_ << Ltrue << ":\n    addi t0,zero,1\n";
-    code_ << Ldone << ":\n";
+    emit("beq", cat("t0,zero,", Lfalse));
+    emit("j", Ltrue);
+    emitLabel(Lfalse);
+    emit("addi", "t0,zero,0");
+    emit("j", Ldone);
+    emitLabel(Ltrue);
+    emit("addi", "t0,zero,1");
+    emitLabel(Ldone);
 }
 
 void Riscv64Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    bne t0,zero," << Ltrue << "\n";
+    emit("bne", cat("t0,zero,", Ltrue));
     genExpr(rhs);
-    code_ << "    bne t0,zero," << Ltrue << "\n";
-    code_ << "    j " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    addi t0,zero,1\n    j " << Ldone << "\n";
-    code_ << Lfalse << ":\n    addi t0,zero,0\n";
-    code_ << Ldone << ":\n";
+    emit("bne", cat("t0,zero,", Ltrue));
+    emit("j", Lfalse);
+    emitLabel(Ltrue);
+    emit("addi", "t0,zero,1");
+    emit("j", Ldone);
+    emitLabel(Lfalse);
+    emit("addi", "t0,zero,0");
+    emitLabel(Ldone);
 }
 
 void Riscv64Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    code_ << "    sltiu t0,t0,1\n";
+    emit("sltiu", "t0,t0,1");
 }
 
 // Entry: t0 = old, t1 = rhs. Neither `mul` nor `div`/`rem` touch t2, so the address
@@ -703,40 +738,46 @@ void Riscv64Codegen::genLogicalNot(const ir::Expr &rhs) {
 // Riscv32Codegen.cpp's own `genCompoundOp()`.
 void Riscv64Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add t0,t0,t1\n"; return; }
-    if (op == "-") { code_ << "    sub t0,t0,t1\n"; return; }
-    if (op == "*") { code_ << "    mul t0,t0,t1\n"; return; }
-    if (op == "&") { code_ << "    and t0,t0,t1\n"; return; }
-    if (op == "|") { code_ << "    or t0,t0,t1\n"; return; }
-    if (op == "^") { code_ << "    xor t0,t0,t1\n"; return; }
+    if (op == "+") { emit("add", "t0,t0,t1"); return; }
+    if (op == "-") { emit("sub", "t0,t0,t1"); return; }
+    if (op == "*") { emit("mul", "t0,t0,t1"); return; }
+    if (op == "&") { emit("and", "t0,t0,t1"); return; }
+    if (op == "|") { emit("or", "t0,t0,t1"); return; }
+    if (op == "^") { emit("xor", "t0,t0,t1"); return; }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t0,t1\n";
+        emit(insn, "t0,t0,t1");
         return;
     }
     const char *insn = op == "%" ? (isUnsigned ? "remu" : "rem") : (isUnsigned ? "divu" : "div");
-    code_ << "    " << insn << " t0,t0,t1\n";
+    emit(insn, "t0,t0,t1");
 }
 
 // t2 must already hold the resolved address on entry; it's stashed on the stack (as a full
 // 8-byte quantity - see this class's own header comment on why every internal spill here uses
 // `sd`/`ld` rather than a narrower store/load) across evaluating e.rhs, and never recomputed.
 void Riscv64Codegen::genCompoundThroughT2(const ir::Expr &e) {
-    code_ << "    addi sp,sp,-8\n    sd t2,sp,0\n";
+    emit("addi", "sp,sp,-8");
+    emit("sd", "t2,sp,0");
     genExpr(*e.rhs);
-    code_ << "    add t1,t0,zero\n";
-    code_ << "    ld t2,sp,0\n    addi sp,sp,8\n";
+    emit("add", "t1,t0,zero");
+    emit("ld", "t2,sp,0");
+    emit("addi", "sp,sp,8");
     loadOperand("t2", e.type);
-    if (e.yieldOld) code_ << "    addi sp,sp,-8\n    sd t0,sp,0\n";
+    if (e.yieldOld) {
+        emit("addi", "sp,sp,-8");
+        emit("sd", "t0,sp,0");
+    }
     genCompoundOp(e.op, e.type);
     narrowT0To(e.type);
     if (e.yieldOld) {
-        code_ << "    add t1,t0,zero\n";
-        code_ << "    ld t0,sp,0\n    addi sp,sp,8\n";
-        code_ << "    add t3,t0,zero\n";
-        code_ << "    add t0,t1,zero\n";
+        emit("add", "t1,t0,zero");
+        emit("ld", "t0,sp,0");
+        emit("addi", "sp,sp,8");
+        emit("add", "t3,t0,zero");
+        emit("add", "t0,t1,zero");
         storeOperand("t2", e.type);
-        code_ << "    add t0,t3,zero\n";
+        emit("add", "t0,t3,zero");
     } else {
         storeOperand("t2", e.type);
     }

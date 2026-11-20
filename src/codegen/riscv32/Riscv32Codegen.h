@@ -57,7 +57,7 @@ namespace rcc {
 // RISC-V has no branch-delay slot (unlike MIPS/SPARC), so every
 // `beq`/`bne`/`jal`/`jalr` here takes effect immediately, with no
 // synthesized `nop` needed afterward.
-class Riscv32Codegen : public Backend {
+class Riscv32Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "riscv32"; }
@@ -75,6 +75,13 @@ class Riscv32Codegen : public Backend {
                                                   const std::string &format) const override;
 
    private:
+    // A frame offset or `-frameSize` can exceed `addi`'s own 12-bit signed
+    // range for a large local array, unlike every other (always small,
+    // literal) stack adjustment in this backend - so this one spot routes
+    // through `s1` (this dialect's scratch register, transiently reused the
+    // same way MipsCodegen.h's `$at` is) when the plain immediate wouldn't fit.
+    void addImm(const std::string &dst, const std::string &src, int32_t v);
+
     void genFunction(const ir::FunctionBody &fn);
     void genStmt(const ir::Stmt &s);
     void genExpr(const ir::Expr &e);  // leaves the result in t0
@@ -162,7 +169,6 @@ class Riscv32Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

@@ -55,7 +55,7 @@ namespace rcc {
 // Every jump/call uses full-range `LJMP`/`LCALL` rather than the
 // 8051's short, ±127-byte conditional branches, which could land out
 // of range on a large generated function; see safeBranch().
-class MCS51Codegen : public Backend {
+class MCS51Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "8051"; }
@@ -249,8 +249,11 @@ class MCS51Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
-    std::ostringstream initCode_;  // globals' initial-value MOVX writes
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat() and
+    // `code_` itself come from TextCodegenBase (see Codegen.h);
+    // `initCode_` is a separate raw stream (globals' initial-value MOVX
+    // writes), left on its own direct `<<` usage.
+    std::ostringstream initCode_;
     std::map<std::string, std::string> perFileAsm_;
 
     int tempCounter_ = 0;

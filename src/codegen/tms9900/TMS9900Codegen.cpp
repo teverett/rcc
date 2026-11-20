@@ -62,13 +62,16 @@ std::string TMS9900Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    lwpi " << kWorkspaceBase << "\n";
-        code_ << "    li r15," << kInitialSP << "\n";
-        code_ << "    bl [" << label(mainFn) << "]\n";
-        code_ << "halt:\n    jmp halt\n\n";
+        emitLabel("_start");
+        emit("lwpi", cat(kWorkspaceBase));
+        emit("li", cat("r15,", kInitialSP));
+        emit("bl", cat("[", label(mainFn), "]"));
+        emitLabel("halt");
+        emit("jmp", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -107,18 +110,21 @@ std::map<std::string, std::string> TMS9900Codegen::perFileAsm() const { return p
 // that, then returns via "b [r11]" - the real, documented TMS9900 subroutine-return idiom.
 void TMS9900Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunction_ = fn.func;
-    code_ << label(fn.func) << ":\n";
-    code_ << "    dect r15\n    mov r11,[r15]\n";
-    code_ << "    dect r15\n    mov r10,[r15]\n";
-    code_ << "    mov r15,r10\n";
-    if (fn.func->frameSize > 0) code_ << "    ai r15,-" << fn.func->frameSize << "\n";
+    emitLabel(label(fn.func));
+    emit("dect", "r15");
+    emit("mov", "r11,[r15]");
+    emit("dect", "r15");
+    emit("mov", "r10,[r15]");
+    emit("mov", "r15,r10");
+    if (fn.func->frameSize > 0) emit("ai", cat("r15,-", fn.func->frameSize));
 
     genStmt(*fn.body);
 
-    code_ << "    mov r10,r15\n";
-    code_ << "    mov [ir15],r10\n";
-    code_ << "    mov [ir15],r11\n";
-    code_ << "    b [r11]\n\n";
+    emit("mov", "r10,r15");
+    emit("mov", "[ir15],r10");
+    emit("mov", "[ir15],r11");
+    emit("b", "[r11]");
+    emitRaw("");
 }
 
 void TMS9900Codegen::genStmt(const ir::Stmt &s) {
@@ -130,52 +136,53 @@ void TMS9900Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::If: {
             genExpr(*s.cond);
             if (isWide(s.cond->type)) failWide(s.line);
-            code_ << "    ci r0,0\n";
+            emit("ci", "r0,0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jeq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("jeq", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             if (isWide(s.cond->type)) failWide(s.line);
-            code_ << "    ci r0,0\n    jeq " << Lend << "\n";
+            emit("ci", "r0,0");
+            emit("jeq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
-            code_ << "    mov r10,r15\n";
-            code_ << "    mov [ir15],r10\n";
-            code_ << "    mov [ir15],r11\n";
-            code_ << "    b [r11]\n";
+            emit("mov", "r10,r15");
+            emit("mov", "[ir15],r10");
+            emit("mov", "[ir15],r11");
+            emit("b", "[r11]");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -194,16 +201,15 @@ void TMS9900Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -215,7 +221,7 @@ void TMS9900Codegen::genExpr(const ir::Expr &e) {
             err(e.line, "float/double is not supported on this target (floatSupport() == None)");
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) failWide(e.line);
-            code_ << "    li r0," << static_cast<int16_t>(e.intValue) << "\n";
+            emit("li", cat("r0,", static_cast<int16_t>(e.intValue)));
             return;
         }
         case ir::ExprKind::Var: {
@@ -241,7 +247,7 @@ void TMS9900Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    mov r0,r4\n";
+            emit("mov", "r0,r4");
             pushR4();
             genExpr(*e.rhs);
             popR4();
@@ -256,7 +262,7 @@ void TMS9900Codegen::genExpr(const ir::Expr &e) {
             }
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // r0 = rhs
-            code_ << "    mov r0,r1\n";
+            emit("mov", "r0,r1");
             loadOperand(mem, e.type);  // r0 = old
             if (e.yieldOld) pushR0();
             genCompoundOp(e.op, e.type);
@@ -267,39 +273,39 @@ void TMS9900Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    mov r0,r4\n";
+            emit("mov", "r0,r4");
             genCompoundThroughPtr(e);
             return;
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
             if (isWide(e.lhs->type)) failWide(e.line);
-            code_ << "    ci r0,0\n";
+            emit("ci", "r0,0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jeq " << Lelse << "\n";
+            emit("jeq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genExpr(*e.rhs);
                 if (isWide(e.rhs->type)) failWide(e.line);
-                code_ << "    neg r0\n";
+                emit("neg", "r0");
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // r0 = pointer value
-                code_ << "    mov r0,r4\n";
+                emit("mov", "r0,r4");
                 loadIndirect(e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
                 if (isWide(e.rhs->type)) failWide(e.line);
-                code_ << "    inv r0\n";
+                emit("inv", "r0");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -318,22 +324,22 @@ void TMS9900Codegen::genExpr(const ir::Expr &e) {
                 pushR0();
                 totalBytes += 2;
             }
-            code_ << "    bl [" << label(e.func) << "]\n";
-            if (totalBytes > 0) code_ << "    ai r15," << totalBytes << "\n";
+            emit("bl", cat("[", label(e.func), "]"));
+            if (totalBytes > 0) emit("ai", cat("r15,", totalBytes));
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // r0 = the callee's own entry address
-            code_ << "    mov r0,r4\n";
+            emit("mov", "r0,r4");
             // Saves/restores r11 around the call exactly like a real `bl` would via another
             // register, since the callee's own prologue/epilogue already expects `bl`'s own
             // return-address convention - `bl` itself needs a Symbolic/label operand, so an
             // indirect call instead uses `b` to transfer control and plants the return address
             // (the next instruction after this sequence) into r11 itself first.
             std::string Lret = newLabel();
-            code_ << "    li r11," << Lret << "\n";
-            code_ << "    b [r4]\n";
-            code_ << Lret << ":\n";
+            emit("li", cat("r11,", Lret));
+            emit("b", "[r4]");
+            emitLabel(Lret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -360,40 +366,45 @@ void TMS9900Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr)
     genExpr(idxExpr);  // r0 = index
     int shift = elemShift(slot->type);
     if (shift >= 0) {
-        if (shift > 0) code_ << "    sla r0," << shift << "\n";
+        if (shift > 0) emit("sla", cat("r0,", shift));
     } else {
         // A struct element's non-power-of-two width - scale via the real hardware multiply
         // (always exact: both operands fit in 16 bits).
-        code_ << "    li r1," << widthOfType(slot->type) << "\n";
-        code_ << "    mov r0,r2\n    mpy r1,r2\n    mov r3,r0\n";
+        emit("li", cat("r1,", widthOfType(slot->type)));
+        emit("mov", "r0,r2");
+        emit("mpy", "r1,r2");
+        emit("mov", "r3,r0");
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    li r4," << label(slot) << "\n";
+            emit("li", cat("r4,", label(slot)));
         } else {
             int base = slot->kind == ir::SlotKind::Param ? slot->frameOffset
                                                            : -ir::localLowOffset(*slot, typeWidths());
-            code_ << "    li r4," << base << "\n    a r10,r4\n";
+            emit("li", cat("r4,", base));
+            emit("a", "r10,r4");
         }
     } else {
-        code_ << "    mov " << operandOf(slot) << ",r4\n";
+        emit("mov", cat(operandOf(slot), ",r4"));
     }
-    code_ << "    a r0,r4\n";
+    emit("a", "r0,r4");
 }
 
 // r0=old, r1=rhs on entry (CompoundAssign's own contract); leaves the un-narrowed new value in
 // r0. `type` is never wide here (IRBuilder's rejectIfWide() guarantees it).
 void TMS9900Codegen::genCompoundOp(const std::string &op, Type type) {
     if (op == "+") {
-        code_ << "    a r1,r0\n";
+        emit("a", "r1,r0");
         return;
     }
     if (op == "-") {
-        code_ << "    s r1,r0\n";
+        emit("s", "r1,r0");
         return;
     }
     if (op == "*") {
-        code_ << "    mov r1,r2\n    mpy r0,r2\n    mov r3,r0\n";
+        emit("mov", "r1,r2");
+        emit("mpy", "r0,r2");
+        emit("mov", "r3,r0");
         return;
     }
     if (op == "/" || op == "%") {
@@ -404,15 +415,17 @@ void TMS9900Codegen::genCompoundOp(const std::string &op, Type type) {
     // dst &= ~src) and SOC ("set ones corresponding", dst |= src). AND is synthesized as
     // "dst &= ~(~src)", i.e. invert a copy of src first, then SZC it in.
     if (op == "&") {
-        code_ << "    mov r1,r2\n    inv r2\n    szc r2,r0\n";
+        emit("mov", "r1,r2");
+        emit("inv", "r2");
+        emit("szc", "r2,r0");
         return;
     }
     if (op == "|") {
-        code_ << "    soc r1,r0\n";
+        emit("soc", "r1,r0");
         return;
     }
     if (op == "^") {
-        code_ << "    xor r1,r0\n";
+        emit("xor", "r1,r0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -427,19 +440,19 @@ void TMS9900Codegen::genCompoundOp(const std::string &op, Type type) {
 void TMS9900Codegen::genCompoundThroughPtr(const ir::Expr &e) {
     pushR4();
     genExpr(*e.rhs);       // r0 = rhs
-    code_ << "    mov r0,r1\n";  // r1 = rhs, held across the r4 reload below
+    emit("mov", "r0,r1");  // r1 = rhs, held across the r4 reload below
     popR4();                 // r4 = address
     loadIndirect(e.type);     // r0 = old
     if (e.yieldOld) pushR0();
     genCompoundOp(e.op, e.type);  // r0 = new (raw)
     narrowR0To(e.type);
     if (e.yieldOld) {
-        code_ << "    mov r0,r2\n";  // r2 = new
+        emit("mov", "r0,r2");  // r2 = new
         popR0();                       // r0 = old
-        code_ << "    mov r0,r3\n";     // r3 = old, preserved across the store below
-        code_ << "    mov r2,r0\n";      // r0 = new (storeIndirect always stores from r0)
+        emit("mov", "r0,r3");     // r3 = old, preserved across the store below
+        emit("mov", "r2,r0");      // r0 = new (storeIndirect always stores from r0)
         storeIndirect(e.type);               // r4 still addresses the target
-        code_ << "    mov r3,r0\n";            // r0 = old (final result)
+        emit("mov", "r3,r0");            // r0 = old (final result)
     } else {
         storeIndirect(e.type);
     }
@@ -452,8 +465,8 @@ void TMS9900Codegen::genLocalArrayInit(const ir::Slot *slot) {
         const ir::ArrayInitElem &elem = slot->arrayInit[i];
         int byteOffset = static_cast<int>(i) * w;
         const char *mnemonic = w == 1 ? "movb" : "mov";
-        code_ << "    li r0," << arrayElemText(elem) << "\n";
-        code_ << "    " << mnemonic << " r0," << addr(slot, byteOffset) << "\n";
+        emit("li", cat("r0,", arrayElemText(elem)));
+        emit(mnemonic, cat("r0,", addr(slot, byteOffset)));
     }
 }
 
@@ -471,9 +484,10 @@ void TMS9900Codegen::narrowR0To(Type to) {
         // byte moved up into the high-byte position first (SLA 8) so its own bit 7 lands on
         // r0's bit 15, then arithmetic-shifted back down (SRA 8) to sign-extend from there.
         if (to.isUnsigned) {
-            code_ << "    andi r0,255\n";
+            emit("andi", "r0,255");
         } else {
-            code_ << "    sla r0,8\n    sra r0,8\n";
+            emit("sla", "r0,8");
+            emit("sra", "r0,8");
         }
     }
     // 2 bytes: nothing to do (r0 is already a full native word).
@@ -487,14 +501,14 @@ void TMS9900Codegen::loadOperand(const std::string &mem, Type type) {
     int w = widthOfType(type);
     if (w > 2) failWide(0);
     if (w == 1) {
-        code_ << "    movb " << mem << ",r0\n";
+        emit("movb", cat(mem, ",r0"));
         if (type.isUnsigned) {
-            code_ << "    srl r0,8\n";
+            emit("srl", "r0,8");
         } else {
-            code_ << "    sra r0,8\n";
+            emit("sra", "r0,8");
         }
     } else {
-        code_ << "    mov " << mem << ",r0\n";
+        emit("mov", cat(mem, ",r0"));
     }
 }
 
@@ -502,9 +516,11 @@ void TMS9900Codegen::storeOperand(const std::string &mem, Type type) {
     int w = widthOfType(type);
     if (w > 2) failWide(0);
     if (w == 1) {
-        code_ << "    sla r0,8\n    movb r0," << mem << "\n    sra r0,8\n";
+        emit("sla", "r0,8");
+        emit("movb", cat("r0,", mem));
+        emit("sra", "r0,8");
     } else {
-        code_ << "    mov r0," << mem << "\n";
+        emit("mov", cat("r0,", mem));
     }
 }
 
@@ -512,10 +528,10 @@ void TMS9900Codegen::loadIndirect(Type type) {
     int w = widthOfType(type);
     if (w > 2) failWide(0);
     if (w == 1) {
-        code_ << "    movb [r4],r0\n";
-        code_ << "    " << (type.isUnsigned ? "srl r0,8\n" : "sra r0,8\n");
+        emit("movb", "[r4],r0");
+        emit(type.isUnsigned ? "srl" : "sra", "r0,8");
     } else {
-        code_ << "    mov [r4],r0\n";
+        emit("mov", "[r4],r0");
     }
 }
 
@@ -523,9 +539,11 @@ void TMS9900Codegen::storeIndirect(Type type) {
     int w = widthOfType(type);
     if (w > 2) failWide(0);
     if (w == 1) {
-        code_ << "    sla r0,8\n    movb r0,[r4]\n    sra r0,8\n";
+        emit("sla", "r0,8");
+        emit("movb", "r0,[r4]");
+        emit("sra", "r0,8");
     } else {
-        code_ << "    mov r0,[r4]\n";
+        emit("mov", "r0,[r4]");
     }
 }
 
@@ -540,22 +558,23 @@ void TMS9900Codegen::genConvert(const ir::Expr &e) {
 void TMS9900Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    li r0," << label(operand.slot) << "\n";
+            emit("li", cat("r0,", label(operand.slot)));
         } else {
             int off = operand.slot->kind == ir::SlotKind::Param
                           ? operand.slot->frameOffset + paramByteFixup(operand.slot)
                           : -ir::localOffsetDescendingWide(*operand.slot, typeWidths());
-            code_ << "    li r0," << off << "\n    a r10,r0\n";
+            emit("li", cat("r0,", off));
+            emit("a", "r10,r0");
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    mov r4,r0\n";
+        emit("mov", "r4,r0");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    li r0," << label(operand.func) << "\n";
+        emit("li", cat("r0,", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -572,10 +591,10 @@ void TMS9900Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.rhs);
         popR1();  // r1 = lhs, r0 = rhs
         if (op == "+") {
-            code_ << "    a r1,r0\n";
+            emit("a", "r1,r0");
         } else {
-            code_ << "    s r0,r1\n";  // r1 = r1 - r0 = lhs - rhs
-            code_ << "    mov r1,r0\n";
+            emit("s", "r0,r1");  // r1 = r1 - r0 = lhs - rhs
+            emit("mov", "r1,r0");
         }
         return;
     }
@@ -587,7 +606,7 @@ void TMS9900Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.lhs);
         pushR0();
         genExpr(*e.rhs);
-        code_ << "    mov r0,r1\n";
+        emit("mov", "r0,r1");
         popR0();  // r0 = lhs (dividend), r1 = rhs (divisor)
         genDivMod(isUnsigned, op == "%");
         return;
@@ -598,11 +617,16 @@ void TMS9900Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.rhs);
         popR1();  // r1 = lhs, r0 = rhs
         if (op == "&") {
-            code_ << "    mov r0,r2\n    inv r2\n    szc r2,r1\n    mov r1,r0\n";
+            emit("mov", "r0,r2");
+            emit("inv", "r2");
+            emit("szc", "r2,r1");
+            emit("mov", "r1,r0");
         } else if (op == "|") {
-            code_ << "    soc r0,r1\n    mov r1,r0\n";
+            emit("soc", "r0,r1");
+            emit("mov", "r1,r0");
         } else {
-            code_ << "    xor r0,r1\n    mov r1,r0\n";
+            emit("xor", "r0,r1");
+            emit("mov", "r1,r0");
         }
         return;
     }
@@ -610,7 +634,7 @@ void TMS9900Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.lhs);
         pushR0();
         genExpr(*e.rhs);  // r0 = count
-        code_ << "    mov r0,r1\n";
+        emit("mov", "r0,r1");
         popR0();  // r0 = value, r1 = count
         genShiftCore(op == "<<", isUnsigned);
         return;
@@ -631,11 +655,11 @@ void TMS9900Codegen::genBinary(const ir::Expr &e) {
 // the instruction's own count field is 0, from r0's own low nibble - so the value is moved out
 // of r0's way into r2 first, then the count into r0, before shifting.
 void TMS9900Codegen::genShiftCore(bool isLeft, bool isUnsigned) {
-    code_ << "    mov r0,r2\n";
-    code_ << "    mov r1,r0\n";
+    emit("mov", "r0,r2");
+    emit("mov", "r1,r0");
     const char *insn = isLeft ? "sla" : (isUnsigned ? "srl" : "sra");
-    code_ << "    " << insn << " r2,0\n";
-    code_ << "    mov r2,r0\n";
+    emit(insn, "r2,0");
+    emit("mov", "r2,r0");
 }
 
 // r0=rhs, r1=lhs preset (genBinary's own arrangement before calling this) - multiplication
@@ -649,7 +673,9 @@ void TMS9900Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     pushR0();
     genExpr(rhs);
     popR1();
-    code_ << "    mov r1,r2\n    mpy r0,r2\n    mov r3,r0\n";
+    emit("mov", "r1,r2");
+    emit("mpy", "r0,r2");
+    emit("mov", "r3,r0");
 }
 
 // r0=dividend, r1=divisor preset. The real hardware DIV is unsigned-only (a 32-bit dividend in
@@ -661,26 +687,39 @@ void TMS9900Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // convention) - the TMS9900 has no signed divide instruction at all.
 void TMS9900Codegen::genDivMod(bool isUnsigned, bool wantRemainder) {
     if (isUnsigned) {
-        code_ << "    li r2,0\n    mov r0,r3\n    div r1,r2\n";
-        code_ << "    mov " << (wantRemainder ? "r3" : "r2") << ",r0\n";
+        emit("li", "r2,0");
+        emit("mov", "r0,r3");
+        emit("div", "r1,r2");
+        emit("mov", cat(wantRemainder ? "r3" : "r2", ",r0"));
         return;
     }
     std::string Lskip1 = newLabel(), Lskip2 = newLabel();
-    code_ << "    mov r0,r4\n";  // r4 = original dividend (sign + remainder-sign source)
-    code_ << "    mov r1,r5\n";  // r5 = original divisor (sign source)
-    code_ << "    ci r0,0\n    jhe " << Lskip1 << "\n    neg r0\n";
-    code_ << Lskip1 << ":\n";
-    code_ << "    ci r1,0\n    jhe " << Lskip2 << "\n    neg r1\n";
-    code_ << Lskip2 << ":\n";
-    code_ << "    li r2,0\n    mov r0,r3\n    div r1,r2\n";  // r2 = |quotient|, r3 = |remainder|
-    code_ << "    mov r4,r6\n    xor r5,r6\n";  // r6's sign bit: original signs differed?
+    emit("mov", "r0,r4");  // r4 = original dividend (sign + remainder-sign source)
+    emit("mov", "r1,r5");  // r5 = original divisor (sign source)
+    emit("ci", "r0,0");
+    emit("jhe", Lskip1);
+    emit("neg", "r0");
+    emitLabel(Lskip1);
+    emit("ci", "r1,0");
+    emit("jhe", Lskip2);
+    emit("neg", "r1");
+    emitLabel(Lskip2);
+    emit("li", "r2,0");
+    emit("mov", "r0,r3");
+    emit("div", "r1,r2");  // r2 = |quotient|, r3 = |remainder|
+    emit("mov", "r4,r6");
+    emit("xor", "r5,r6");  // r6's sign bit: original signs differed?
     std::string LnoQNeg = newLabel();
-    code_ << "    ci r6,0\n    jhe " << LnoQNeg << "\n    neg r2\n";
-    code_ << LnoQNeg << ":\n";
+    emit("ci", "r6,0");
+    emit("jhe", LnoQNeg);
+    emit("neg", "r2");
+    emitLabel(LnoQNeg);
     std::string LnoRNeg = newLabel();
-    code_ << "    ci r4,0\n    jhe " << LnoRNeg << "\n    neg r3\n";
-    code_ << LnoRNeg << ":\n";
-    code_ << "    mov " << (wantRemainder ? "r3" : "r2") << ",r0\n";
+    emit("ci", "r4,0");
+    emit("jhe", LnoRNeg);
+    emit("neg", "r3");
+    emitLabel(LnoRNeg);
+    emit("mov", cat(wantRemainder ? "r3" : "r2", ",r0"));
 }
 
 void TMS9900Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -712,52 +751,66 @@ void TMS9900Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const
     // "rhs <cond> lhs" instead (used only for the two conditions with no direct jump - see
     // genCompare()'s own comment for why that's exactly equivalent).
     if (swapOperands) {
-        code_ << "    c r1,r0\n";
+        emit("c", "r1,r0");
     } else {
-        code_ << "    c r0,r1\n";
+        emit("c", "r0,r1");
     }
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << branchIfTrue << " " << Ltrue << "\n";
-    code_ << "    li r0,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    li r0,1\n";
-    code_ << Ldone << ":\n";
+    emit(branchIfTrue, Ltrue);
+    emit("li", "r0,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("li", "r0,1");
+    emitLabel(Ldone);
 }
 
 void TMS9900Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     if (isWide(lhs.type) || isWide(rhs.type)) failWide(lhs.line);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
-    code_ << "    ci r0,0\n    jeq " << Lfalse << "\n";
+    emit("ci", "r0,0");
+    emit("jeq", Lfalse);
     genExpr(rhs);
-    code_ << "    ci r0,0\n    jeq " << Lfalse << "\n";
-    code_ << "    jmp " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    li r0,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    li r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("ci", "r0,0");
+    emit("jeq", Lfalse);
+    emit("jmp", Ltrue);
+    emitLabel(Lfalse);
+    emit("li", "r0,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("li", "r0,1");
+    emitLabel(Ldone);
 }
 
 void TMS9900Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     if (isWide(lhs.type) || isWide(rhs.type)) failWide(lhs.line);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     genExpr(lhs);
-    code_ << "    ci r0,0\n    jne " << Ltrue << "\n";
+    emit("ci", "r0,0");
+    emit("jne", Ltrue);
     genExpr(rhs);
-    code_ << "    ci r0,0\n    jne " << Ltrue << "\n";
-    code_ << "    jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    li r0,1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    li r0,0\n";
-    code_ << Ldone << ":\n";
+    emit("ci", "r0,0");
+    emit("jne", Ltrue);
+    emit("jmp", Lfalse);
+    emitLabel(Ltrue);
+    emit("li", "r0,1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
+    emit("li", "r0,0");
+    emitLabel(Ldone);
 }
 
 void TMS9900Codegen::genLogicalNot(const ir::Expr &rhs) {
     if (isWide(rhs.type)) failWide(rhs.line);
     genExpr(rhs);
-    code_ << "    ci r0,0\n";
+    emit("ci", "r0,0");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    jeq " << Ltrue << "\n";
-    code_ << "    li r0,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    li r0,1\n";
-    code_ << Ldone << ":\n";
+    emit("jeq", Ltrue);
+    emit("li", "r0,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("li", "r0,1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> TMS9900Codegen::assembleInProcess(const std::string &asmText,

@@ -70,7 +70,7 @@ namespace rcc {
 // own `%hi`/`%lo` convention - same Hi/Lo relocation split and sign-
 // rounding, see Riscv64Assembler.h - plus this one fixed, value-
 // independent instruction pair that needs no relocation of its own.
-class Riscv64Codegen : public Backend {
+class Riscv64Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "riscv64"; }
@@ -156,6 +156,10 @@ class Riscv64Codegen : public Backend {
     // narrowT0To() as needed, same as AlphaCodegen.h's own
     // `loadImm32()`/`narrowT0To()` split).
     void loadImm32(const std::string &reg, int32_t v);
+    // A frame offset or `-frameSize` can exceed `addi`'s own 12-bit signed range for a large
+    // local array, so this routes through `s1` (this dialect's scratch register) when the
+    // plain immediate wouldn't fit.
+    void addImm(const std::string &dst, const std::string &src, int32_t v);
     // Emits a full 64-bit literal load into `reg`, for a `long`/`long
     // long` literal that doesn't fit in `loadImm32()`'s 32-bit range:
     // the low 32 bits via loadImm32()+a zero-extend, the high 32 bits
@@ -178,7 +182,6 @@ class Riscv64Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

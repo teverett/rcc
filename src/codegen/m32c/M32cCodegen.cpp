@@ -40,9 +40,9 @@ void M32cCodegen::genLocalArrayInit(const ir::Slot *slot) {
     int stride = widthOfType(slot->type) == 1 ? 1 : 2;
     bool isChar = stride == 1;
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
-        code_ << "    mov.w " << arrayElemText(slot->arrayInit[i]) << ",r0\n";
+        emit("mov.w", cat(arrayElemText(slot->arrayInit[i]), ",r0"));
         int off = ir::localLowOffset(*slot, typeWidths()) - stride * static_cast<int>(i);
-        code_ << "    " << (isChar ? "movb" : "mov.w") << " r0,[fb-" << off << "]\n";
+        emit((isChar ? "movb" : "mov.w"), cat("r0,[fb-", off, "]"));
     }
 }
 
@@ -61,12 +61,15 @@ std::string M32cCodegen::generate(const ir::Program &prog, bool objectMode) {
         perFileAsm_[file] += chunk;
     };
 
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    mov.w " << kInitialSp << ",sp\n";
-        code_ << "    jsr.w " << label(mainFn) << "\n";
-        code_ << "halt:\n    jmp halt\n\n";
+        emitLabel("_start");
+        emit("mov.w", cat(kInitialSp, ",sp"));
+        emit("jsr.w", label(mainFn));
+        emitLabel("halt");
+        emit("jmp", "halt");
+        emitRaw("");
     }
     flush(mainFn ? mainFn->sourceFile : std::string());
 
@@ -116,14 +119,15 @@ std::string M32cCodegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> M32cCodegen::perFileAsm() const { return perFileAsm_; }
 
 void M32cCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    push.w fb\n";
-    code_ << "    mov.w sp,fb\n";
-    if (fn.func->frameSize > 0) code_ << "    sub.w " << fn.func->frameSize << ",sp\n";
+    emitLabel(label(fn.func));
+    emit("push.w", "fb");
+    emit("mov.w", "sp,fb");
+    if (fn.func->frameSize > 0) emit("sub.w", cat(fn.func->frameSize, ",sp"));
     genStmt(*fn.body);
-    code_ << "    mov.w fb,sp\n";
-    code_ << "    pop.w fb\n";
-    code_ << "    rts\n\n";
+    emit("mov.w", "fb,sp");
+    emit("pop.w", "fb");
+    emit("rts");
+    emitRaw("");
 }
 
 void M32cCodegen::genStmt(const ir::Stmt &s) {
@@ -137,40 +141,40 @@ void M32cCodegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    jeq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("jeq", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    jeq " << Lend << "\n";
+            emit("jeq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -178,12 +182,12 @@ void M32cCodegen::genStmt(const ir::Stmt &s) {
                 genExpr(*s.initOrReturnOrExpr);
                 if (isWide(s.initOrReturnOrExpr->type)) {
                     int words = wordCountOf(s.initOrReturnOrExpr->type);
-                    for (int i = 0; i < words; i++) code_ << "    pop.w r" << i << "\n";
+                    for (int i = 0; i < words; i++) emit("pop.w", cat("r", i));
                 }
             }
-            code_ << "    mov.w fb,sp\n";
-            code_ << "    pop.w fb\n";
-            code_ << "    rts\n";
+            emit("mov.w", "fb,sp");
+            emit("pop.w", "fb");
+            emit("rts");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -206,16 +210,16 @@ void M32cCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -230,7 +234,7 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
                 genWideLoadLiteral(e.intValue, wordCountOf(e.type));
                 return;
             }
-            code_ << "    mov.w " << static_cast<int>(static_cast<uint16_t>(e.intValue)) << ",r0\n";
+            emit("mov.w", cat(static_cast<int>(static_cast<uint16_t>(e.intValue)), ",r0"));
             return;
         }
         case ir::ExprKind::Var: {
@@ -248,20 +252,20 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {
                 genIndexAddr(e.slot, *e.lhs);
-                code_ << "    push.w a0\n";
+                emit("push.w", "a0");
                 genExpr(*e.rhs);
-                code_ << "    pop.w a0\n";
-                code_ << "    " << (widthOfType(e.slot->type) == 1 ? "stb" : "st") << " r0,a0\n";
+                emit("pop.w", "a0");
+                emit((widthOfType(e.slot->type) == 1 ? "stb" : "st"), "r0,a0");
                 return;
             }
             if (isWide(e.slot->type)) {
                 genExpr(*e.rhs);
                 int words = wordCountOf(e.slot->type);
                 for (int i = 0; i < words; i++) {
-                    code_ << "    mov.w [sp+" << (2 * i) << "],r0\n";
-                    code_ << "    mov.w r0," << wideWordOperand(e.slot, i) << "\n";
+                    emit("mov.w", cat("[sp+", (2 * i), "],r0"));
+                    emit("mov.w", cat("r0,", wideWordOperand(e.slot, i)));
                 }
-                code_ << "    add.w " << (2 * words) << ",sp\n";
+                emit("add.w", cat((2 * words), ",sp"));
                 return;
             }
             genExpr(*e.rhs);
@@ -270,22 +274,22 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);
-            code_ << "    mov.w r0,a0\n";
-            code_ << "    push.w a0\n";
+            emit("mov.w", "r0,a0");
+            emit("push.w", "a0");
             genExpr(*e.rhs);
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
-                code_ << "    mov.w [sp+" << (2 * words) << "],a0\n";
+                emit("mov.w", cat("[sp+", (2 * words), "],a0"));
                 for (int i = 0; i < words; i++) {
-                    code_ << "    pop.w r0\n";
-                    code_ << "    st r0,a0\n";
-                    if (i + 1 < words) code_ << "    add.w 2,a0\n";
+                    emit("pop.w", "r0");
+                    emit("st", "r0,a0");
+                    if (i + 1 < words) emit("add.w", "2,a0");
                 }
-                code_ << "    add.w 2,sp\n";
+                emit("add.w", "2,sp");
                 return;
             }
-            code_ << "    pop.w a0\n";
-            code_ << "    " << (widthOfType(e.type) == 1 ? "stb" : "st") << " r0,a0\n";
+            emit("pop.w", "a0");
+            emit((widthOfType(e.type) == 1 ? "stb" : "st"), "r0,a0");
             return;
         }
         case ir::ExprKind::CompoundAssign: {
@@ -316,26 +320,26 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
                     // word further from `sp`, so this slides across it one
                     // word at a time, most-significant word first.
                     for (int k = 0; k < words; k++) {
-                        code_ << "    mov.w [sp+" << (2 * (words - 1)) << "],r0\n";
-                        code_ << "    push.w r0\n";
+                        emit("mov.w", cat("[sp+", (2 * (words - 1)), "],r0"));
+                        emit("push.w", "r0");
                     }
                 }
                 genWideStore(e.slot, words);
                 return;
             }
             genExpr(*e.rhs);
-            code_ << "    mov.w r0,r1\n";
+            emit("mov.w", "r0,r1");
             loadOperand(operandOf(e.slot), e.type);
-            if (e.yieldOld) code_ << "    push.w r0\n";
+            if (e.yieldOld) emit("push.w", "r0");
             genCompoundOp(e.op, e.type);
             narrowR0To(e.type);
             storeOperand(operandOf(e.slot), e.type);
-            if (e.yieldOld) code_ << "    pop.w r0\n";
+            if (e.yieldOld) emit("pop.w", "r0");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);
-            code_ << "    mov.w r0,a0\n";
+            emit("mov.w", "r0,a0");
             genCompoundThroughA0(e);
             return;
         }
@@ -344,12 +348,12 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    jeq " << Lelse << "\n";
+            emit("jeq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -358,30 +362,30 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genWideNegate(wordCountOf(e.rhs->type));
                 } else {
-                    code_ << "    neg.w r0\n";
+                    emit("neg.w", "r0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);
-                code_ << "    mov.w r0,a0\n";
+                emit("mov.w", "r0,a0");
                 if (isWide(e.type)) {
                     int words = wordCountOf(e.type);
-                    if (words > 1) code_ << "    add.w " << (2 * (words - 1)) << ",a0\n";
+                    if (words > 1) emit("add.w", cat((2 * (words - 1)), ",a0"));
                     for (int i = words - 1; i >= 0; i--) {
-                        code_ << "    ld a0,r0\n";
-                        code_ << "    push.w r0\n";
-                        if (i > 0) code_ << "    sub.w 2,a0\n";
+                        emit("ld", "a0,r0");
+                        emit("push.w", "r0");
+                        if (i > 0) emit("sub.w", "2,a0");
                     }
                     return;
                 }
-                code_ << "    " << (widthOfType(e.type) == 1 ? "ldb" : "ld") << " a0,r0\n";
-                if (widthOfType(e.type) == 1 && e.type.isUnsigned) code_ << "    and.w 0x00FF,r0\n";
+                emit((widthOfType(e.type) == 1 ? "ldb" : "ld"), "a0,r0");
+                if (widthOfType(e.type) == 1 && e.type.isUnsigned) emit("and.w", "0x00FF,r0");
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    not.w r0\n";
+                emit("not.w", "r0");
                 if (isWide(e.rhs->type)) {
-                    for (int i = 1; i < wordCountOf(e.rhs->type); i++) code_ << "    not.w [sp+" << (2 * i) << "]\n";
+                    for (int i = 1; i < wordCountOf(e.rhs->type); i++) emit("not.w", cat("[sp+", (2 * i), "]"));
                 }
             } else {
                 genAddrOf(*e.rhs);
@@ -395,16 +399,17 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.args[i]->type)) {
                     totalWords += wordCountOf(e.args[i]->type);
                 } else {
-                    code_ << "    push.w r0\n";
+                    emit("push.w", "r0");
                     totalWords += 1;
                 }
             }
-            code_ << "    jsr.w " << label(e.func) << "\n";
-            if (totalWords > 0) code_ << "    add.w " << (2 * totalWords) << ",sp\n";
+            emit("jsr.w", label(e.func));
+            if (totalWords > 0) emit("add.w", cat((2 * totalWords), ",sp"));
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
                 for (int i = words - 1; i >= 0; i--) {
-                    code_ << "    mov.w r" << i << ",r0\n    push.w r0\n";
+                    emit("mov.w", cat("r", i, ",r0"));
+                    emit("push.w", "r0");
                 }
             }
             return;
@@ -413,8 +418,8 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
             genExpr(*e.lhs);
             std::string T = allocTemp();
             declareTemp(T);
-            code_ << "    mov.w r0," << T << "\n";
-            code_ << "    jsri.w " << T << "\n";
+            emit("mov.w", cat("r0,", T));
+            emit("jsri.w", T);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -422,7 +427,7 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Intrinsic: {
-            code_ << "    " << (e.op == "ion" ? "fset i" : "fclr i") << "\n";
+            emit((e.op == "ion" ? "fset i" : "fclr i"));
             return;
         }
         case ir::ExprKind::Convert: {
@@ -437,34 +442,34 @@ void M32cCodegen::genExpr(const ir::Expr &e) {
 void M32cCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);
     int shift = elemShift(slot->type);
-    if (shift > 0) code_ << "    shl.w " << shift << ",r0\n";
+    if (shift > 0) emit("shl.w", cat(shift, ",r0"));
     if (slot->arraySize > 0) {
-        code_ << "    lea " << operandOf(slot) << ",a0\n";
-        code_ << "    add.w r0,a0\n";
+        emit("lea", cat(operandOf(slot), ",a0"));
+        emit("add.w", "r0,a0");
     } else {
-        code_ << "    mov.w " << operandOf(slot) << ",a0\n";
-        code_ << "    add.w r0,a0\n";
+        emit("mov.w", cat(operandOf(slot), ",a0"));
+        emit("add.w", "r0,a0");
     }
 }
 
 void M32cCodegen::genIndex(const ir::Expr &e) {
     genIndexAddr(e.slot, *e.lhs);
-    code_ << "    " << (widthOfType(e.slot->type) == 1 ? "ldb" : "ld") << " a0,r0\n";
-    if (widthOfType(e.slot->type) == 1 && e.slot->type.isUnsigned) code_ << "    and.w 0x00FF,r0\n";
+    emit((widthOfType(e.slot->type) == 1 ? "ldb" : "ld"), "a0,r0");
+    if (widthOfType(e.slot->type) == 1 && e.slot->type.isUnsigned) emit("and.w", "0x00FF,r0");
 }
 
 void M32cCodegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
-        code_ << "    lea " << operandOf(operand.slot) << ",r0\n";
+        emit("lea", cat(operandOf(operand.slot), ",r0"));
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    mov.w a0,r0\n";
+        emit("mov.w", "a0,r0");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    lea " << label(operand.func) << ",r0\n";
+        emit("lea", cat(label(operand.func), ",r0"));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -482,14 +487,14 @@ void M32cCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push.w r0\n";
+        emit("push.w", "r0");
         genExpr(*e.rhs);
-        code_ << "    pop.w r1\n";
+        emit("pop.w", "r1");
         if (op == "+") {
-            code_ << "    add.w r1,r0\n";
+            emit("add.w", "r1,r0");
         } else {
-            code_ << "    sub.w r0,r1\n";
-            code_ << "    mov.w r1,r0\n";
+            emit("sub.w", "r0,r1");
+            emit("mov.w", "r1,r0");
         }
         return;
     }
@@ -515,11 +520,11 @@ void M32cCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push.w r0\n";
+        emit("push.w", "r0");
         genExpr(*e.rhs);
-        code_ << "    pop.w r1\n";
+        emit("pop.w", "r1");
         const char *insn = (op == "&") ? "and.w" : (op == "|") ? "or.w" : "xor.w";
-        code_ << "    " << insn << " r1,r0\n";
+        emit(insn, "r1,r0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -547,55 +552,61 @@ void M32cCodegen::genBinary(const ir::Expr &e) {
 
 void M32cCodegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push.w r0\n";
+    emit("push.w", "r0");
     genExpr(rhs);
-    code_ << "    mov.w r0,r1\n";
-    code_ << "    pop.w r0\n";
-    if (!isLeft) code_ << "    neg.w r1\n";
-    code_ << "    " << ((isLeft || isUnsigned) ? "shl.w" : "sha.w") << " r1,r0\n";
+    emit("mov.w", "r0,r1");
+    emit("pop.w", "r0");
+    if (!isLeft) emit("neg.w", "r1");
+    emit(((isLeft || isUnsigned) ? "shl.w" : "sha.w"), "r1,r0");
 }
 
 void M32cCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    push.w r0\n";
+    emit("push.w", "r0");
     genExpr(rhs);
-    code_ << "    pop.w r1\n";
-    code_ << "    mul.w r1,r0\n";
+    emit("pop.w", "r1");
+    emit("mul.w", "r1,r0");
 }
 
 void M32cCodegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
     if (isUnsigned) {
-        code_ << "    mov.w 0,r2\n";
-        code_ << "    divu.w r1,r0\n";
-        if (wantRemainder) code_ << "    mov.w r2,r0\n";
+        emit("mov.w", "0,r2");
+        emit("divu.w", "r1,r0");
+        if (wantRemainder) emit("mov.w", "r2,r0");
         return;
     }
     std::string Ld = newLabel(), Lr = newLabel();
-    code_ << "    mov.w 0,r3\n";
-    code_ << "    cmp.w 0,r0\n    jge " << Ld << "\n";
-    code_ << "    neg.w r0\n    mov.w 1,r3\n";
-    code_ << Ld << ":\n";
-    code_ << "    push.w r3\n";
-    code_ << "    mov.w 0,r3\n";
-    code_ << "    cmp.w 0,r1\n    jge " << Lr << "\n";
-    code_ << "    neg.w r1\n    mov.w 1,r3\n";
-    code_ << Lr << ":\n";
-    code_ << "    mov.w 0,r2\n";
-    code_ << "    divu.w r1,r0\n";
+    emit("mov.w", "0,r3");
+    emit("cmp.w", "0,r0");
+    emit("jge", Ld);
+    emit("neg.w", "r0");
+    emit("mov.w", "1,r3");
+    emitLabel(Ld);
+    emit("push.w", "r3");
+    emit("mov.w", "0,r3");
+    emit("cmp.w", "0,r1");
+    emit("jge", Lr);
+    emit("neg.w", "r1");
+    emit("mov.w", "1,r3");
+    emitLabel(Lr);
+    emit("mov.w", "0,r2");
+    emit("divu.w", "r1,r0");
     std::string Lskip = newLabel();
     if (wantRemainder) {
-        code_ << "    mov.w r2,r0\n";
-        code_ << "    pop.w r3\n";
-        code_ << "    cmp.w 0,r3\n    jeq " << Lskip << "\n";
-        code_ << "    neg.w r0\n";
-        code_ << Lskip << ":\n";
+        emit("mov.w", "r2,r0");
+        emit("pop.w", "r3");
+        emit("cmp.w", "0,r3");
+        emit("jeq", Lskip);
+        emit("neg.w", "r0");
+        emitLabel(Lskip);
         return;
     }
-    code_ << "    xor.w r3,[sp]\n";
-    code_ << "    pop.w r3\n";
-    code_ << "    cmp.w 0,r3\n    jeq " << Lskip << "\n";
-    code_ << "    neg.w r0\n";
-    code_ << Lskip << ":\n";
+    emit("xor.w", "r3,[sp]");
+    emit("pop.w", "r3");
+    emit("cmp.w", "0,r3");
+    emit("jeq", Lskip);
+    emit("neg.w", "r0");
+    emitLabel(Lskip);
 }
 
 // The `long`-only counterpart of genDivModCore(), operating on the real
@@ -613,8 +624,8 @@ void M32cCodegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
 // instead of a register, unlike genDivModCore()'s own `r3`.
 void M32cCodegen::genDivModCoreLong(bool wantRemainder, bool isUnsigned) {
     if (isUnsigned) {
-        code_ << "    divul r3r1,r2r0\n";  // r2r0 = quotient, r3r1 = remainder
-        if (wantRemainder) code_ << "    movl r3r1,r2r0\n";
+        emit("divul", "r3r1,r2r0");  // r2r0 = quotient, r3r1 = remainder
+        if (wantRemainder) emit("movl", "r3r1,r2r0");
         return;
     }
     std::string flagD = allocTemp();
@@ -622,36 +633,42 @@ void M32cCodegen::genDivModCoreLong(bool wantRemainder, bool isUnsigned) {
     std::string flagS = allocTemp();
     declareTemp(flagS);
     std::string Ld = newLabel(), Lr = newLabel(), Lskip = newLabel();
-    code_ << "    mov.w 0," << flagD << "\n";
-    code_ << "    cmpl 0,r2r0\n    jge " << Ld << "\n";
-    code_ << "    negl r2r0\n    mov.w 1," << flagD << "\n";
-    code_ << Ld << ":\n";
-    code_ << "    mov.w 0," << flagS << "\n";
-    code_ << "    cmpl 0,r3r1\n    jge " << Lr << "\n";
-    code_ << "    negl r3r1\n    mov.w 1," << flagS << "\n";
-    code_ << Lr << ":\n";
-    code_ << "    divxl r3r1,r2r0\n";  // |quotient| in r2r0, |remainder| in r3r1
+    emit("mov.w", cat("0,", flagD));
+    emit("cmpl", "0,r2r0");
+    emit("jge", Ld);
+    emit("negl", "r2r0");
+    emit("mov.w", cat("1,", flagD));
+    emitLabel(Ld);
+    emit("mov.w", cat("0,", flagS));
+    emit("cmpl", "0,r3r1");
+    emit("jge", Lr);
+    emit("negl", "r3r1");
+    emit("mov.w", cat("1,", flagS));
+    emitLabel(Lr);
+    emit("divxl", "r3r1,r2r0");  // |quotient| in r2r0, |remainder| in r3r1
     if (wantRemainder) {
-        code_ << "    movl r3r1,r2r0\n";
-        code_ << "    mov.w " << flagD << ",r1\n";  // r1 is free again: r3r1's own value is no longer needed
-        code_ << "    cmp.w 0,r1\n    jeq " << Lskip << "\n";
-        code_ << "    negl r2r0\n";
-        code_ << Lskip << ":\n";
+        emit("movl", "r3r1,r2r0");
+        emit("mov.w", cat(flagD, ",r1"));  // r1 is free again: r3r1's own value is no longer needed
+        emit("cmp.w", "0,r1");
+        emit("jeq", Lskip);
+        emit("negl", "r2r0");
+        emitLabel(Lskip);
         return;
     }
-    code_ << "    mov.w " << flagD << ",r1\n";
-    code_ << "    xor.w " << flagS << ",r1\n";
-    code_ << "    cmp.w 0,r1\n    jeq " << Lskip << "\n";
-    code_ << "    negl r2r0\n";
-    code_ << Lskip << ":\n";
+    emit("mov.w", cat(flagD, ",r1"));
+    emit("xor.w", cat(flagS, ",r1"));
+    emit("cmp.w", "0,r1");
+    emit("jeq", Lskip);
+    emit("negl", "r2r0");
+    emitLabel(Lskip);
 }
 
 void M32cCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push.w r0\n";
+    emit("push.w", "r0");
     genExpr(rhs);
-    code_ << "    mov.w r0,r1\n";
-    code_ << "    pop.w r0\n";
+    emit("mov.w", "r0,r1");
+    emit("pop.w", "r0");
     genDivModCore(wantRemainder, isUnsigned);
 }
 
@@ -667,103 +684,113 @@ void M32cCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const i
 
 void M32cCodegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &jumpIfTrue) {
     genExpr(lhs);
-    code_ << "    push.w r0\n";
+    emit("push.w", "r0");
     genExpr(rhs);
-    code_ << "    pop.w r1\n";
-    code_ << "    cmp.w r0,r1\n";
+    emit("pop.w", "r1");
+    emit("cmp.w", "r0,r1");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jumpIfTrue << " " << Ltrue << "\n";
-    code_ << "    mov.w 0,r0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov.w 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit(jumpIfTrue, Ltrue);
+    emit("mov.w", "0,r0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov.w", "1,r0");
+    emitLabel(Ldone);
 }
 
 void M32cCodegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    cmp.w 0,r0\n";
+        emit("cmp.w", "0,r0");
         return;
     }
     int words = wordCountOf(e.type);
-    code_ << "    mov.w [sp],r0\n";
-    for (int i = 1; i < words; i++) code_ << "    or.w [sp+" << (2 * i) << "],r0\n";
-    code_ << "    add.w " << (2 * words) << ",sp\n";
-    code_ << "    cmp.w 0,r0\n";
+    emit("mov.w", "[sp],r0");
+    for (int i = 1; i < words; i++) emit("or.w", cat("[sp+", (2 * i), "],r0"));
+    emit("add.w", cat((2 * words), ",sp"));
+    emit("cmp.w", "0,r0");
 }
 
 void M32cCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jeq " << Lfalse << "\n";
+    emit("jeq", Lfalse);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jeq " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    mov.w 1,r0\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mov.w 0,r0\n";
-    code_ << Ldone << ":\n";
+    emit("jeq", Lfalse);
+    emitLabel(Ltrue);
+    emit("mov.w", "1,r0");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
+    emit("mov.w", "0,r0");
+    emitLabel(Ldone);
 }
 
 void M32cCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     genExpr(lhs);
     testTruthy(lhs);
-    code_ << "    jne " << Ltrue << "\n";
+    emit("jne", Ltrue);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    jne " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    mov.w 0,r0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov.w 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit("jne", Ltrue);
+    emitLabel(Lfalse);
+    emit("mov.w", "0,r0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov.w", "1,r0");
+    emitLabel(Ldone);
 }
 
 void M32cCodegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    jeq " << Ltrue << "\n";
-    code_ << "    mov.w 0,r0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov.w 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit("jeq", Ltrue);
+    emit("mov.w", "0,r0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov.w", "1,r0");
+    emitLabel(Ldone);
 }
 
 void M32cCodegen::loadOperand(const std::string &mem, Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    movb " << mem << ",r0\n";
-        if (type.isUnsigned) code_ << "    and.w 0x00FF,r0\n";
+        emit("movb", cat(mem, ",r0"));
+        if (type.isUnsigned) emit("and.w", "0x00FF,r0");
     } else {
-        code_ << "    mov.w " << mem << ",r0\n";
+        emit("mov.w", cat(mem, ",r0"));
     }
 }
 
 void M32cCodegen::storeOperand(const std::string &mem, Type type) {
     if (widthOfType(type) == 1) {
-        code_ << "    movb r0," << mem << "\n";
+        emit("movb", cat("r0,", mem));
     } else {
-        code_ << "    mov.w r0," << mem << "\n";
+        emit("mov.w", cat("r0,", mem));
     }
 }
 
 void M32cCodegen::narrowR0To(Type to) {
     if (widthOfType(to) != 1) return;
     if (to.isUnsigned) {
-        code_ << "    and.w 0x00FF,r0\n";
+        emit("and.w", "0x00FF,r0");
         return;
     }
-    code_ << "    movb r0,r0\n";
+    emit("movb", "r0,r0");
 }
 
 void M32cCodegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
     if (op == "+") {
-        code_ << "    add.w r1,r0\n";
+        emit("add.w", "r1,r0");
         return;
     }
     if (op == "-") {
-        code_ << "    sub.w r1,r0\n";
+        emit("sub.w", "r1,r0");
         return;
     }
     if (op == "*") {
-        code_ << "    mul.w r1,r0\n";
+        emit("mul.w", "r1,r0");
         return;
     }
     if (op == "/" || op == "%") {
@@ -772,25 +799,25 @@ void M32cCodegen::genCompoundOp(const std::string &op, Type type) {
     }
     if (op == "&" || op == "|" || op == "^") {
         const char *insn = (op == "&") ? "and.w" : (op == "|") ? "or.w" : "xor.w";
-        code_ << "    " << insn << " r1,r0\n";
+        emit(insn, "r1,r0");
         return;
     }
-    if (op != "<<") code_ << "    neg.w r1\n";
-    code_ << "    " << ((op == "<<" || isUnsigned) ? "shl.w" : "sha.w") << " r1,r0\n";
+    if (op != "<<") emit("neg.w", "r1");
+    emit(((op == "<<" || isUnsigned) ? "shl.w" : "sha.w"), "r1,r0");
 }
 
 void M32cCodegen::genCompoundThroughA0(const ir::Expr &e) {
-    code_ << "    push.w a0\n";
+    emit("push.w", "a0");
     genExpr(*e.rhs);
-    code_ << "    mov.w r0,r1\n";
-    code_ << "    pop.w a0\n";
-    code_ << "    " << (widthOfType(e.type) == 1 ? "ldb" : "ld") << " a0,r0\n";
-    if (widthOfType(e.type) == 1 && e.type.isUnsigned) code_ << "    and.w 0x00FF,r0\n";
-    if (e.yieldOld) code_ << "    push.w r0\n";
+    emit("mov.w", "r0,r1");
+    emit("pop.w", "a0");
+    emit((widthOfType(e.type) == 1 ? "ldb" : "ld"), "a0,r0");
+    if (widthOfType(e.type) == 1 && e.type.isUnsigned) emit("and.w", "0x00FF,r0");
+    if (e.yieldOld) emit("push.w", "r0");
     genCompoundOp(e.op, e.type);
     narrowR0To(e.type);
-    code_ << "    " << (widthOfType(e.type) == 1 ? "stb" : "st") << " r0,a0\n";
-    if (e.yieldOld) code_ << "    pop.w r0\n";
+    emit((widthOfType(e.type) == 1 ? "stb" : "st"), "r0,a0");
+    if (e.yieldOld) emit("pop.w", "r0");
 }
 
 std::string M32cCodegen::wideWordOperand(const ir::Slot *slot, int wordIndex) const {
@@ -806,39 +833,39 @@ std::string M32cCodegen::wideWordOperand(const ir::Slot *slot, int wordIndex) co
 
 void M32cCodegen::genWideLoad(const ir::Slot *slot, int words) {
     if (words == 2) {
-        code_ << "    movl " << operandOf(slot) << ",r2r0\n";
-        code_ << "    pushl r2r0\n";
+        emit("movl", cat(operandOf(slot), ",r2r0"));
+        emit("pushl", "r2r0");
         return;
     }
     for (int i = words - 1; i >= 0; i--) {
-        code_ << "    mov.w " << wideWordOperand(slot, i) << ",r0\n";
-        code_ << "    push.w r0\n";
+        emit("mov.w", cat(wideWordOperand(slot, i), ",r0"));
+        emit("push.w", "r0");
     }
 }
 
 void M32cCodegen::genWideLoadLiteral(long value, int words) {
     if (words == 2) {
-        code_ << "    movl " << static_cast<uint32_t>(value) << ",r2r0\n";
-        code_ << "    pushl r2r0\n";
+        emit("movl", cat(static_cast<uint32_t>(value), ",r2r0"));
+        emit("pushl", "r2r0");
         return;
     }
     auto uv = static_cast<unsigned long>(value);
     for (int i = words - 1; i >= 0; i--) {
         int shiftedWord = static_cast<int>((uv >> (16 * i)) & 0xFFFF);
-        code_ << "    mov.w " << shiftedWord << ",r0\n";
-        code_ << "    push.w r0\n";
+        emit("mov.w", cat(shiftedWord, ",r0"));
+        emit("push.w", "r0");
     }
 }
 
 void M32cCodegen::genWideStore(const ir::Slot *slot, int words) {
     if (words == 2) {
-        code_ << "    popl r2r0\n";
-        code_ << "    movl r2r0," << operandOf(slot) << "\n";
+        emit("popl", "r2r0");
+        emit("movl", cat("r2r0,", operandOf(slot)));
         return;
     }
     for (int i = 0; i < words; i++) {
-        code_ << "    pop.w r0\n";
-        code_ << "    mov.w r0," << wideWordOperand(slot, i) << "\n";
+        emit("pop.w", "r0");
+        emit("mov.w", cat("r0,", wideWordOperand(slot, i)));
     }
 }
 
@@ -853,21 +880,21 @@ void M32cCodegen::genWideAdd(const ir::Expr *lhs, const ir::Expr &rhs, bool isAd
     std::string op = opOverride.empty() ? (isAdd ? "+" : "-") : opOverride;
     if (words == 2) {
         genExpr(rhs);
-        code_ << "    popl r3r1\n";  // r3r1 = rhs
-        code_ << "    popl r2r0\n";  // r2r0 = lhs
+        emit("popl", "r3r1");  // r3r1 = rhs
+        emit("popl", "r2r0");  // r2r0 = lhs
         if (op == "+") {
-            code_ << "    addl r3r1,r2r0\n";
+            emit("addl", "r3r1,r2r0");
         } else if (op == "-") {
-            code_ << "    subl r3r1,r2r0\n";
+            emit("subl", "r3r1,r2r0");
         } else if (op == "*") {
-            code_ << "    mull r3r1,r2r0\n";  // truncated low 32 bits - same result whether signed or unsigned
+            emit("mull", "r3r1,r2r0");  // truncated low 32 bits - same result whether signed or unsigned
         } else if (op == "/" || op == "%") {
             genDivModCoreLong(op == "%", isUnsignedOverride);
         } else {  // "&"/"|"/"^"
             const char *insn = op == "&" ? "andl" : op == "|" ? "orl" : "xorl";
-            code_ << "    " << insn << " r3r1,r2r0\n";
+            emit(insn, "r3r1,r2r0");
         }
-        code_ << "    pushl r2r0\n";
+        emit("pushl", "r2r0");
         return;
     }
     // `long long` (words != 2): no 32-bit-pair fast path exists above this
@@ -887,21 +914,21 @@ void M32cCodegen::genWideAdd(const ir::Expr *lhs, const ir::Expr &rhs, bool isAd
         } else {
             mnemonic = op == "&" ? "and.w" : op == "|" ? "or.w" : "xor.w";
         }
-        code_ << "    " << mnemonic << " " << rhsOperand << "," << lhsOperand << "\n";
+        emit(mnemonic, cat(rhsOperand, ",", lhsOperand));
     }
-    code_ << "    add.w " << (2 * words) << ",sp\n";
+    emit("add.w", cat((2 * words), ",sp"));
 }
 
 void M32cCodegen::genWideNegate(int words) {
     if (words == 2) {
-        code_ << "    popl r2r0\n";
-        code_ << "    negl r2r0\n";
-        code_ << "    pushl r2r0\n";
+        emit("popl", "r2r0");
+        emit("negl", "r2r0");
+        emit("pushl", "r2r0");
         return;
     }
-    for (int i = 0; i < words; i++) code_ << "    not.w [sp+" << (2 * i) << "]\n";
-    code_ << "    add.w 1,[sp+0]\n";
-    for (int i = 1; i < words; i++) code_ << "    adc.w 0,[sp+" << (2 * i) << "]\n";
+    for (int i = 0; i < words; i++) emit("not.w", cat("[sp+", (2 * i), "]"));
+    emit("add.w", "1,[sp+0]");
+    for (int i = 1; i < words; i++) emit("adc.w", cat("0,[sp+", (2 * i), "]"));
 }
 
 void M32cCodegen::genWideBitwise(const ir::Expr *lhs, const ir::Expr &rhs, const std::string &op, int words) {
@@ -914,26 +941,28 @@ void M32cCodegen::genWideCompare(const std::string &op, const ir::Expr &lhs, con
     genExpr(rhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (words == 2) {
-        code_ << "    popl r3r1\n";  // rhs
-        code_ << "    popl r2r0\n";  // lhs
-        code_ << "    cmpl r3r1,r2r0\n";
+        emit("popl", "r3r1");  // rhs
+        emit("popl", "r2r0");  // lhs
+        emit("cmpl", "r3r1,r2r0");
         std::string signedJ = op == "<" ? "jlt" : op == "<=" ? "jle" : op == ">" ? "jgt" : "jge";
         std::string unsignedJ = op == "<" ? "jltu" : op == "<=" ? "jleu" : op == ">" ? "jgtu" : "jgeu";
         std::string jump = op == "==" ? "jeq" : op == "!=" ? "jne" : (isUnsigned ? unsignedJ : signedJ);
-        code_ << "    " << jump << " " << Ltrue << "\n";
-        code_ << "    mov.w 0,r0\n    jmp " << Ldone << "\n";
-        code_ << Ltrue << ":\n    mov.w 1,r0\n";
-        code_ << Ldone << ":\n";
+        emit(jump, Ltrue);
+        emit("mov.w", "0,r0");
+        emit("jmp", Ldone);
+        emitLabel(Ltrue);
+        emit("mov.w", "1,r0");
+        emitLabel(Ldone);
         return;
     }
     if (op == "==" || op == "!=") {
         for (int i = words - 1; i >= 0; i--) {
             std::string lhsOperand = "[sp+" + std::to_string(2 * words + 2 * i) + "]";
             std::string rhsOperand = "[sp+" + std::to_string(2 * i) + "]";
-            code_ << "    cmp.w " << rhsOperand << "," << lhsOperand << "\n";
-            code_ << "    jne " << (op == "==" ? Lfalse : Ltrue) << "\n";
+            emit("cmp.w", cat(rhsOperand, ",", lhsOperand));
+            emit("jne", (op == "==" ? Lfalse : Ltrue));
         }
-        code_ << "    jmp " << (op == "==" ? Ltrue : Lfalse) << "\n";
+        emit("jmp", (op == "==" ? Ltrue : Lfalse));
     } else {
         std::string signedJ = op == "<" ? "jlt" : op == "<=" ? "jle" : op == ">" ? "jgt" : "jge";
         std::string unsignedJ = op == "<" ? "jltu" : op == "<=" ? "jleu" : op == ">" ? "jgtu" : "jgeu";
@@ -941,19 +970,22 @@ void M32cCodegen::genWideCompare(const std::string &op, const ir::Expr &lhs, con
             std::string lhsOperand = "[sp+" + std::to_string(2 * words + 2 * i) + "]";
             std::string rhsOperand = "[sp+" + std::to_string(2 * i) + "]";
             std::string Lcontinue = newLabel();
-            code_ << "    cmp.w " << rhsOperand << "," << lhsOperand << "\n";
-            code_ << "    jeq " << Lcontinue << "\n";
+            emit("cmp.w", cat(rhsOperand, ",", lhsOperand));
+            emit("jeq", Lcontinue);
             bool useSigned = (i == words - 1) && !isUnsigned;
-            code_ << "    " << (useSigned ? signedJ : unsignedJ) << " " << Ltrue << "\n";
-            code_ << "    jmp " << Lfalse << "\n";
-            code_ << Lcontinue << ":\n";
+            emit((useSigned ? signedJ : unsignedJ), Ltrue);
+            emit("jmp", Lfalse);
+            emitLabel(Lcontinue);
         }
-        code_ << "    jmp " << Lfalse << "\n";
+        emit("jmp", Lfalse);
     }
-    code_ << Lfalse << ":\n    mov.w 0,r0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov.w 1,r0\n";
-    code_ << Ldone << ":\n";
-    code_ << "    add.w " << (4 * words) << ",sp\n";
+    emitLabel(Lfalse);
+    emit("mov.w", "0,r0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov.w", "1,r0");
+    emitLabel(Ldone);
+    emit("add.w", cat((4 * words), ",sp"));
 }
 
 void M32cCodegen::genWideShift(const ir::Expr *lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned, int words,
@@ -961,39 +993,43 @@ void M32cCodegen::genWideShift(const ir::Expr *lhs, const ir::Expr &rhs, bool is
     if (!lhsAlreadyPushed) genExpr(*lhs);
     if (words == 2) {
         genExpr(rhs);                  // r0 = shift count
-        code_ << "    mov.w r0,r1\n";  // stash count in r1 (free: r3r1's "pair" meaning isn't live yet)
-        code_ << "    popl r2r0\n";    // r2r0 = value to shift
-        if (!isLeft) code_ << "    neg.w r1\n";
-        code_ << "    " << ((isLeft || isUnsigned) ? "shll" : "shal") << " r1,r2r0\n";
-        code_ << "    pushl r2r0\n";
+        emit("mov.w", "r0,r1");  // stash count in r1 (free: r3r1's "pair" meaning isn't live yet)
+        emit("popl", "r2r0");    // r2r0 = value to shift
+        if (!isLeft) emit("neg.w", "r1");
+        emit(((isLeft || isUnsigned) ? "shll" : "shal"), "r1,r2r0");
+        emit("pushl", "r2r0");
         return;
     }
-    code_ << "    push.w r1\n";
+    emit("push.w", "r1");
     genExpr(rhs);
-    code_ << "    mov.w r0,[sp]\n";
+    emit("mov.w", "r0,[sp]");
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    cmp.w 0,[sp]\n    jeq " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("cmp.w", "0,[sp]");
+    emit("jeq", Ldone);
     if (isLeft) {
-        code_ << "    clc\n";
-        for (int i = 0; i < words; i++) code_ << "    rol.w [sp+" << (2 + 2 * i) << "]\n";
+        emit("clc");
+        for (int i = 0; i < words; i++) emit("rol.w", cat("[sp+", (2 + 2 * i), "]"));
     } else {
         if (isUnsigned) {
-            code_ << "    clc\n";
+            emit("clc");
         } else {
             std::string topWord = "[sp+" + std::to_string(2 + 2 * (words - 1)) + "]";
             std::string Lneg = newLabel(), Lcdone = newLabel();
-            code_ << "    cmp.w 0," << topWord << "\n    jlt " << Lneg << "\n";
-            code_ << "    clc\n    jmp " << Lcdone << "\n";
-            code_ << Lneg << ":\n    stc\n";
-            code_ << Lcdone << ":\n";
+            emit("cmp.w", cat("0,", topWord));
+            emit("jlt", Lneg);
+            emit("clc");
+            emit("jmp", Lcdone);
+            emitLabel(Lneg);
+            emit("stc");
+            emitLabel(Lcdone);
         }
-        for (int i = words - 1; i >= 0; i--) code_ << "    ror.w [sp+" << (2 + 2 * i) << "]\n";
+        for (int i = words - 1; i >= 0; i--) emit("ror.w", cat("[sp+", (2 + 2 * i), "]"));
     }
-    code_ << "    sub.w 1,[sp]\n";
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    code_ << "    pop.w r1\n";
+    emit("sub.w", "1,[sp]");
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
+    emit("pop.w", "r1");
 }
 
 // Unlike M16cCodegen.cpp's own genWideMul() (which has no 32-bit hardware
@@ -1039,9 +1075,9 @@ void M32cCodegen::genConvert(const ir::Expr &e) {
         genExpr(*e.lhs);
         if (widthOfType(to) == 1) {
             if (to.isUnsigned) {
-                code_ << "    and.w 0x00FF,r0\n";
+                emit("and.w", "0x00FF,r0");
             } else {
-                code_ << "    movb r0,r0\n";
+                emit("movb", "r0,r0");
             }
         }
         return;
@@ -1049,22 +1085,23 @@ void M32cCodegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
-        code_ << "    mov.w [sp],r0\n";
-        code_ << "    add.w " << (2 * words) << ",sp\n";
+        emit("mov.w", "[sp],r0");
+        emit("add.w", cat((2 * words), ",sp"));
         if (widthOfType(to) == 1) {
-            code_ << "    " << (to.isUnsigned ? "and.w 0x00FF,r0\n" : "movb r0,r0\n");
+            emit((to.isUnsigned ? "and.w 0x00FF,r0\n" : "movb r0,r0\n"));
         }
         return;
     }
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);
-        code_ << "    push.w r0\n";
+        emit("push.w", "r0");
         if (from.isUnsigned) {
-            for (int i = 1; i < toWords; i++) code_ << "    mov.w 0,r0\n    push.w r0\n";
+            for (int i = 1; i < toWords; i++) emit("mov.w", "0,r0");
+emit("push.w", "r0");
         } else {
             genSignFillWord();
-            for (int i = 1; i < toWords; i++) code_ << "    push.w r1\n";
+            for (int i = 1; i < toWords; i++) emit("push.w", "r1");
         }
         return;
     }
@@ -1072,24 +1109,27 @@ void M32cCodegen::genConvert(const ir::Expr &e) {
     int toWords = wordCountOf(to);
     genExpr(*e.lhs);
     if (toWords > fromWords) {
-        code_ << "    mov.w [sp+" << (2 * (fromWords - 1)) << "],r0\n";
+        emit("mov.w", cat("[sp+", (2 * (fromWords - 1)), "],r0"));
         if (from.isUnsigned) {
-            code_ << "    mov.w 0,r1\n";
+            emit("mov.w", "0,r1");
         } else {
             genSignFillWord();
         }
-        for (int i = 0; i < toWords - fromWords; i++) code_ << "    push.w r1\n";
+        for (int i = 0; i < toWords - fromWords; i++) emit("push.w", "r1");
     } else if (toWords < fromWords) {
-        code_ << "    add.w " << (2 * (fromWords - toWords)) << ",sp\n";
+        emit("add.w", cat((2 * (fromWords - toWords)), ",sp"));
     }
 }
 
 void M32cCodegen::genSignFillWord() {
     std::string Lneg = newLabel(), Ldone = newLabel();
-    code_ << "    cmp.w 0,r0\n    jlt " << Lneg << "\n";
-    code_ << "    mov.w 0,r1\n    jmp " << Ldone << "\n";
-    code_ << Lneg << ":\n    mov.w 0xFFFF,r1\n";
-    code_ << Ldone << ":\n";
+    emit("cmp.w", "0,r0");
+    emit("jlt", Lneg);
+    emit("mov.w", "0,r1");
+    emit("jmp", Ldone);
+    emitLabel(Lneg);
+    emit("mov.w", "0xFFFF,r1");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> M32cCodegen::assembleInProcess(const std::string &asmText,

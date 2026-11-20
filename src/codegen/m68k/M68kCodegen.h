@@ -34,7 +34,7 @@ namespace rcc {
 // signed comparisons correctly in hardware.
 //
 // Every Bcc/BRA uses the 16-bit-displacement form (+-32KB), ample for this project.
-class M68kCodegen : public Backend {
+class M68kCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "68000"; }
@@ -183,7 +183,6 @@ class M68kCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dl v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

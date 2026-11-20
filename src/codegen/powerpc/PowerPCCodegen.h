@@ -53,7 +53,7 @@ namespace rcc {
 // instruction (see genCompare()).
 //
 // PowerPC branches/calls have no branch-delay slot.
-class PowerPCCodegen : public Backend {
+class PowerPCCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "powerpc"; }
@@ -182,7 +182,6 @@ class PowerPCCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

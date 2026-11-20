@@ -54,7 +54,7 @@ namespace rcc {
 // reaches a backward target exactly as well as a forward one - see CP1610Assembler.h's own
 // header comment on why this backend never needs the real CP1610's alternate "reverse-direction"
 // branch opcodes).
-class CP1610Codegen : public Backend {
+class CP1610Codegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "cp1610"; }
@@ -169,7 +169,8 @@ class CP1610Codegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim()/cat() and
+    // `code_` itself come from TextCodegenBase (see Codegen.h).
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
 

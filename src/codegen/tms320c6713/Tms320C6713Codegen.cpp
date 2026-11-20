@@ -71,28 +71,28 @@ void Tms320C6713Codegen::declareArray(const std::string &lbl, const std::vector<
 void Tms320C6713Codegen::loadImm32(const std::string &reg, int32_t v) {
     int32_t lo16 = static_cast<int32_t>(static_cast<int16_t>(v & 0xFFFF));
     if (v == lo16) {
-        code_ << "    MVK " << reg << "," << lo16 << "\n";
+        emit("MVK", cat(reg, ",", lo16));
         return;
     }
-    code_ << "    MVK " << reg << "," << lo16 << "\n";
+    emit("MVK", cat(reg, ",", lo16));
     uint32_t hi16 = (static_cast<uint32_t>(v) >> 16) & 0xFFFFu;
-    code_ << "    MVKH " << reg << "," << hi16 << "\n";
+    emit("MVKH", cat(reg, ",", hi16));
 }
 
 void Tms320C6713Codegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    MVK " << reg << "," << lbl << "\n";
-    code_ << "    MVKH " << reg << "," << lbl << "\n";
+    emit("MVK", reg + "," + lbl);
+    emit("MVKH", reg + "," + lbl);
 }
 
 void Tms320C6713Codegen::adjustReg(const std::string &reg, int32_t delta) {
     if (delta == 0) return;
     loadImm32(T10, delta);
-    code_ << "    ADD " << reg << "," << reg << "," << T10 << "\n";
+    emit("ADD", reg + "," + reg + "," + T10);
 }
 
 void Tms320C6713Codegen::computeAddr(const std::string &dst, const std::string &baseReg, int32_t byteOffset) {
     loadImm32(dst, byteOffset);
-    code_ << "    ADD " << dst << "," << dst << "," << baseReg << "\n";
+    emit("ADD", dst + "," + dst + "," + baseReg);
 }
 
 void Tms320C6713Codegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
@@ -139,33 +139,33 @@ void Tms320C6713Codegen::genPopWide(const std::string &lo, const std::string &hi
 }
 
 void Tms320C6713Codegen::emitLoad(const std::string &mnemonic, const std::string &base, const std::string &reg) {
-    code_ << "    " << mnemonic << " " << base << "," << reg << "\n";
-    for (int i = 0; i < 4; i++) code_ << "    NOP\n";
+    emit(mnemonic, base + "," + reg);
+    for (int i = 0; i < 4; i++) emit("NOP");
 }
 
 void Tms320C6713Codegen::emitStore(const std::string &mnemonic, const std::string &base, const std::string &reg) {
-    code_ << "    " << mnemonic << " " << base << "," << reg << "\n";
+    emit(mnemonic, base + "," + reg);
 }
 
 void Tms320C6713Codegen::emitMul(const std::string &mnemonic, const std::string &dst, const std::string &src1,
                                   const std::string &src2) {
-    code_ << "    " << mnemonic << " " << dst << "," << src1 << "," << src2 << "\n";
-    code_ << "    NOP\n";
+    emit(mnemonic, dst + "," + src1 + "," + src2);
+    emit("NOP");
 }
 
 void Tms320C6713Codegen::emitBranch(const std::string &label) {
-    code_ << "    B " << label << "\n";
-    for (int i = 0; i < 5; i++) code_ << "    NOP\n";
+    emit("B", label);
+    for (int i = 0; i < 5; i++) emit("NOP");
 }
 
 void Tms320C6713Codegen::emitBranchZ(bool branchIfZero, const std::string &label) {
-    code_ << "    " << (branchIfZero ? "BZ " : "BNZ ") << label << "\n";
-    for (int i = 0; i < 5; i++) code_ << "    NOP\n";
+    emit(branchIfZero ? "BZ" : "BNZ", label);
+    for (int i = 0; i < 5; i++) emit("NOP");
 }
 
 void Tms320C6713Codegen::emitBranchReg(const std::string &reg) {
-    code_ << "    BR (" << reg << ")\n";
-    for (int i = 0; i < 5; i++) code_ << "    NOP\n";
+    emit("BR", "(" + reg + ")");
+    for (int i = 0; i < 5; i++) emit("NOP");
 }
 
 // --- program/function structure --------------------------------------------
@@ -175,18 +175,19 @@ std::string Tms320C6713Codegen::generate(const ir::Program &prog, bool objectMod
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw("org " + std::to_string(objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         // Establishes the permanent zero register (see this backend's own header comment);
         // never written again anywhere else in generated code.
-        code_ << "    MVK " << ZERO << ",0\n";
+        emit("MVK", std::string(ZERO) + ",0");
         loadImm32(SP, static_cast<int32_t>(kInitialSP));
         loadAddress(RA, "halt");
         emitBranch(label(mainFn));
-        code_ << "halt:\n";
+        emitLabel("halt");
         emitBranch("halt");
-        code_ << "\n";
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -243,27 +244,27 @@ std::map<std::string, std::string> Tms320C6713Codegen::perFileAsm() const { retu
 // genFunction() comment describes: the caller's fp/ra must land in the NEW frame (computed off
 // the already-adjusted sp) before fp itself is repointed there.
 void Tms320C6713Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
+    emitLabel(label(fn.func));
     adjustReg(SP, -8);
-    emitStore("STW", SP, FP);        // caller's fp at new sp+0
+    emitStore("STW", SP, FP);  // caller's fp at new sp+0
     computeAddr(T2, SP, 4);
-    emitStore("STW", T2, RA);         // this call's own return address at new sp+4
-    code_ << "    ADD " << FP << "," << SP << "," << ZERO << "\n";  // fp = sp
+    emitStore("STW", T2, RA);  // this call's own return address at new sp+4
+    emit("ADD", std::string(FP) + "," + SP + "," + ZERO);  // fp = sp
     if (fn.func->frameSize > 0) adjustReg(SP, -fn.func->frameSize);
 
     genStmt(*fn.body);
 
     genEpilogue();
-    code_ << "\n";
+    emitRaw("");
 }
 
 void Tms320C6713Codegen::genEpilogue() {
-    code_ << "    ADD " << SP << "," << FP << "," << ZERO << "\n";  // sp = fp (drop locals)
-    emitLoad("LDW", SP, T9);                                        // T9 = saved caller's fp
+    emit("ADD", std::string(SP) + "," + FP + "," + ZERO);  // sp = fp (drop locals)
+    emitLoad("LDW", SP, T9);                                // T9 = saved caller's fp
     computeAddr(T2, SP, 4);
-    emitLoad("LDW", T2, RA);                                        // ra = this call's own saved ra
+    emitLoad("LDW", T2, RA);                                // ra = this call's own saved ra
     adjustReg(SP, 8);
-    code_ << "    ADD " << FP << "," << T9 << "," << ZERO << "\n";  // fp = caller's fp
+    emit("ADD", std::string(FP) + "," + T9 + "," + ZERO);  // fp = caller's fp
     emitBranchReg(RA);
 }
 
@@ -275,36 +276,36 @@ void Tms320C6713Codegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+            if (isWide(s.cond->type)) emit("OR", std::string(AC) + "," + AC + "," + T1);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             emitBranchZ(true, s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
                 emitBranch(Ldone);
-                code_ << Lelse << ":\n";
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+            if (isWide(s.cond->type)) emit("OR", std::string(AC) + "," + AC + "," + T1);
             emitBranchZ(true, Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
             emitBranch(Lstart);
-            code_ << Lend << ":\n";
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
@@ -337,12 +338,11 @@ void Tms320C6713Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
@@ -402,21 +402,21 @@ void Tms320C6713Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // AC = pointer value
-            code_ << "    ADD " << T2 << "," << AC << "," << ZERO << "\n";
+            emit("ADD", cat(T2, ",", AC, ",", ZERO));
             genCompoundThroughT2(e);
             return;
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
-            if (isWide(e.lhs->type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+            if (isWide(e.lhs->type)) emit("OR", cat(AC, ",", AC, ",", T1));
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
             emitBranchZ(true, Lelse);
             genExpr(*e.rhs);
             emitBranch(Ldone);
-            code_ << Lelse << ":\n";
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
@@ -433,21 +433,21 @@ void Tms320C6713Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    SUB " << AC << "," << ZERO << "," << AC << "\n";
+                    emit("SUB", cat(AC, ",", ZERO, ",", AC));
                     narrowB0To(e.rhs->type);
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // AC = pointer value
-                code_ << "    ADD " << T2 << "," << AC << "," << ZERO << "\n";
+                emit("ADD", cat(T2, ",", AC, ",", ZERO));
                 loadOperand(T2, e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
                 loadImm32(T10, -1);
-                code_ << "    XOR " << AC << "," << AC << "," << T10 << "\n";
+                emit("XOR", cat(AC, ",", AC, ",", T10));
                 if (isWide(e.rhs->type)) {
-                    code_ << "    XOR " << T1 << "," << T1 << "," << T10 << "\n";
+                    emit("XOR", cat(T1, ",", T1, ",", T10));
                 } else {
                     narrowB0To(e.rhs->type);
                 }
@@ -475,17 +475,17 @@ void Tms320C6713Codegen::genExpr(const ir::Expr &e) {
             std::string retLbl = newLabel();
             loadAddress(RA, retLbl);
             emitBranch(label(e.func));
-            code_ << retLbl << ":\n";
+            emitLabel(retLbl);
             if (totalBytes > 0) adjustReg(SP, totalBytes);
             return;
         }
         case ir::ExprKind::CallPtr: {
             genExpr(*e.lhs);  // AC = the callee's own entry address
-            code_ << "    ADD " << T2 << "," << AC << "," << ZERO << "\n";
+            emit("ADD", cat(T2, ",", AC, ",", ZERO));
             std::string retLbl = newLabel();
             loadAddress(RA, retLbl);
             emitBranchReg(T2);
-            code_ << retLbl << ":\n";
+            emitLabel(retLbl);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -506,7 +506,7 @@ void Tms320C6713Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxE
     int shift = elemShift(slot->type);
     if (shift > 0) {
         loadImm32(T10, shift);
-        code_ << "    SHL " << AC << "," << AC << "," << T10 << "\n";
+        emit("SHL", cat(AC, ",", AC, ",", T10));
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): scale by a real multiply instead.
         loadImm32(T10, widthOfType(slot->type));
@@ -514,11 +514,11 @@ void Tms320C6713Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxE
     }
     if (slot->arraySize > 0) {
         loadSlotAddr(T2, slot);
-        code_ << "    ADD " << T2 << "," << T2 << "," << AC << "\n";
+        emit("ADD", cat(T2, ",", T2, ",", AC));
     } else {
         loadSlotAddr(T1, slot);
         emitLoad("LDW", T1, T1);  // T1 = the pointer variable's own stored value
-        code_ << "    ADD " << T2 << "," << T1 << "," << AC << "\n";
+        emit("ADD", cat(T2, ",", T1, ",", AC));
     }
 }
 
@@ -557,17 +557,17 @@ void Tms320C6713Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void Tms320C6713Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         loadSlotAddr(T2, operand.slot);
-        code_ << "    ADD " << AC << "," << T2 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T2, ",", ZERO));
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    ADD " << AC << "," << T2 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T2, ",", ZERO));
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
         loadAddress(T2, label(operand.func));
-        code_ << "    ADD " << AC << "," << T2 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T2, ",", ZERO));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -619,8 +619,8 @@ void Tms320C6713Codegen::narrowB0To(Type to) {
     if (w >= 4) return;
     int shiftAmt = 32 - 8 * w;
     loadImm32(T10, shiftAmt);
-    code_ << "    SHL " << AC << "," << AC << "," << T10 << "\n";
-    code_ << "    " << (to.isUnsigned ? "SHRU" : "SHR") << " " << AC << "," << AC << "," << T10 << "\n";
+    emit("SHL", cat(AC, ",", AC, ",", T10));
+    emit((to.isUnsigned ? "SHRU" : "SHR"), cat(AC, ",", AC, ",", T10));
 }
 
 void Tms320C6713Codegen::genConvert(const ir::Expr &e) {
@@ -636,7 +636,7 @@ void Tms320C6713Codegen::genConvert(const ir::Expr &e) {
             loadImm32(T1, 0);
         } else {
             loadImm32(T10, 31);
-            code_ << "    SHR " << T1 << "," << AC << "," << T10 << "\n";  // sign-fill T1
+            emit("SHR", cat(T1, ",", AC, ",", T10));  // sign-fill T1
         }
     } else if (!fromWide && !toWide) {
         narrowB0To(to);
@@ -660,45 +660,45 @@ void Tms320C6713Codegen::genConvert(const ir::Expr &e) {
 // branch-free mask (0 or 0xFFFFFFFF from each operand's own low-halfword sign bit) rather than
 // trust the sequence to be exact as a bare sum.
 void Tms320C6713Codegen::genMulLow32(const std::string &dst, const std::string &src1, const std::string &src2) {
-    code_ << "    ADD " << T6 << "," << src1 << "," << ZERO << "\n";  // T6 = A (safe copy)
-    code_ << "    ADD " << T7 << "," << src2 << "," << ZERO << "\n";   // T7 = B (safe copy)
+    emit("ADD", cat(T6, ",", src1, ",", ZERO));  // T6 = A (safe copy)
+    emit("ADD", cat(T7, ",", src2, ",", ZERO));  // T7 = B (safe copy)
 
     emitMul("MPY", T3, T6, T7);     // T3 = lo*lo partial product
     emitMul("MPYHL", T4, T6, T7);    // T4 = A_hi * B_lo
     emitMul("MPYLH", T5, T6, T7);     // T5 = A_lo * B_hi
-    code_ << "    ADD " << T4 << "," << T4 << "," << T5 << "\n";
+    emit("ADD", cat(T4, ",", T4, ",", T5));
     loadImm32(T8, 16);
-    code_ << "    SHL " << T4 << "," << T4 << "," << T8 << "\n";
-    code_ << "    ADD " << T3 << "," << T3 << "," << T4 << "\n";
+    emit("SHL", cat(T4, ",", T4, ",", T8));
+    emit("ADD", cat(T3, ",", T3, ",", T4));
 
     // If A's low halfword's own sign bit is set, add B's raw low halfword (unshifted sign
     // error) back in, shifted into position.
     loadImm32(T8, 0x8000);
-    code_ << "    AND " << T9 << "," << T6 << "," << T8 << "\n";
+    emit("AND", cat(T9, ",", T6, ",", T8));
     loadImm32(T8, 15);
-    code_ << "    SHRU " << T9 << "," << T9 << "," << T8 << "\n";  // clean 0/1
-    code_ << "    SUB " << T9 << "," << ZERO << "," << T9 << "\n";  // mask: 0 or all-ones
+    emit("SHRU", cat(T9, ",", T9, ",", T8));  // clean 0/1
+    emit("SUB", cat(T9, ",", ZERO, ",", T9));  // mask: 0 or all-ones
     loadImm32(T8, 0xFFFF);
-    code_ << "    AND " << T10 << "," << T7 << "," << T8 << "\n";
-    code_ << "    AND " << T10 << "," << T10 << "," << T9 << "\n";
+    emit("AND", cat(T10, ",", T7, ",", T8));
+    emit("AND", cat(T10, ",", T10, ",", T9));
     loadImm32(T8, 16);
-    code_ << "    SHL " << T10 << "," << T10 << "," << T8 << "\n";
-    code_ << "    ADD " << T3 << "," << T3 << "," << T10 << "\n";
+    emit("SHL", cat(T10, ",", T10, ",", T8));
+    emit("ADD", cat(T3, ",", T3, ",", T10));
 
     // Symmetric correction if B's low halfword's own sign bit is set.
     loadImm32(T8, 0x8000);
-    code_ << "    AND " << T9 << "," << T7 << "," << T8 << "\n";
+    emit("AND", cat(T9, ",", T7, ",", T8));
     loadImm32(T8, 15);
-    code_ << "    SHRU " << T9 << "," << T9 << "," << T8 << "\n";
-    code_ << "    SUB " << T9 << "," << ZERO << "," << T9 << "\n";
+    emit("SHRU", cat(T9, ",", T9, ",", T8));
+    emit("SUB", cat(T9, ",", ZERO, ",", T9));
     loadImm32(T8, 0xFFFF);
-    code_ << "    AND " << T10 << "," << T6 << "," << T8 << "\n";
-    code_ << "    AND " << T10 << "," << T10 << "," << T9 << "\n";
+    emit("AND", cat(T10, ",", T6, ",", T8));
+    emit("AND", cat(T10, ",", T10, ",", T9));
     loadImm32(T8, 16);
-    code_ << "    SHL " << T10 << "," << T10 << "," << T8 << "\n";
-    code_ << "    ADD " << T3 << "," << T3 << "," << T10 << "\n";
+    emit("SHL", cat(T10, ",", T10, ",", T8));
+    emit("ADD", cat(T3, ",", T3, ",", T10));
 
-    code_ << "    ADD " << dst << "," << T3 << "," << ZERO << "\n";
+    emit("ADD", cat(dst, ",", T3, ",", ZERO));
 }
 
 // Full unsigned 64-bit product of two 32-bit registers via a 32-iteration shift-and-add loop
@@ -707,52 +707,52 @@ void Tms320C6713Codegen::genMulLow32(const std::string &dst, const std::string &
 // may safely alias either of them.
 void Tms320C6713Codegen::genMulFull32(const std::string &aReg, const std::string &bReg, const std::string &outLo,
                                        const std::string &outHi) {
-    code_ << "    ADD " << T6 << "," << aReg << "," << ZERO << "\n";  // addend lo = a
+    emit("ADD", cat(T6, ",", aReg, ",", ZERO));  // addend lo = a
     loadImm32(T7, 0);                                                  // addend hi = 0
-    code_ << "    ADD " << T8 << "," << bReg << "," << ZERO << "\n";    // multiplier = b
+    emit("ADD", cat(T8, ",", bReg, ",", ZERO));  // multiplier = b
     loadImm32(T3, 0);                                                    // result lo = 0
     loadImm32(T4, 0);                                                     // result hi = 0
     loadImm32(T9, 32);                                                      // counter = 32
 
     std::string Lloop = newLabel(), Ldone = newLabel(), Lskip = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    CMPEQ " << AC << "," << T9 << "," << ZERO << "\n";
+    emitLabel(Lloop);
+    emit("CMPEQ", cat(AC, ",", T9, ",", ZERO));
     emitBranchZ(false, Ldone);  // counter == 0 -> done
     loadImm32(T10, -1);
-    code_ << "    ADD " << T9 << "," << T9 << "," << T10 << "\n";
+    emit("ADD", cat(T9, ",", T9, ",", T10));
 
     loadImm32(T10, 1);
-    code_ << "    AND " << AC << "," << T8 << "," << T10 << "\n";  // bit = multiplier & 1
+    emit("AND", cat(AC, ",", T8, ",", T10));  // bit = multiplier & 1
     emitBranchZ(true, Lskip);
     // result += addend (64-bit add with carry)
-    code_ << "    ADD " << T11 << "," << T3 << "," << T6 << "\n";       // sum = resultLo+addendLo
-    code_ << "    CMPLTU " << AC << "," << T11 << "," << T3 << "\n";     // carry
-    code_ << "    ADD " << T4 << "," << T4 << "," << T7 << "\n";
-    code_ << "    ADD " << T4 << "," << T4 << "," << AC << "\n";
-    code_ << "    ADD " << T3 << "," << T11 << "," << ZERO << "\n";
-    code_ << Lskip << ":\n";
+    emit("ADD", cat(T11, ",", T3, ",", T6));  // sum = resultLo+addendLo
+    emit("CMPLTU", cat(AC, ",", T11, ",", T3));  // carry
+    emit("ADD", cat(T4, ",", T4, ",", T7));
+    emit("ADD", cat(T4, ",", T4, ",", AC));
+    emit("ADD", cat(T3, ",", T11, ",", ZERO));
+    emitLabel(Lskip);
     // addend <<= 1 (64-bit)
     loadImm32(T10, 31);
-    code_ << "    SHRU " << AC << "," << T6 << "," << T10 << "\n";  // top bit of addend lo
+    emit("SHRU", cat(AC, ",", T6, ",", T10));  // top bit of addend lo
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << "    SHL " << T7 << "," << T7 << "," << T10 << "\n";
-    code_ << "    OR " << T7 << "," << T7 << "," << AC << "\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
+    emit("SHL", cat(T7, ",", T7, ",", T10));
+    emit("OR", cat(T7, ",", T7, ",", AC));
     // multiplier >>>= 1
     loadImm32(T10, 1);
-    code_ << "    SHRU " << T8 << "," << T8 << "," << T10 << "\n";
+    emit("SHRU", cat(T8, ",", T8, ",", T10));
     emitBranch(Lloop);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 
-    code_ << "    ADD " << outLo << "," << T3 << "," << ZERO << "\n";
-    code_ << "    ADD " << outHi << "," << T4 << "," << ZERO << "\n";
+    emit("ADD", cat(outLo, ",", T3, ",", ZERO));
+    emit("ADD", cat(outHi, ",", T4, ",", ZERO));
 }
 
 void Tms320C6713Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     genPush(AC);
     genExpr(rhs);
-    code_ << "    ADD " << T1 << "," << AC << "," << ZERO << "\n";  // T1 = rhs
+    emit("ADD", cat(T1, ",", AC, ",", ZERO));  // T1 = rhs
     genPop(AC);                                                      // AC = lhs
     genMulLow32(AC, AC, T1);
 }
@@ -772,12 +772,12 @@ void Tms320C6713Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     loadStack(AC, 12);
     loadStack(T1, 0);
     genMulLow32(T2, AC, T1);  // T2 = crossB = lhsHi*rhsLo (low32)
-    code_ << "    ADD " << T5 << "," << T5 << "," << T2 << "\n";  // T5 = crossSum
+    emit("ADD", cat(T5, ",", T5, ",", T2));  // T5 = crossSum
 
     loadStack(AC, 8);
     loadStack(T1, 0);
     genMulFull32(AC, T1, AC, T1);  // AC:T1 = full lhsLo*rhsLo (lo:hi)
-    code_ << "    ADD " << T1 << "," << T1 << "," << T5 << "\n";
+    emit("ADD", cat(T1, ",", T1, ",", T5));
 
     adjustReg(SP, 16);
 }
@@ -788,21 +788,21 @@ void Tms320C6713Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bo
     genExpr(lhs);
     genPushWide(AC, T1);
     genExpr(rhs);  // AC:T1 = rhs
-    code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";
-    code_ << "    ADD " << T4 << "," << T1 << "," << ZERO << "\n";
+    emit("ADD", cat(T3, ",", AC, ",", ZERO));
+    emit("ADD", cat(T4, ",", T1, ",", ZERO));
     genPopWide(AC, T1);  // AC:T1 = lhs
     if (isAdd) {
-        code_ << "    ADD " << T5 << "," << AC << "," << T3 << "\n";
-        code_ << "    CMPLTU " << T6 << "," << T5 << "," << AC << "\n";
-        code_ << "    ADD " << T1 << "," << T1 << "," << T4 << "\n";
-        code_ << "    ADD " << T1 << "," << T1 << "," << T6 << "\n";
-        code_ << "    ADD " << AC << "," << T5 << "," << ZERO << "\n";
+        emit("ADD", cat(T5, ",", AC, ",", T3));
+        emit("CMPLTU", cat(T6, ",", T5, ",", AC));
+        emit("ADD", cat(T1, ",", T1, ",", T4));
+        emit("ADD", cat(T1, ",", T1, ",", T6));
+        emit("ADD", cat(AC, ",", T5, ",", ZERO));
     } else {
-        code_ << "    CMPLTU " << T6 << "," << AC << "," << T3 << "\n";
-        code_ << "    SUB " << T5 << "," << AC << "," << T3 << "\n";
-        code_ << "    SUB " << T1 << "," << T1 << "," << T4 << "\n";
-        code_ << "    SUB " << T1 << "," << T1 << "," << T6 << "\n";
-        code_ << "    ADD " << AC << "," << T5 << "," << ZERO << "\n";
+        emit("CMPLTU", cat(T6, ",", AC, ",", T3));
+        emit("SUB", cat(T5, ",", AC, ",", T3));
+        emit("SUB", cat(T1, ",", T1, ",", T4));
+        emit("SUB", cat(T1, ",", T1, ",", T6));
+        emit("ADD", cat(AC, ",", T5, ",", ZERO));
     }
 }
 
@@ -814,47 +814,47 @@ void Tms320C6713Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, 
     genExpr(lhs);
     genPushWide(AC, T1);
     genExpr(rhs);  // AC = shift count
-    code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";
+    emit("ADD", cat(T3, ",", AC, ",", ZERO));
     genPopWide(T4, T5);  // T4:T5 = value (lo:hi)
 
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    CMPEQ " << AC << "," << T3 << "," << ZERO << "\n";
+    emitLabel(Lloop);
+    emit("CMPEQ", cat(AC, ",", T3, ",", ZERO));
     emitBranchZ(false, Ldone);
     loadImm32(T10, -1);
-    code_ << "    ADD " << T3 << "," << T3 << "," << T10 << "\n";
+    emit("ADD", cat(T3, ",", T3, ",", T10));
     if (isLeft) {
         loadImm32(T10, 31);
-        code_ << "    SHRU " << T6 << "," << T4 << "," << T10 << "\n";  // carry from lo's top bit
+        emit("SHRU", cat(T6, ",", T4, ",", T10));  // carry from lo's top bit
         loadImm32(T10, 1);
-        code_ << "    SHL " << T4 << "," << T4 << "," << T10 << "\n";
-        code_ << "    SHL " << T5 << "," << T5 << "," << T10 << "\n";
-        code_ << "    OR " << T5 << "," << T5 << "," << T6 << "\n";
+        emit("SHL", cat(T4, ",", T4, ",", T10));
+        emit("SHL", cat(T5, ",", T5, ",", T10));
+        emit("OR", cat(T5, ",", T5, ",", T6));
     } else {
         loadImm32(T10, 1);
-        code_ << "    AND " << T6 << "," << T5 << "," << T10 << "\n";  // hi's bit0
+        emit("AND", cat(T6, ",", T5, ",", T10));  // hi's bit0
         loadImm32(T10, 31);
-        code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";  // move into lo's top-bit position
+        emit("SHL", cat(T6, ",", T6, ",", T10));  // move into lo's top-bit position
         loadImm32(T10, 1);
-        code_ << "    " << (isUnsigned ? "SHRU" : "SHR") << " " << T5 << "," << T5 << "," << T10 << "\n";
-        code_ << "    SHRU " << T4 << "," << T4 << "," << T10 << "\n";
-        code_ << "    OR " << T4 << "," << T4 << "," << T6 << "\n";
+        emit((isUnsigned ? "SHRU" : "SHR"), cat(T5, ",", T5, ",", T10));
+        emit("SHRU", cat(T4, ",", T4, ",", T10));
+        emit("OR", cat(T4, ",", T4, ",", T6));
     }
     emitBranch(Lloop);
-    code_ << Ldone << ":\n";
-    code_ << "    ADD " << AC << "," << T4 << "," << ZERO << "\n";
-    code_ << "    ADD " << T1 << "," << T5 << "," << ZERO << "\n";
+    emitLabel(Ldone);
+    emit("ADD", cat(AC, ",", T4, ",", ZERO));
+    emit("ADD", cat(T1, ",", T5, ",", ZERO));
 }
 
 // Negates AC:T1 (two's complement) in place.
 void Tms320C6713Codegen::genNegate64() {
     loadImm32(T10, -1);
-    code_ << "    XOR " << AC << "," << AC << "," << T10 << "\n";
-    code_ << "    XOR " << T1 << "," << T1 << "," << T10 << "\n";
+    emit("XOR", cat(AC, ",", AC, ",", T10));
+    emit("XOR", cat(T1, ",", T1, ",", T10));
     loadImm32(T10, 1);
-    code_ << "    ADD " << AC << "," << AC << "," << T10 << "\n";
-    code_ << "    CMPEQ " << T11 << "," << AC << "," << ZERO << "\n";  // AC wrapped to 0 -> carry
-    code_ << "    ADD " << T1 << "," << T1 << "," << T11 << "\n";
+    emit("ADD", cat(AC, ",", AC, ",", T10));
+    emit("CMPEQ", cat(T11, ",", AC, ",", ZERO));  // AC wrapped to 0 -> carry
+    emit("ADD", cat(T1, ",", T1, ",", T11));
 }
 
 // --- compare/logical ---------------------------------------------------------
@@ -866,33 +866,33 @@ void Tms320C6713Codegen::genCompare(const std::string &op, const ir::Expr &lhs, 
     genExpr(rhs);  // AC = rhs
     genPop(T1);     // T1 = lhs
     if (op == "<") {
-        code_ << "    " << (isUnsigned ? "CMPLTU" : "CMPLT") << " " << AC << "," << T1 << "," << AC << "\n";
+        emit((isUnsigned ? "CMPLTU" : "CMPLT"), cat(AC, ",", T1, ",", AC));
         return;
     }
     if (op == ">") {
-        code_ << "    " << (isUnsigned ? "CMPGTU" : "CMPGT") << " " << AC << "," << T1 << "," << AC << "\n";
+        emit((isUnsigned ? "CMPGTU" : "CMPGT"), cat(AC, ",", T1, ",", AC));
         return;
     }
     if (op == "<=") {
-        code_ << "    " << (isUnsigned ? "CMPGTU" : "CMPGT") << " " << T10 << "," << T1 << "," << AC << "\n";
+        emit((isUnsigned ? "CMPGTU" : "CMPGT"), cat(T10, ",", T1, ",", AC));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
         return;
     }
     if (op == ">=") {
-        code_ << "    " << (isUnsigned ? "CMPLTU" : "CMPLT") << " " << T10 << "," << T1 << "," << AC << "\n";
+        emit((isUnsigned ? "CMPLTU" : "CMPLT"), cat(T10, ",", T1, ",", AC));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
         return;
     }
     if (op == "==") {
-        code_ << "    CMPEQ " << AC << "," << T1 << "," << AC << "\n";
+        emit("CMPEQ", cat(AC, ",", T1, ",", AC));
         return;
     }
     if (op == "!=") {
-        code_ << "    CMPEQ " << T10 << "," << T1 << "," << AC << "\n";
+        emit("CMPEQ", cat(T10, ",", T1, ",", AC));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
         return;
     }
     err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
@@ -907,103 +907,103 @@ void Tms320C6713Codegen::genWideCompare(const std::string &op, const ir::Expr &l
     genExpr(lhs);
     genPushWide(AC, T1);
     genExpr(rhs);  // AC:T1 = rhs
-    code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";
-    code_ << "    ADD " << T4 << "," << T1 << "," << ZERO << "\n";
+    emit("ADD", cat(T3, ",", AC, ",", ZERO));
+    emit("ADD", cat(T4, ",", T1, ",", ZERO));
     genPopWide(AC, T1);  // AC:T1 = lhs
-    code_ << "    ADD " << T6 << "," << AC << "," << ZERO << "\n";
-    code_ << "    ADD " << T7 << "," << T1 << "," << ZERO << "\n";
+    emit("ADD", cat(T6, ",", AC, ",", ZERO));
+    emit("ADD", cat(T7, ",", T1, ",", ZERO));
 
     if (op == "==" || op == "!=") {
         std::string Lfalse = newLabel(), Ldone = newLabel();
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    CMPEQ " << AC << "," << T6 << "," << T3 << "\n";
+        emit("CMPEQ", cat(AC, ",", T6, ",", T3));
         emitBranchZ(true, Lfalse);
-        code_ << "    CMPEQ " << AC << "," << T7 << "," << T4 << "\n";
+        emit("CMPEQ", cat(AC, ",", T7, ",", T4));
         emitBranchZ(true, Lfalse);
         loadImm32(AC, atoi(onEqual));
         emitBranch(Ldone);
-        code_ << Lfalse << ":\n";
+        emitLabel(Lfalse);
         loadImm32(AC, atoi(onDiffer));
-        code_ << Ldone << ":\n";
+        emitLabel(Ldone);
         return;
     }
 
     std::string LhiDiff = newLabel(), Ldone = newLabel();
-    code_ << "    CMPEQ " << AC << "," << T7 << "," << T4 << "\n";
+    emit("CMPEQ", cat(AC, ",", T7, ",", T4));
     emitBranchZ(true, LhiDiff);
     // hi equal: unsigned lo compare
     if (op == "<") {
-        code_ << "    CMPLTU " << AC << "," << T6 << "," << T3 << "\n";
+        emit("CMPLTU", cat(AC, ",", T6, ",", T3));
     } else if (op == ">") {
-        code_ << "    CMPGTU " << AC << "," << T6 << "," << T3 << "\n";
+        emit("CMPGTU", cat(AC, ",", T6, ",", T3));
     } else if (op == "<=") {
-        code_ << "    CMPGTU " << T10 << "," << T6 << "," << T3 << "\n";
+        emit("CMPGTU", cat(T10, ",", T6, ",", T3));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
     } else {  // ">="
-        code_ << "    CMPLTU " << T10 << "," << T6 << "," << T3 << "\n";
+        emit("CMPLTU", cat(T10, ",", T6, ",", T3));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
     }
     emitBranch(Ldone);
-    code_ << LhiDiff << ":\n";
+    emitLabel(LhiDiff);
     const char *ltInsn = isUnsigned ? "CMPLTU" : "CMPLT";
     const char *gtInsn = isUnsigned ? "CMPGTU" : "CMPGT";
     if (op == "<") {
-        code_ << "    " << ltInsn << " " << AC << "," << T7 << "," << T4 << "\n";
+        emit(ltInsn, cat(AC, ",", T7, ",", T4));
     } else if (op == ">") {
-        code_ << "    " << gtInsn << " " << AC << "," << T7 << "," << T4 << "\n";
+        emit(gtInsn, cat(AC, ",", T7, ",", T4));
     } else if (op == "<=") {
-        code_ << "    " << gtInsn << " " << T10 << "," << T7 << "," << T4 << "\n";
+        emit(gtInsn, cat(T10, ",", T7, ",", T4));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
     } else {  // ">="
-        code_ << "    " << ltInsn << " " << T10 << "," << T7 << "," << T4 << "\n";
+        emit(ltInsn, cat(T10, ",", T7, ",", T4));
         loadImm32(T11, 1);
-        code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";
+        emit("XOR", cat(AC, ",", T10, ",", T11));
     }
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void Tms320C6713Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+    if (isWide(lhs.type)) emit("OR", cat(AC, ",", AC, ",", T1));
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
     emitBranchZ(true, Lfalse);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+    if (isWide(rhs.type)) emit("OR", cat(AC, ",", AC, ",", T1));
     emitBranchZ(true, Lfalse);
     emitBranch(Ltrue);
-    code_ << Lfalse << ":\n";
+    emitLabel(Lfalse);
     loadImm32(AC, 0);
     emitBranch(Ldone);
-    code_ << Ltrue << ":\n";
+    emitLabel(Ltrue);
     loadImm32(AC, 1);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void Tms320C6713Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+    if (isWide(lhs.type)) emit("OR", cat(AC, ",", AC, ",", T1));
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     emitBranchZ(false, Ltrue);
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+    if (isWide(rhs.type)) emit("OR", cat(AC, ",", AC, ",", T1));
     emitBranchZ(false, Ltrue);
     emitBranch(Lfalse);
-    code_ << Ltrue << ":\n";
+    emitLabel(Ltrue);
     loadImm32(AC, 1);
     emitBranch(Ldone);
-    code_ << Lfalse << ":\n";
+    emitLabel(Lfalse);
     loadImm32(AC, 0);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 }
 
 void Tms320C6713Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
-    code_ << "    CMPEQ " << AC << "," << AC << "," << ZERO << "\n";
+    if (isWide(rhs.type)) emit("OR", cat(AC, ",", AC, ",", T1));
+    emit("CMPEQ", cat(AC, ",", AC, ",", ZERO));
 }
 
 // --- division ---------------------------------------------------------------
@@ -1012,7 +1012,7 @@ void Tms320C6713Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, boo
     genExpr(lhs);
     genPush(AC);
     genExpr(rhs);  // AC = divisor
-    code_ << "    ADD " << T1 << "," << AC << "," << ZERO << "\n";
+    emit("ADD", cat(T1, ",", AC, ",", ZERO));
     genPop(AC);  // AC = dividend
     genDivModCore(wantRemainder, isUnsigned);
 }
@@ -1023,22 +1023,22 @@ void Tms320C6713Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, boo
 // in T2..T9 throughout (never AC/T1), since the loop's own exit test and sign checks need AC
 // free to hold each predicate in turn.
 void Tms320C6713Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
-    code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";  // T3 = dividend (n)
-    code_ << "    ADD " << T4 << "," << T1 << "," << ZERO << "\n";   // T4 = divisor (d)
+    emit("ADD", cat(T3, ",", AC, ",", ZERO));  // T3 = dividend (n)
+    emit("ADD", cat(T4, ",", T1, ",", ZERO));  // T4 = divisor (d)
 
     std::string LskipNegN = newLabel(), LskipNegD = newLabel();
     if (!isUnsigned) {
         loadImm32(T10, 31);
-        code_ << "    SHRU " << T7 << "," << T3 << "," << T10 << "\n";  // T7 = dividend sign
-        code_ << "    ADD " << AC << "," << T7 << "," << ZERO << "\n";
+        emit("SHRU", cat(T7, ",", T3, ",", T10));  // T7 = dividend sign
+        emit("ADD", cat(AC, ",", T7, ",", ZERO));
         emitBranchZ(true, LskipNegN);
-        code_ << "    SUB " << T3 << "," << ZERO << "," << T3 << "\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    SHRU " << T8 << "," << T4 << "," << T10 << "\n";  // T8 = divisor sign
-        code_ << "    ADD " << AC << "," << T8 << "," << ZERO << "\n";
+        emit("SUB", cat(T3, ",", ZERO, ",", T3));
+        emitLabel(LskipNegN);
+        emit("SHRU", cat(T8, ",", T4, ",", T10));  // T8 = divisor sign
+        emit("ADD", cat(AC, ",", T8, ",", ZERO));
         emitBranchZ(true, LskipNegD);
-        code_ << "    SUB " << T4 << "," << ZERO << "," << T4 << "\n";
-        code_ << LskipNegD << ":\n";
+        emit("SUB", cat(T4, ",", ZERO, ",", T4));
+        emitLabel(LskipNegD);
     }
 
     loadImm32(T5, 0);   // r
@@ -1047,16 +1047,16 @@ void Tms320C6713Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LcheckCmp = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), Lcont = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    CMPEQ " << AC << "," << T9 << "," << ZERO << "\n";
+    emitLabel(Lloop);
+    emit("CMPEQ", cat(AC, ",", T9, ",", ZERO));
     emitBranchZ(false, Ldone);
     loadImm32(T10, -1);
-    code_ << "    ADD " << T9 << "," << T9 << "," << T10 << "\n";
+    emit("ADD", cat(T9, ",", T9, ",", T10));
 
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T11 << "," << T3 << "," << T10 << "\n";  // dividend's own top bit
+    emit("SHRU", cat(T11, ",", T3, ",", T10));  // dividend's own top bit
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T1 << "," << T5 << "," << T10 << "\n";    // remainder's own top bit (overflow
+    emit("SHRU", cat(T1, ",", T5, ",", T10));  // remainder's own top bit (overflow
                                                                         // flag) - T1 is free here: its own
                                                                         // entry value (the divisor) was
                                                                         // already copied into T4 above, and
@@ -1065,42 +1065,42 @@ void Tms320C6713Codegen::genDivModCore(bool wantRemainder, bool isUnsigned) {
                                                                         // keeps the live target address there
                                                                         // across this whole call)
     loadImm32(T10, 1);
-    code_ << "    SHL " << T3 << "," << T3 << "," << T10 << "\n";      // n <<= 1
+    emit("SHL", cat(T3, ",", T3, ",", T10));  // n <<= 1
     loadImm32(T10, 1);
-    code_ << "    SHL " << T5 << "," << T5 << "," << T10 << "\n";       // r <<= 1
-    code_ << "    OR " << T5 << "," << T5 << "," << T11 << "\n";         // r |= n's captured top bit
+    emit("SHL", cat(T5, ",", T5, ",", T10));  // r <<= 1
+    emit("OR", cat(T5, ",", T5, ",", T11));  // r |= n's captured top bit
 
-    code_ << "    ADD " << AC << "," << T1 << "," << ZERO << "\n";
+    emit("ADD", cat(AC, ",", T1, ",", ZERO));
     emitBranchZ(true, LcheckCmp);
     emitBranch(LsubYes);
-    code_ << LcheckCmp << ":\n";
-    code_ << "    CMPLTU " << AC << "," << T5 << "," << T4 << "\n";  // r < d ?
+    emitLabel(LcheckCmp);
+    emit("CMPLTU", cat(AC, ",", T5, ",", T4));  // r < d ?
     emitBranchZ(false, LsubNo);
-    code_ << LsubYes << ":\n";
-    code_ << "    SUB " << T5 << "," << T5 << "," << T4 << "\n";
+    emitLabel(LsubYes);
+    emit("SUB", cat(T5, ",", T5, ",", T4));
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << "    OR " << T6 << "," << T6 << "," << T10 << "\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
+    emit("OR", cat(T6, ",", T6, ",", T10));
     emitBranch(Lcont);
-    code_ << LsubNo << ":\n";
+    emitLabel(LsubNo);
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << Lcont << ":\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
+    emitLabel(Lcont);
     emitBranch(Lloop);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 
     if (!isUnsigned) {
         std::string LnoNegQ = newLabel(), LnoNegR = newLabel();
-        code_ << "    XOR " << AC << "," << T7 << "," << T8 << "\n";
+        emit("XOR", cat(AC, ",", T7, ",", T8));
         emitBranchZ(true, LnoNegQ);
-        code_ << "    SUB " << T6 << "," << ZERO << "," << T6 << "\n";
-        code_ << LnoNegQ << ":\n";
-        code_ << "    ADD " << AC << "," << T7 << "," << ZERO << "\n";
+        emit("SUB", cat(T6, ",", ZERO, ",", T6));
+        emitLabel(LnoNegQ);
+        emit("ADD", cat(AC, ",", T7, ",", ZERO));
         emitBranchZ(true, LnoNegR);
-        code_ << "    SUB " << T5 << "," << ZERO << "," << T5 << "\n";
-        code_ << LnoNegR << ":\n";
+        emit("SUB", cat(T5, ",", ZERO, ",", T5));
+        emitLabel(LnoNegR);
     }
-    code_ << "    ADD " << AC << "," << (wantRemainder ? T5 : T6) << "," << ZERO << "\n";
+    emit("ADD", cat(AC, ",", (wantRemainder ? T5 : T6), ",", ZERO));
 }
 
 // 64-bit counterpart of genDivModCore(), the same algorithm run on register pairs kept in a
@@ -1129,151 +1129,151 @@ void Tms320C6713Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs,
     if (!isUnsigned) {
         loadImm32(T10, 31);
         loadStack(AC, 4);
-        code_ << "    SHRU " << T3 << "," << AC << "," << T10 << "\n";
+        emit("SHRU", cat(T3, ",", AC, ",", T10));
         storeStack(T3, 36);
         loadStack(AC, 12);
-        code_ << "    SHRU " << T4 << "," << AC << "," << T10 << "\n";
+        emit("SHRU", cat(T4, ",", AC, ",", T10));
         storeStack(T4, 40);
 
-        code_ << "    ADD " << AC << "," << T3 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T3, ",", ZERO));
         emitBranchZ(true, Lskip1);
         loadStack(AC, 0);
         loadStack(T1, 4);
         genNegate64();
         storeStack(AC, 0);
         storeStack(T1, 4);
-        code_ << Lskip1 << ":\n";
+        emitLabel(Lskip1);
 
-        code_ << "    ADD " << AC << "," << T4 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T4, ",", ZERO));
         emitBranchZ(true, Lskip2);
         loadStack(AC, 8);
         loadStack(T1, 12);
         genNegate64();
         storeStack(AC, 8);
         storeStack(T1, 12);
-        code_ << Lskip2 << ":\n";
+        emitLabel(Lskip2);
     }
 
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
+    emitLabel(Lloop);
     loadStack(T3, 32);
-    code_ << "    CMPEQ " << AC << "," << T3 << "," << ZERO << "\n";
+    emit("CMPEQ", cat(AC, ",", T3, ",", ZERO));
     emitBranchZ(false, Ldone);
     loadImm32(T10, -1);
-    code_ << "    ADD " << T3 << "," << T3 << "," << T10 << "\n";
+    emit("ADD", cat(T3, ",", T3, ",", T10));
     storeStack(T3, 32);
 
     // capture n's top bit, then n <<= 1 (64-bit)
     loadStack(T4, 4);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T5 << "," << T4 << "," << T10 << "\n";  // n's top bit
+    emit("SHRU", cat(T5, ",", T4, ",", T10));  // n's top bit
     loadStack(T6, 0);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T7 << "," << T6 << "," << T10 << "\n";  // n_lo's own top bit (carries into hi)
+    emit("SHRU", cat(T7, ",", T6, ",", T10));  // n_lo's own top bit (carries into hi)
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
     loadImm32(T10, 1);
-    code_ << "    SHL " << T4 << "," << T4 << "," << T10 << "\n";
-    code_ << "    OR " << T4 << "," << T4 << "," << T7 << "\n";
+    emit("SHL", cat(T4, ",", T4, ",", T10));
+    emit("OR", cat(T4, ",", T4, ",", T7));
     storeStack(T6, 0);
     storeStack(T4, 4);
 
     // r = (r<<1)|T5, capturing r's own (pre-shift) top bit as the overflow flag T9
     loadStack(T8, 20);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T9 << "," << T8 << "," << T10 << "\n";  // overflow flag
+    emit("SHRU", cat(T9, ",", T8, ",", T10));  // overflow flag
     loadStack(T11, 16);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T2 << "," << T11 << "," << T10 << "\n";  // r_lo's own top bit (carries into hi)
+    emit("SHRU", cat(T2, ",", T11, ",", T10));  // r_lo's own top bit (carries into hi)
     loadImm32(T10, 1);
-    code_ << "    SHL " << T11 << "," << T11 << "," << T10 << "\n";
-    code_ << "    OR " << T11 << "," << T11 << "," << T5 << "\n";
+    emit("SHL", cat(T11, ",", T11, ",", T10));
+    emit("OR", cat(T11, ",", T11, ",", T5));
     loadImm32(T10, 1);
-    code_ << "    SHL " << T8 << "," << T8 << "," << T10 << "\n";
-    code_ << "    OR " << T8 << "," << T8 << "," << T2 << "\n";
+    emit("SHL", cat(T8, ",", T8, ",", T10));
+    emit("OR", cat(T8, ",", T8, ",", T2));
     storeStack(T11, 16);
     storeStack(T8, 20);
 
     std::string LcheckCmp = newLabel(), LloCmp = newLabel(), LcmpDone = newLabel();
     std::string LsubYes = newLabel(), LsubNo = newLabel(), Lcont = newLabel();
-    code_ << "    ADD " << AC << "," << T9 << "," << ZERO << "\n";
+    emit("ADD", cat(AC, ",", T9, ",", ZERO));
     emitBranchZ(true, LcheckCmp);
     emitBranch(LsubYes);
-    code_ << LcheckCmp << ":\n";
+    emitLabel(LcheckCmp);
     // unsigned 64-bit compare: r (now at 16/20) >= d (at 8/12)
     loadStack(T4, 20);
     loadStack(T6, 12);
-    code_ << "    CMPEQ " << AC << "," << T4 << "," << T6 << "\n";
+    emit("CMPEQ", cat(AC, ",", T4, ",", T6));
     emitBranchZ(false, LloCmp);
-    code_ << "    CMPGTU " << AC << "," << T4 << "," << T6 << "\n";
+    emit("CMPGTU", cat(AC, ",", T4, ",", T6));
     emitBranch(LcmpDone);
-    code_ << LloCmp << ":\n";
+    emitLabel(LloCmp);
     loadStack(T5, 16);  // r_lo
     loadStack(T7, 8);    // d_lo
-    code_ << "    CMPLTU " << T10 << "," << T5 << "," << T7 << "\n";  // r_lo < d_lo ?
+    emit("CMPLTU", cat(T10, ",", T5, ",", T7));  // r_lo < d_lo ?
     loadImm32(T11, 1);
-    code_ << "    XOR " << AC << "," << T10 << "," << T11 << "\n";  // AC = r_lo >= d_lo
-    code_ << LcmpDone << ":\n";
+    emit("XOR", cat(AC, ",", T10, ",", T11));  // AC = r_lo >= d_lo
+    emitLabel(LcmpDone);
     emitBranchZ(true, LsubNo);
-    code_ << LsubYes << ":\n";
+    emitLabel(LsubYes);
     loadStack(T4, 16);
     loadStack(T6, 8);
-    code_ << "    CMPLTU " << T9 << "," << T4 << "," << T6 << "\n";
-    code_ << "    SUB " << T5 << "," << T4 << "," << T6 << "\n";
+    emit("CMPLTU", cat(T9, ",", T4, ",", T6));
+    emit("SUB", cat(T5, ",", T4, ",", T6));
     loadStack(T4, 20);
     loadStack(T6, 12);
-    code_ << "    SUB " << T4 << "," << T4 << "," << T6 << "\n";
-    code_ << "    SUB " << T4 << "," << T4 << "," << T9 << "\n";
+    emit("SUB", cat(T4, ",", T4, ",", T6));
+    emit("SUB", cat(T4, ",", T4, ",", T9));
     storeStack(T5, 16);
     storeStack(T4, 20);
     loadStack(T6, 24);
     loadStack(T7, 28);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T11 << "," << T6 << "," << T10 << "\n";
+    emit("SHRU", cat(T11, ",", T6, ",", T10));
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << "    OR " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << "    SHL " << T7 << "," << T7 << "," << T10 << "\n";
-    code_ << "    OR " << T7 << "," << T7 << "," << T11 << "\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
+    emit("OR", cat(T6, ",", T6, ",", T10));
+    emit("SHL", cat(T7, ",", T7, ",", T10));
+    emit("OR", cat(T7, ",", T7, ",", T11));
     storeStack(T6, 24);
     storeStack(T7, 28);
     emitBranch(Lcont);
-    code_ << LsubNo << ":\n";
+    emitLabel(LsubNo);
     loadStack(T6, 24);
     loadStack(T7, 28);
     loadImm32(T10, 31);
-    code_ << "    SHRU " << T11 << "," << T6 << "," << T10 << "\n";
+    emit("SHRU", cat(T11, ",", T6, ",", T10));
     loadImm32(T10, 1);
-    code_ << "    SHL " << T6 << "," << T6 << "," << T10 << "\n";
-    code_ << "    SHL " << T7 << "," << T7 << "," << T10 << "\n";
-    code_ << "    OR " << T7 << "," << T7 << "," << T11 << "\n";
+    emit("SHL", cat(T6, ",", T6, ",", T10));
+    emit("SHL", cat(T7, ",", T7, ",", T10));
+    emit("OR", cat(T7, ",", T7, ",", T11));
     storeStack(T6, 24);
     storeStack(T7, 28);
-    code_ << Lcont << ":\n";
+    emitLabel(Lcont);
     emitBranch(Lloop);
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
 
     if (!isUnsigned) {
         std::string LnoNegQ = newLabel(), LnoNegR = newLabel();
         loadStack(T3, 36);
         loadStack(T4, 40);
-        code_ << "    XOR " << AC << "," << T3 << "," << T4 << "\n";
+        emit("XOR", cat(AC, ",", T3, ",", T4));
         emitBranchZ(true, LnoNegQ);
         loadStack(AC, 24);
         loadStack(T1, 28);
         genNegate64();
         storeStack(AC, 24);
         storeStack(T1, 28);
-        code_ << LnoNegQ << ":\n";
+        emitLabel(LnoNegQ);
         loadStack(T3, 36);
-        code_ << "    ADD " << AC << "," << T3 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T3, ",", ZERO));
         emitBranchZ(true, LnoNegR);
         loadStack(AC, 16);
         loadStack(T1, 20);
         genNegate64();
         storeStack(AC, 16);
         storeStack(T1, 20);
-        code_ << LnoNegR << ":\n";
+        emitLabel(LnoNegR);
     }
 
     if (wantRemainder) {
@@ -1291,11 +1291,11 @@ void Tms320C6713Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs,
 void Tms320C6713Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
     if (op == "+") {
-        code_ << "    ADD " << AC << "," << AC << "," << T1 << "\n";
+        emit("ADD", cat(AC, ",", AC, ",", T1));
         return;
     }
     if (op == "-") {
-        code_ << "    SUB " << AC << "," << AC << "," << T1 << "\n";
+        emit("SUB", cat(AC, ",", AC, ",", T1));
         return;
     }
     if (op == "*") {
@@ -1303,20 +1303,20 @@ void Tms320C6713Codegen::genCompoundOp(const std::string &op, Type type) {
         return;
     }
     if (op == "&") {
-        code_ << "    AND " << AC << "," << AC << "," << T1 << "\n";
+        emit("AND", cat(AC, ",", AC, ",", T1));
         return;
     }
     if (op == "|") {
-        code_ << "    OR " << AC << "," << AC << "," << T1 << "\n";
+        emit("OR", cat(AC, ",", AC, ",", T1));
         return;
     }
     if (op == "^") {
-        code_ << "    XOR " << AC << "," << AC << "," << T1 << "\n";
+        emit("XOR", cat(AC, ",", AC, ",", T1));
         return;
     }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "SHL" : (isUnsigned ? "SHRU" : "SHR");
-        code_ << "    " << insn << " " << AC << "," << AC << "," << T1 << "\n";
+        emit(insn, cat(AC, ",", AC, ",", T1));
         return;
     }
     // "/" or "%"
@@ -1326,19 +1326,19 @@ void Tms320C6713Codegen::genCompoundOp(const std::string &op, Type type) {
 void Tms320C6713Codegen::genCompoundThroughT2(const ir::Expr &e) {
     genPush(T2);
     genExpr(*e.rhs);
-    code_ << "    ADD " << T1 << "," << AC << "," << ZERO << "\n";
+    emit("ADD", cat(T1, ",", AC, ",", ZERO));
     genPop(T2);
     loadOperand(T2, e.type);
     if (e.yieldOld) genPush(AC);
     genCompoundOp(e.op, e.type);
     narrowB0To(e.type);
     if (e.yieldOld) {
-        code_ << "    ADD " << T1 << "," << AC << "," << ZERO << "\n";
+        emit("ADD", cat(T1, ",", AC, ",", ZERO));
         genPop(AC);
-        code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";
-        code_ << "    ADD " << AC << "," << T1 << "," << ZERO << "\n";
+        emit("ADD", cat(T3, ",", AC, ",", ZERO));
+        emit("ADD", cat(AC, ",", T1, ",", ZERO));
         storeOperand(T2, e.type);
-        code_ << "    ADD " << AC << "," << T3 << "," << ZERO << "\n";
+        emit("ADD", cat(AC, ",", T3, ",", ZERO));
     } else {
         storeOperand(T2, e.type);
     }
@@ -1358,7 +1358,7 @@ void Tms320C6713Codegen::genBinary(const ir::Expr &e) {
         genPush(AC);
         genExpr(*e.rhs);
         genPop(T1);  // T1 = lhs, AC = rhs
-        code_ << "    " << (op == "+" ? "ADD" : "SUB") << " " << AC << "," << T1 << "," << AC << "\n";
+        emit((op == "+" ? "ADD" : "SUB"), cat(AC, ",", T1, ",", AC));
         narrowB0To(operandType);
         return;
     }
@@ -1385,18 +1385,18 @@ void Tms320C6713Codegen::genBinary(const ir::Expr &e) {
             genExpr(*e.lhs);
             genPushWide(AC, T1);
             genExpr(*e.rhs);
-            code_ << "    ADD " << T3 << "," << AC << "," << ZERO << "\n";
-            code_ << "    ADD " << T4 << "," << T1 << "," << ZERO << "\n";
+            emit("ADD", cat(T3, ",", AC, ",", ZERO));
+            emit("ADD", cat(T4, ",", T1, ",", ZERO));
             genPopWide(AC, T1);
-            code_ << "    " << insn << " " << AC << "," << AC << "," << T3 << "\n";
-            code_ << "    " << insn << " " << T1 << "," << T1 << "," << T4 << "\n";
+            emit(insn, cat(AC, ",", AC, ",", T3));
+            emit(insn, cat(T1, ",", T1, ",", T4));
             return;
         }
         genExpr(*e.lhs);
         genPush(AC);
         genExpr(*e.rhs);
         genPop(T1);
-        code_ << "    " << insn << " " << AC << "," << T1 << "," << AC << "\n";
+        emit(insn, cat(AC, ",", T1, ",", AC));
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -1407,10 +1407,10 @@ void Tms320C6713Codegen::genBinary(const ir::Expr &e) {
         genExpr(*e.lhs);
         genPush(AC);
         genExpr(*e.rhs);  // AC = shift count
-        code_ << "    ADD " << T1 << "," << AC << "," << ZERO << "\n";
+        emit("ADD", cat(T1, ",", AC, ",", ZERO));
         genPop(AC);  // AC = value
         const char *insn = op == "<<" ? "SHL" : (isUnsigned ? "SHRU" : "SHR");
-        code_ << "    " << insn << " " << AC << "," << AC << "," << T1 << "\n";
+        emit(insn, cat(AC, ",", AC, ",", T1));
         narrowB0To(operandType);
         return;
     }

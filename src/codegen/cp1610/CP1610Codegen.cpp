@@ -56,13 +56,16 @@ std::string CP1610Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &fn : prog.functions) {
         if (fn->sourceName == "main") mainFn = fn.get();
     }
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    emitRaw(cat("org ", objectMode ? 0 : kBaseAddress));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "_start:\n";
-        code_ << "    mvii " << kInitialSp << ",r6\n";
-        code_ << "    jsr r5," << label(mainFn) << "\n";
+        emitLabel("_start");
+        emit("mvii", cat(kInitialSp, ",r6"));
+        emit("jsr", cat("r5,", label(mainFn)));
         // The result sits in r0 once execution reaches `halt`.
-        code_ << "halt:\n    hlt\n\n";
+        emitLabel("halt");
+        emit("hlt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -125,15 +128,16 @@ std::map<std::string, std::string> CP1610Codegen::perFileAsm() const { return pe
 // the real hardware PC - this CPU's own documented "return" idiom (there's no dedicated
 // instruction for it).
 void CP1610Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    pshr r5\n";
-    code_ << "    pshr r4\n";
-    code_ << "    movr r6,r4\n";
-    if (fn.func->frameSize > 0) code_ << "    sub " << fn.func->frameSize << ",r6\n";
+    emitLabel(label(fn.func));
+    emit("pshr", "r5");
+    emit("pshr", "r4");
+    emit("movr", "r6,r4");
+    if (fn.func->frameSize > 0) emit("sub", cat(fn.func->frameSize, ",r6"));
     genStmt(*fn.body);
-    code_ << "    movr r4,r6\n";
-    code_ << "    pulr r4\n";
-    code_ << "    pulr r7\n\n";
+    emit("movr", "r4,r6");
+    emit("pulr", "r4");
+    emit("pulr", "r7");
+    emitRaw("");
 }
 
 void CP1610Codegen::genStmt(const ir::Stmt &s) {
@@ -147,40 +151,40 @@ void CP1610Codegen::genStmt(const ir::Stmt &s) {
             testTruthy(*s.cond);
             std::string Lelse = s.elseStmt ? newLabel() : "";
             std::string Ldone = newLabel();
-            code_ << "    bze " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("bze", s.elseStmt ? Lelse : Ldone);
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    b " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("b", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel(), Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
             testTruthy(*s.cond);
-            code_ << "    bze " << Lend << "\n";
+            emit("bze", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    b " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("b", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    b " << loopLabels_.back().second << "\n";
+            emit("b", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    b " << loopLabels_.back().first << "\n";
+            emit("b", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -188,12 +192,12 @@ void CP1610Codegen::genStmt(const ir::Stmt &s) {
                 genExpr(*s.initOrReturnOrExpr);
                 if (isWide(s.initOrReturnOrExpr->type)) {
                     int words = wordCountOf(s.initOrReturnOrExpr->type);
-                    for (int i = 0; i < words; i++) code_ << "    pulr r" << i << "\n";
+                    for (int i = 0; i < words; i++) emit("pulr", cat("r", i));
                 }
             }
-            code_ << "    movr r4,r6\n";
-            code_ << "    pulr r4\n";
-            code_ << "    pulr r7\n";
+            emit("movr", "r4,r6");
+            emit("pulr", "r4");
+            emit("pulr", "r7");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -217,16 +221,15 @@ void CP1610Codegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    b " << irLabel(s.labelId) << "\n";
+            emit("b", irLabel(s.labelId));
             return;
         }
     }
@@ -240,15 +243,15 @@ void CP1610Codegen::genStmt(const ir::Stmt &s) {
 // has no indexed/displacement addressing mode at all.
 void CP1610Codegen::genSlotAddr(const ir::Slot *slot) {
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    mvii " << label(slot) << ",r2\n";
+        emit("mvii", cat(label(slot), ",r2"));
         return;
     }
-    code_ << "    movr r4,r2\n";
+    emit("movr", "r4,r2");
     if (slot->kind == ir::SlotKind::Param) {
-        if (slot->frameOffset > 0) code_ << "    add " << slot->frameOffset << ",r2\n";
+        if (slot->frameOffset > 0) emit("add", cat(slot->frameOffset, ",r2"));
     } else {
         int below = ir::localOffsetDescendingWide(*slot, typeWidths());
-        if (below > 0) code_ << "    sub " << below << ",r2\n";
+        if (below > 0) emit("sub", cat(below, ",r2"));
     }
 }
 
@@ -260,16 +263,16 @@ void CP1610Codegen::genSlotAddr(const ir::Slot *slot) {
 void CP1610Codegen::genWideSlotWordAddr(const ir::Slot *slot, int wordIndex) {
     if (slot->kind == ir::SlotKind::Global) {
         std::string lbl = wordIndex == 0 ? label(slot) : (label(slot) + "+" + std::to_string(wordIndex));
-        code_ << "    mvii " << lbl << ",r2\n";
+        emit("mvii", cat(lbl, ",r2"));
         return;
     }
-    code_ << "    movr r4,r2\n";
+    emit("movr", "r4,r2");
     if (slot->kind == ir::SlotKind::Param) {
         int off = slot->frameOffset + wordIndex;
-        if (off > 0) code_ << "    add " << off << ",r2\n";
+        if (off > 0) emit("add", cat(off, ",r2"));
     } else {
         int below = slot->frameOffset + wordIndex;
-        if (below > 0) code_ << "    sub " << below << ",r2\n";
+        if (below > 0) emit("sub", cat(below, ",r2"));
     }
 }
 
@@ -282,7 +285,7 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
                 genWideLoadLiteral(e.intValue, wordCountOf(e.type));
                 return;
             }
-            code_ << "    mvii " << static_cast<int>(static_cast<uint16_t>(e.intValue)) << ",r0\n";
+            emit("mvii", cat(static_cast<int>(static_cast<uint16_t>(e.intValue)), ",r0"));
             return;
         }
         case ir::ExprKind::Var: {
@@ -301,7 +304,7 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs - may be wide (e.g. a `long` array's element).
                 genIndexAddr(e.slot, *e.lhs);  // r2 = target address
-                code_ << "    pshr r2\n";
+                emit("pshr", "r2");
                 genExpr(*e.rhs);
                 storeIndirect(e.slot->type);  // handles a wide element too
                 return;
@@ -318,8 +321,8 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    movr r0,r2\n";
-            code_ << "    pshr r2\n";
+            emit("movr", "r0,r2");
+            emit("pshr", "r2");
             genExpr(*e.rhs);  // r0, or pushes `words` words if wide
             storeIndirect(e.type);
             return;
@@ -332,35 +335,35 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
             }
             if (e.slot->kind != ir::SlotKind::Global) genSlotAddr(e.slot);
             std::string mem = operandOf(e.slot);
-            code_ << "    pshr r2\n";  // stash the computed address (Global's own `mem` doesn't need it, but pushing is harmless)
-            genExpr(*e.rhs);            // r0 = rhs
-            code_ << "    movr r0,r1\n";
-            code_ << "    pulr r2\n";
+            emit("pshr", "r2");  // stash the computed address (Global's own `mem` doesn't need it, but pushing is harmless)
+            genExpr(*e.rhs);     // r0 = rhs
+            emit("movr", "r0,r1");
+            emit("pulr", "r2");
             loadOperand(mem, e.type);  // r0 = old
             // genCompoundOp()'s own `*`/`/`/`%` paths use r2/r3 as scratch, so the address has
             // to be re-stashed across that call too (same as genCompoundThroughR2() already
             // does for the indexed/pointer case) - not just across evaluating rhs above.
-            code_ << "    pshr r2\n";
-            if (e.yieldOld) code_ << "    pshr r0\n";
+            emit("pshr", "r2");
+            if (e.yieldOld) emit("pshr", "r0");
             genCompoundOp(e.op, e.type);
             narrowR0To(e.type);
             if (e.yieldOld) {
-                code_ << "    pshr r0\n";    // new
-                code_ << "    pulr r1\n";    // r1 = new
-                code_ << "    pulr r3\n";    // r3 = old
-                code_ << "    pulr r2\n";    // r2 = address
-                code_ << "    movr r1,r0\n";  // r0 = new, ready for storeOperand()
+                emit("pshr", "r0");  // new
+                emit("pulr", "r1");  // r1 = new
+                emit("pulr", "r3");  // r3 = old
+                emit("pulr", "r2");  // r2 = address
+                emit("movr", "r1,r0");  // r0 = new, ready for storeOperand()
                 storeOperand(mem, e.type);
-                code_ << "    movr r3,r0\n";  // r0 = old (final result)
+                emit("movr", "r3,r0");  // r0 = old (final result)
             } else {
-                code_ << "    pulr r2\n";  // r2 = address
+                emit("pulr", "r2");  // r2 = address
                 storeOperand(mem, e.type);  // r0 already = new
             }
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // r0 = pointer value
-            code_ << "    movr r0,r2\n";
+            emit("movr", "r0,r2");
             genCompoundThroughR2(e);
             return;
         }
@@ -369,12 +372,12 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
             testTruthy(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    bze " << Lelse << "\n";
+            emit("bze", Lelse);
             genExpr(*e.rhs);
-            code_ << "    b " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("b", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -386,17 +389,23 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
                     // value on the stack instead, so it has to move there and back.
                     int words = wordCountOf(e.rhs->type);
                     static const char *const vcells[] = {"__v0", "__v1", "__v2", "__v3"};
-                    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << vcells[i] << "\n";
+                    for (int i = 0; i < words; i++) {
+                        emit("pulr", "r0");
+                        emit("mvo", cat("r0,", vcells[i]));
+                    }
                     genWideNegate(words);
-                    for (int i = words - 1; i >= 0; i--) code_ << "    mvi " << vcells[i] << ",r0\n    pshr r0\n";
+                    for (int i = words - 1; i >= 0; i--) {
+                        emit("mvi", cat(vcells[i], ",r0"));
+                        emit("pshr", "r0");
+                    }
                 } else {
-                    code_ << "    negr r0\n";
+                    emit("negr", "r0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // r0 = pointer value
-                code_ << "    movr r0,r2\n";
+                emit("movr", "r0,r2");
                 loadIndirect("r2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
@@ -409,12 +418,12 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
                     static const char *const tempRegs[] = {"r0", "r1", "r2", "r3"};
                     int words = wordCountOf(e.rhs->type);
                     for (int i = 0; i < words; i++) {
-                        code_ << "    pulr " << tempRegs[i] << "\n";
-                        code_ << "    comr " << tempRegs[i] << "\n";
+                        emit("pulr", tempRegs[i]);
+                        emit("comr", tempRegs[i]);
                     }
-                    for (int i = words - 1; i >= 0; i--) code_ << "    pshr " << tempRegs[i] << "\n";
+                    for (int i = words - 1; i >= 0; i--) emit("pshr", tempRegs[i]);
                 } else {
-                    code_ << "    comr r0\n";
+                    emit("comr", "r0");
                 }
             } else {  // "&"
                 genAddrOf(*e.rhs);
@@ -428,15 +437,15 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.args[i]->type)) {
                     totalWords += wordCountOf(e.args[i]->type);
                 } else {
-                    code_ << "    pshr r0\n";
+                    emit("pshr", "r0");
                     totalWords += 1;
                 }
             }
-            code_ << "    jsr r5," << label(e.func) << "\n";
-            if (totalWords > 0) code_ << "    add " << totalWords << ",r6\n";
+            emit("jsr", cat("r5,", label(e.func)));
+            if (totalWords > 0) emit("add", cat(totalWords, ",r6"));
             if (isWide(e.type)) {
                 int words = wordCountOf(e.type);
-                for (int i = words - 1; i >= 0; i--) code_ << "    pshr r" << i << "\n";
+                for (int i = words - 1; i >= 0; i--) emit("pshr", cat("r", i));
             }
             return;
         }
@@ -450,11 +459,11 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
             // own prologue (which always starts with a plain `pshr r5`, expecting a real `JSR`)
             // still works completely unmodified.
             genExpr(*e.lhs);  // r0 = the callee's own entry address
-            code_ << "    movr r0,r2\n";
+            emit("movr", "r0,r2");
             std::string Lret = newLabel();
-            code_ << "    mvii " << Lret << ",r5\n";
-            code_ << "    movr r2,r7\n";
-            code_ << Lret << ":\n";
+            emit("mvii", cat(Lret, ",r5"));
+            emit("movr", "r2,r7");
+            emitLabel(Lret);
             return;
         }
         case ir::ExprKind::Binary: {
@@ -480,13 +489,13 @@ void CP1610Codegen::genExpr(const ir::Expr &e) {
 // from some earlier, wider write; every load re-applies C's own 8-bit truncation instead of
 // trusting whatever happens to already be in the high byte.
 void CP1610Codegen::loadOperand(const std::string &mem, Type type) {
-    code_ << "    mvi " << mem << ",r0\n";
+    emit("mvi", cat(mem, ",r0"));
     if (isCharType(type)) narrowR0To(type);
 }
 
 void CP1610Codegen::storeOperand(const std::string &mem, Type type) {
     if (isCharType(type)) narrowR0To(type);
-    code_ << "    mvo r0," << mem << "\n";
+    emit("mvo", cat("r0,", mem));
 }
 
 // A wide pointee's words live at consecutive addresses starting at `addrReg` (always r2 - see
@@ -497,19 +506,19 @@ void CP1610Codegen::storeOperand(const std::string &mem, Type type) {
 // convention.
 void CP1610Codegen::loadIndirect(const std::string &addrReg, Type type) {
     if (!isWide(type)) {
-        code_ << "    mvi [" << addrReg << "],r0\n";
+        emit("mvi", cat("[", addrReg, "],r0"));
         if (isCharType(type)) narrowR0To(type);
         return;
     }
     int words = wordCountOf(type);
     static const char *const tempRegs[] = {"r0", "r1", "r3", "r2"};
-    code_ << "    movr " << addrReg << ",r5\n";
+    emit("movr", cat(addrReg, ",r5"));
     // `[r5]` is real hardware auto-increment addressing (mode 5 - see
     // CP1610Assembler.h's own header comment): each access already advances r5 by 1 on its
     // own, so consecutive words need no explicit `add 1,r5` between them (that would double-
     // advance it).
-    for (int i = 0; i < words; i++) code_ << "    mvi [r5]," << tempRegs[i] << "\n";
-    for (int i = words - 1; i >= 0; i--) code_ << "    pshr " << tempRegs[i] << "\n";
+    for (int i = 0; i < words; i++) emit("mvi", cat("[r5],", tempRegs[i]));
+    for (int i = words - 1; i >= 0; i--) emit("pshr", tempRegs[i]);
 }
 
 // `*lhs = rhs`'s store: r2 already holds `lhs`'s own pointer value, pushed on the stack before
@@ -519,26 +528,26 @@ void CP1610Codegen::loadIndirect(const std::string &addrReg, Type type) {
 // to write each word - the same technique as loadIndirect(), in reverse.
 void CP1610Codegen::storeIndirect(Type type) {
     if (!isWide(type)) {
-        code_ << "    pulr r2\n";
+        emit("pulr", "r2");
         if (isCharType(type)) narrowR0To(type);
-        code_ << "    mvo r0,[r2]\n";
+        emit("mvo", "r0,[r2]");
         return;
     }
     int words = wordCountOf(type);
     static const char *const tempRegs[] = {"r0", "r1", "r3", "r2"};
-    for (int i = 0; i < words; i++) code_ << "    pulr " << tempRegs[i] << "\n";
-    code_ << "    pulr r5\n";  // the stashed address, now free since every word is popped
+    for (int i = 0; i < words; i++) emit("pulr", tempRegs[i]);
+    emit("pulr", "r5");  // the stashed address, now free since every word is popped
     // `[r5]` auto-increments on its own (see loadIndirect()'s own comment) - no explicit
     // `add 1,r5` between words.
-    for (int i = 0; i < words; i++) code_ << "    mvo " << tempRegs[i] << ",[r5]\n";
+    for (int i = 0; i < words; i++) emit("mvo", cat(tempRegs[i], ",[r5]"));
 }
 
 // Pushes `slot`'s `words`-word value, least-significant word on top (pushed last).
 void CP1610Codegen::genWideLoad(const ir::Slot *slot, int words) {
     for (int i = words - 1; i >= 0; i--) {
         genWideSlotWordAddr(slot, i);
-        code_ << "    mvi [r2],r0\n";
-        code_ << "    pshr r0\n";
+        emit("mvi", "[r2],r0");
+        emit("pshr", "r0");
     }
 }
 
@@ -546,17 +555,17 @@ void CP1610Codegen::genWideLoadLiteral(long value, int words) {
     auto uv = static_cast<unsigned long>(value);
     for (int i = words - 1; i >= 0; i--) {
         int shiftedWord = static_cast<int>((uv >> (16 * i)) & 0xFFFF);
-        code_ << "    mvii " << shiftedWord << ",r0\n";
-        code_ << "    pshr r0\n";
+        emit("mvii", cat(shiftedWord, ",r0"));
+        emit("pshr", "r0");
     }
 }
 
 // Pops `words` words off the stack (least-significant on top) into `slot`'s storage.
 void CP1610Codegen::genWideStore(const ir::Slot *slot, int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    pulr r0\n";
+        emit("pulr", "r0");
         genWideSlotWordAddr(slot, i);
-        code_ << "    mvo r0,[r2]\n";
+        emit("mvo", "r0,[r2]");
     }
 }
 
@@ -571,17 +580,17 @@ const char *const kVScratch[4] = {"__v0", "__v1", "__v2", "__v3"};
 // the first adds nothing but that one carry bit.
 void CP1610Codegen::genWideNegate(int words) {
     for (int i = 0; i < words; i++) {
-        code_ << "    mvi " << kVScratch[i] << ",r0\n";
-        code_ << "    comr r0\n";
-        code_ << "    mvo r0," << kVScratch[i] << "\n";
+        emit("mvi", cat(kVScratch[i], ",r0"));
+        emit("comr", "r0");
+        emit("mvo", cat("r0,", kVScratch[i]));
     }
-    code_ << "    mvi " << kVScratch[0] << ",r0\n";
-    code_ << "    add 1,r0\n";
-    code_ << "    mvo r0," << kVScratch[0] << "\n";
+    emit("mvi", cat(kVScratch[0], ",r0"));
+    emit("add", "1,r0");
+    emit("mvo", cat("r0,", kVScratch[0]));
     for (int i = 1; i < words; i++) {
-        code_ << "    mvi " << kVScratch[i] << ",r0\n";
-        code_ << "    adcr r0\n";
-        code_ << "    mvo r0," << kVScratch[i] << "\n";
+        emit("mvi", cat(kVScratch[i], ",r0"));
+        emit("adcr", "r0");
+        emit("mvo", cat("r0,", kVScratch[i]));
     }
 }
 
@@ -594,78 +603,102 @@ void CP1610Codegen::genWideNegate(int words) {
 // Pdp11Codegen.cpp's own genWideAdd(), using this CPU's real `SETC` instead of PDP-11's compare-
 // based workaround).
 void CP1610Codegen::genWideRippleAdd(int words) {
-    code_ << "    mvi " << kWScratch[0] << ",r0\n";
-    code_ << "    mvi " << kVScratch[0] << ",r1\n";
-    code_ << "    addr r1,r0\n";
-    code_ << "    mvo r0," << kWScratch[0] << "\n";
+    emit("mvi", cat(kWScratch[0], ",r0"));
+    emit("mvi", cat(kVScratch[0], ",r1"));
+    emit("addr", "r1,r0");
+    emit("mvo", cat("r0,", kWScratch[0]));
     for (int i = 1; i < words; i++) {
         std::string Lcarried = newLabel(), Ldone = newLabel();
-        code_ << "    mvi " << kWScratch[i] << ",r0\n";
-        code_ << "    adcr r0\n";
-        code_ << "    bc " << Lcarried << "\n";
-        code_ << "    mvi " << kVScratch[i] << ",r1\n";
-        code_ << "    addr r1,r0\n";
-        code_ << "    b " << Ldone << "\n";
-        code_ << Lcarried << ":\n";
-        code_ << "    mvi " << kVScratch[i] << ",r1\n";
-        code_ << "    addr r1,r0\n";
-        code_ << "    setc\n";
-        code_ << Ldone << ":\n";
-        code_ << "    mvo r0," << kWScratch[i] << "\n";
+        emit("mvi", cat(kWScratch[i], ",r0"));
+        emit("adcr", "r0");
+        emit("bc", Lcarried);
+        emit("mvi", cat(kVScratch[i], ",r1"));
+        emit("addr", "r1,r0");
+        emit("b", Ldone);
+        emitLabel(Lcarried);
+        emit("mvi", cat(kVScratch[i], ",r1"));
+        emit("addr", "r1,r0");
+        emit("setc");
+        emitLabel(Ldone);
+        emit("mvo", cat("r0,", kWScratch[i]));
     }
 }
 
 void CP1610Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd, int words) {
     genExpr(lhs);
     genExpr(rhs);
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kVScratch[i] << "\n";
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kWScratch[i] << "\n";
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kVScratch[i]));
+    }
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kWScratch[i]));
+    }
     if (!isAdd) genWideNegate(words);
     genWideRippleAdd(words);
-    for (int i = words - 1; i >= 0; i--) code_ << "    mvi " << kWScratch[i] << ",r0\n    pshr r0\n";
+    for (int i = words - 1; i >= 0; i--) {
+        emit("mvi", cat(kWScratch[i], ",r0"));
+        emit("pshr", "r0");
+    }
 }
 
 void CP1610Codegen::genWideBitwise(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &op, int words) {
     genExpr(lhs);
     genExpr(rhs);
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kVScratch[i] << "\n";
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kWScratch[i] << "\n";
     for (int i = 0; i < words; i++) {
-        code_ << "    mvi " << kWScratch[i] << ",r0\n";
-        code_ << "    mvi " << kVScratch[i] << ",r1\n";
-        if (op == "&") {
-            code_ << "    andr r1,r0\n";
-        } else if (op == "^") {
-            code_ << "    xorr r1,r0\n";
-        } else {  // "|" - no real OR exists on this CPU; De Morgan: a|b = ~(~a & ~b)
-            code_ << "    comr r0\n";
-            code_ << "    comr r1\n";
-            code_ << "    andr r1,r0\n";
-            code_ << "    comr r0\n";
-        }
-        code_ << "    mvo r0," << kWScratch[i] << "\n";
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kVScratch[i]));
     }
-    for (int i = words - 1; i >= 0; i--) code_ << "    mvi " << kWScratch[i] << ",r0\n    pshr r0\n";
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kWScratch[i]));
+    }
+    for (int i = 0; i < words; i++) {
+        emit("mvi", cat(kWScratch[i], ",r0"));
+        emit("mvi", cat(kVScratch[i], ",r1"));
+        if (op == "&") {
+            emit("andr", "r1,r0");
+        } else if (op == "^") {
+            emit("xorr", "r1,r0");
+        } else {  // "|" - no real OR exists on this CPU; De Morgan: a|b = ~(~a & ~b)
+            emit("comr", "r0");
+            emit("comr", "r1");
+            emit("andr", "r1,r0");
+            emit("comr", "r0");
+        }
+        emit("mvo", cat("r0,", kWScratch[i]));
+    }
+    for (int i = words - 1; i >= 0; i--) {
+        emit("mvi", cat(kWScratch[i], ",r0"));
+        emit("pshr", "r0");
+    }
 }
 
 void CP1610Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned,
                                     int words) {
     genExpr(lhs);
     genExpr(rhs);
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kVScratch[i] << "\n";
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kWScratch[i] << "\n";
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kVScratch[i]));
+    }
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kWScratch[i]));
+    }
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         for (int i = words - 1; i >= 0; i--) {
-            code_ << "    mvi " << kWScratch[i] << ",r0\n";
-            code_ << "    mvi " << kVScratch[i] << ",r1\n";
-            code_ << "    cmpr r1,r0\n";
+            emit("mvi", cat(kWScratch[i], ",r0"));
+            emit("mvi", cat(kVScratch[i], ",r1"));
+            emit("cmpr", "r1,r0");
             std::string Lcontinue = newLabel();
-            code_ << "    bze " << Lcontinue << "\n";
-            code_ << "    b " << (op == "==" ? Lfalse : Ltrue) << "\n";
-            code_ << Lcontinue << ":\n";
+            emit("bze", Lcontinue);
+            emit("b", op == "==" ? Lfalse : Ltrue);
+            emitLabel(Lcontinue);
         }
-        code_ << "    b " << (op == "==" ? Ltrue : Lfalse) << "\n";
+        emit("b", op == "==" ? Ltrue : Lfalse);
     } else {
         std::string signedBranch = op == "<" ? "blt" : op == "<=" ? "ble" : op == ">" ? "bgt" : "bge";
         // Once a word differs (the `bze` below didn't fire), a strict `<`/`>` on that one word
@@ -674,27 +707,32 @@ void CP1610Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, c
         // (for `<`/`<=`) or `bc` (for `>`/`>=`).
         bool wantLess = (op == "<" || op == "<=");
         for (int i = words - 1; i >= 0; i--) {
-            code_ << "    mvi " << kWScratch[i] << ",r0\n";
-            code_ << "    mvi " << kVScratch[i] << ",r1\n";
-            code_ << "    cmpr r1,r0\n";
+            emit("mvi", cat(kWScratch[i], ",r0"));
+            emit("mvi", cat(kVScratch[i], ",r1"));
+            emit("cmpr", "r1,r0");
             std::string Lcontinue = newLabel();
-            code_ << "    bze " << Lcontinue << "\n";
+            emit("bze", Lcontinue);
             bool useSigned = (i == words - 1) && !isUnsigned;
             if (useSigned) {
-                code_ << "    " << signedBranch << " " << Ltrue << "\n";
-                code_ << "    b " << Lfalse << "\n";
+                emit(signedBranch, Ltrue);
+                emit("b", Lfalse);
             } else if (wantLess) {
-                code_ << "    bnc " << Ltrue << "\n    b " << Lfalse << "\n";
+                emit("bnc", Ltrue);
+                emit("b", Lfalse);
             } else {
-                code_ << "    bc " << Ltrue << "\n    b " << Lfalse << "\n";
+                emit("bc", Ltrue);
+                emit("b", Lfalse);
             }
-            code_ << Lcontinue << ":\n";
+            emitLabel(Lcontinue);
         }
-        code_ << "    b " << Lfalse << "\n";
+        emit("b", Lfalse);
     }
-    code_ << Lfalse << ":\n    mvii 0,r0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mvii 1,r0\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lfalse);
+    emit("mvii", "0,r0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mvii", "1,r0");
+    emitLabel(Ldone);
 }
 
 // A `long`/`long long` shifted by a runtime count loops one bit at a time via `RLC`/`RRC`
@@ -703,23 +741,26 @@ void CP1610Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, c
 // genWideAdd() is.
 void CP1610Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned, int words) {
     genExpr(lhs);
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kWScratch[i] << "\n";
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kWScratch[i]));
+    }
     genExpr(rhs);  // r0 = shift count
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    tstr r0\n";
-    code_ << "    bze " << Ldone << "\n";
-    code_ << "    movr r0,r1\n";  // stash the remaining count (r0 is clobbered below)
-    code_ << "    clrc\n";
+    emitLabel(Lloop);
+    emit("tstr", "r0");
+    emit("bze", Ldone);
+    emit("movr", "r0,r1");  // stash the remaining count (r0 is clobbered below)
+    emit("clrc");
     if (isLeft) {
         for (int i = 0; i < words; i++) {
-            code_ << "    mvi " << kWScratch[i] << ",r0\n";
-            code_ << "    rlc r0,1\n";
-            code_ << "    mvo r0," << kWScratch[i] << "\n";
+            emit("mvi", cat(kWScratch[i], ",r0"));
+            emit("rlc", "r0,1");
+            emit("mvo", cat("r0,", kWScratch[i]));
         }
     } else {
         for (int i = words - 1; i >= 0; i--) {
-            code_ << "    mvi " << kWScratch[i] << ",r0\n";
+            emit("mvi", cat(kWScratch[i], ",r0"));
             if (i == words - 1 && !isUnsigned) {
                 // `SARC` (not `RRC`) for the top word only: a real arithmetic shift (sign-fills
                 // bit 15, instead of pulling in whatever's in the carry flag) that *also*
@@ -727,18 +768,21 @@ void CP1610Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool 
                 // own `RRC` - `RRC` alone (as every other word here uses) only ever rotates the
                 // carry flag in, which is the wrong fill for the very first (most significant)
                 // word of a signed shift.
-                code_ << "    sarc r0,1\n";
+                emit("sarc", "r0,1");
             } else {
-                code_ << "    rrc r0,1\n";
+                emit("rrc", "r0,1");
             }
-            code_ << "    mvo r0," << kWScratch[i] << "\n";
+            emit("mvo", cat("r0,", kWScratch[i]));
         }
     }
-    code_ << "    movr r1,r0\n";
-    code_ << "    decr r0\n";
-    code_ << "    b " << Lloop << "\n";
-    code_ << Ldone << ":\n";
-    for (int i = words - 1; i >= 0; i--) code_ << "    mvi " << kWScratch[i] << ",r0\n    pshr r0\n";
+    emit("movr", "r1,r0");
+    emit("decr", "r0");
+    emit("b", Lloop);
+    emitLabel(Ldone);
+    for (int i = words - 1; i >= 0; i--) {
+        emit("mvi", cat(kWScratch[i], ",r0"));
+        emit("pshr", "r0");
+    }
 }
 
 // Deliberately not implemented - the CP1610 has no multiply/divide instruction even for a
@@ -773,25 +817,25 @@ void CP1610Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         int words = wordCountOf(from);
         genExpr(*e.lhs);
-        code_ << "    pulr r0\n";                               // the low word is this type's own truncated value
-        for (int i = 1; i < words; i++) code_ << "    pulr r1\n";  // discard the rest
+        emit("pulr", "r0");                                    // the low word is this type's own truncated value
+        for (int i = 1; i < words; i++) emit("pulr", "r1");  // discard the rest
         if (isCharType(to)) narrowR0To(to);
         return;
     }
     if (!fromWide && toWide) {
         int toWords = wordCountOf(to);
         genExpr(*e.lhs);  // r0 = the native-width value, already correctly sign/zero-extended
-        code_ << "    movr r0,r1\n";
+        emit("movr", "r0,r1");
         if (from.isUnsigned) {
-            code_ << "    mvii 0,r0\n";
+            emit("mvii", "0,r0");
         } else {
             // Sign-extend r1's sign bit into r0: 0 or -1 depending on r1's own top bit.
-            code_ << "    movr r1,r0\n";
-            code_ << "    sar r0,2\n    sar r0,2\n    sar r0,2\n    sar r0,2\n";  // r0 >>= 8 (arithmetic)
-            code_ << "    sar r0,2\n    sar r0,2\n    sar r0,2\n    sar r0,2\n";  // r0 >>= 8 more (= 16, all-sign)
+            emit("movr", "r1,r0");
+            for (int i = 0; i < 4; i++) emit("sar", "r0,2");  // r0 >>= 8 (arithmetic)
+            for (int i = 0; i < 4; i++) emit("sar", "r0,2");  // r0 >>= 8 more (= 16, all-sign)
         }
-        for (int i = 1; i < toWords; i++) code_ << "    pshr r0\n";
-        code_ << "    pshr r1\n";
+        for (int i = 1; i < toWords; i++) emit("pshr", "r0");
+        emit("pshr", "r1");
         return;
     }
     int fromWords = wordCountOf(from);
@@ -801,18 +845,18 @@ void CP1610Codegen::genConvert(const ir::Expr &e) {
         static const char *const tempRegs[] = {"r1", "r3"};
         // Pop the existing fromWords words into scratch, computing the sign-extension word
         // from the most significant one first.
-        for (int i = 0; i < fromWords; i++) code_ << "    pulr " << (i == 0 ? "r0" : tempRegs[i - 1]) << "\n";
-        code_ << "    movr " << (fromWords == 1 ? "r0" : tempRegs[fromWords - 2]) << ",r2\n";
+        for (int i = 0; i < fromWords; i++) emit("pulr", i == 0 ? "r0" : tempRegs[i - 1]);
+        emit("movr", cat(fromWords == 1 ? "r0" : tempRegs[fromWords - 2], ",r2"));
         if (to.isUnsigned && from.isUnsigned) {
-            code_ << "    mvii 0,r2\n";
+            emit("mvii", "0,r2");
         } else {
-            code_ << "    sar r2,2\n    sar r2,2\n    sar r2,2\n    sar r2,2\n";
-            code_ << "    sar r2,2\n    sar r2,2\n    sar r2,2\n    sar r2,2\n";
+            for (int i = 0; i < 4; i++) emit("sar", "r2,2");
+            for (int i = 0; i < 4; i++) emit("sar", "r2,2");
         }
-        for (int i = 0; i < toWords - fromWords; i++) code_ << "    pshr r2\n";
-        for (int i = fromWords - 1; i >= 0; i--) code_ << "    pshr " << (i == 0 ? "r0" : tempRegs[i - 1]) << "\n";
+        for (int i = 0; i < toWords - fromWords; i++) emit("pshr", "r2");
+        for (int i = fromWords - 1; i >= 0; i--) emit("pshr", i == 0 ? "r0" : tempRegs[i - 1]);
     } else if (toWords < fromWords) {
-        for (int i = 0; i < fromWords - toWords; i++) code_ << "    pulr r0\n";
+        for (int i = 0; i < fromWords - toWords; i++) emit("pulr", "r0");
     }
 }
 
@@ -823,12 +867,12 @@ void CP1610Codegen::genConvert(const ir::Expr &e) {
 void CP1610Codegen::narrowR0To(Type to) {
     if (!isCharType(to)) return;
     if (to.isUnsigned) {
-        code_ << "    and 0x00FF,r0\n";
+        emit("and", "0x00FF,r0");
         return;
     }
-    code_ << "    and 0x00FF,r0\n";
-    code_ << "    sll r0,2\n    sll r0,2\n    sll r0,2\n    sll r0,2\n";  // r0 <<= 8
-    code_ << "    sar r0,2\n    sar r0,2\n    sar r0,2\n    sar r0,2\n";  // r0 >>= 8 (arithmetic)
+    emit("and", "0x00FF,r0");
+    for (int i = 0; i < 4; i++) emit("sll", "r0,2");  // r0 <<= 8
+    for (int i = 0; i < 4; i++) emit("sar", "r0,2");  // r0 >>= 8 (arithmetic)
 }
 
 // Software 16x16->16 (truncated) multiply: standard shift-and-add, 16 iterations. r1 = the
@@ -838,27 +882,27 @@ void CP1610Codegen::narrowR0To(Type to) {
 // counter, r0 = the running result - the CP1610 has no multiply instruction at all.
 void CP1610Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    pshr r0\n";
+    emit("pshr", "r0");
     genExpr(rhs);
-    code_ << "    movr r0,r2\n";  // r2 = rhs (the multiplier, consumed)
-    code_ << "    pulr r1\n";     // r1 = lhs (the multiplicand)
-    code_ << "    mvii 0,r0\n";   // r0 = running result
-    code_ << "    mvii 16,r3\n";
+    emit("movr", "r0,r2");  // r2 = rhs (the multiplier, consumed)
+    emit("pulr", "r1");     // r1 = lhs (the multiplicand)
+    emit("mvii", "0,r0");   // r0 = running result
+    emit("mvii", "16,r3");
     std::string Lloop = newLabel(), Ladd = newLabel(), Lskip = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    tstr r3\n";
-    code_ << "    bze " << Ldone << "\n";
-    code_ << "    clrc\n";
-    code_ << "    rrc r2,1\n";
-    code_ << "    bc " << Ladd << "\n";
-    code_ << "    b " << Lskip << "\n";
-    code_ << Ladd << ":\n";
-    code_ << "    addr r1,r0\n";
-    code_ << Lskip << ":\n";
-    code_ << "    sll r1,1\n";
-    code_ << "    decr r3\n";
-    code_ << "    b " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emitLabel(Lloop);
+    emit("tstr", "r3");
+    emit("bze", Ldone);
+    emit("clrc");
+    emit("rrc", "r2,1");
+    emit("bc", Ladd);
+    emit("b", Lskip);
+    emitLabel(Ladd);
+    emit("addr", "r1,r0");
+    emitLabel(Lskip);
+    emit("sll", "r1,1");
+    emit("decr", "r3");
+    emit("b", Lloop);
+    emitLabel(Ldone);
 }
 
 // Software restoring division, unrolled 16 iterations (no hardware multiply/divide exists on
@@ -874,46 +918,59 @@ void CP1610Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // sign, C's own truncating-division convention) afterward.
 void CP1610Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pshr r0\n";
+    emit("pshr", "r0");
     genExpr(rhs);
-    code_ << "    movr r0,r1\n";  // r1 = divisor
-    code_ << "    pulr r0\n";     // r0 = dividend
+    emit("movr", "r0,r1");  // r1 = divisor
+    emit("pulr", "r0");     // r0 = dividend
     if (!isUnsigned) {
         std::string Lskip1 = newLabel(), Lskip2 = newLabel();
-        code_ << "    mvii 0,r2\n    tstr r0\n    bpl " << Lskip1 << "\n";
-        code_ << "    mvii 1,r2\n    negr r0\n";
-        code_ << Lskip1 << ":\n    mvo r2,__dsign\n";
-        code_ << "    mvii 0,r2\n    tstr r1\n    bpl " << Lskip2 << "\n";
-        code_ << "    mvii 1,r2\n    negr r1\n";
-        code_ << Lskip2 << ":\n    mvo r2,__ssign\n";
+        emit("mvii", "0,r2");
+        emit("tstr", "r0");
+        emit("bpl", Lskip1);
+        emit("mvii", "1,r2");
+        emit("negr", "r0");
+        emitLabel(Lskip1);
+        emit("mvo", "r2,__dsign");
+        emit("mvii", "0,r2");
+        emit("tstr", "r1");
+        emit("bpl", Lskip2);
+        emit("mvii", "1,r2");
+        emit("negr", "r1");
+        emitLabel(Lskip2);
+        emit("mvo", "r2,__ssign");
     }
-    code_ << "    mvii 0,r2\n";  // remainder
-    code_ << "    mvii 0,r3\n";  // quotient
+    emit("mvii", "0,r2");  // remainder
+    emit("mvii", "0,r3");  // quotient
     for (int i = 0; i < 16; i++) {
         std::string Lge = newLabel(), Lcont = newLabel();
-        code_ << "    clrc\n";
-        code_ << "    sllc r0,1\n";
-        code_ << "    rlc r2,1\n";
-        code_ << "    cmpr r1,r2\n";
-        code_ << "    bc " << Lge << "\n";
-        code_ << "    clrc\n";
-        code_ << "    b " << Lcont << "\n";
-        code_ << Lge << ":\n";
-        code_ << "    subr r1,r2\n";
-        code_ << "    setc\n";
-        code_ << Lcont << ":\n";
-        code_ << "    rlc r3,1\n";
+        emit("clrc");
+        emit("sllc", "r0,1");
+        emit("rlc", "r2,1");
+        emit("cmpr", "r1,r2");
+        emit("bc", Lge);
+        emit("clrc");
+        emit("b", Lcont);
+        emitLabel(Lge);
+        emit("subr", "r1,r2");
+        emit("setc");
+        emitLabel(Lcont);
+        emit("rlc", "r3,1");
     }
     if (!isUnsigned) {
         std::string LsameSign = newLabel(), LnoNegRem = newLabel();
-        code_ << "    mvi __dsign,r0\n    mvi __ssign,r1\n    cmpr r1,r0\n    bze " << LsameSign << "\n";
-        code_ << "    negr r3\n";
-        code_ << LsameSign << ":\n";
-        code_ << "    mvi __dsign,r0\n    tstr r0\n    bze " << LnoNegRem << "\n";
-        code_ << "    negr r2\n";
-        code_ << LnoNegRem << ":\n";
+        emit("mvi", "__dsign,r0");
+        emit("mvi", "__ssign,r1");
+        emit("cmpr", "r1,r0");
+        emit("bze", LsameSign);
+        emit("negr", "r3");
+        emitLabel(LsameSign);
+        emit("mvi", "__dsign,r0");
+        emit("tstr", "r0");
+        emit("bze", LnoNegRem);
+        emit("negr", "r2");
+        emitLabel(LnoNegRem);
     }
-    code_ << "    movr " << (wantRemainder ? "r2" : "r3") << ",r0\n";
+    emit("movr", cat(wantRemainder ? "r2" : "r3", ",r0"));
 }
 
 int CP1610Codegen::localArrayBase(const ir::Slot *slot) { return ir::localLowOffset(*slot, typeWidths()); }
@@ -926,44 +983,53 @@ void CP1610Codegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) 
     genExpr(idxExpr);  // r0 = index
     int shift = elemShift(slot->type);
     if (shift >= 0) {
-        for (int i = 0; i < shift; i++) code_ << "    addr r0,r0\n";
+        for (int i = 0; i < shift; i++) emit("addr", "r0,r0");
     } else {
         // A non-power-of-two element width (e.g. a packed struct's) has no shift-based scaling;
         // multiply by the real width in place, inline, with the same shift-and-add technique
         // genMul() uses (r1=multiplicand/index, r2=multiplier/width consumed, r3=counter, r0=
         // the running result) - both operands are already available without a real genMul()
         // call's own push/pop dance.
-        code_ << "    movr r0,r1\n";
-        code_ << "    mvii " << widthOfType(slot->type) << ",r2\n";
-        code_ << "    mvii 0,r0\n";
-        code_ << "    mvii 16,r3\n";
+        emit("movr", "r0,r1");
+        emit("mvii", cat(widthOfType(slot->type), ",r2"));
+        emit("mvii", "0,r0");
+        emit("mvii", "16,r3");
         std::string Lloop = newLabel(), Ladd = newLabel(), Lskip = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n    tstr r3\n    bze " << Ldone << "\n";
-        code_ << "    clrc\n    rrc r2,1\n    bc " << Ladd << "\n    b " << Lskip << "\n";
-        code_ << Ladd << ":\n    addr r1,r0\n";
-        code_ << Lskip << ":\n    sll r1,1\n    decr r3\n    b " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emitLabel(Lloop);
+        emit("tstr", "r3");
+        emit("bze", Ldone);
+        emit("clrc");
+        emit("rrc", "r2,1");
+        emit("bc", Ladd);
+        emit("b", Lskip);
+        emitLabel(Ladd);
+        emit("addr", "r1,r0");
+        emitLabel(Lskip);
+        emit("sll", "r1,1");
+        emit("decr", "r3");
+        emit("b", Lloop);
+        emitLabel(Ldone);
     }
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    mvii " << label(slot) << ",r2\n";
+            emit("mvii", cat(label(slot), ",r2"));
         } else {
-            code_ << "    movr r4,r2\n";
+            emit("movr", "r4,r2");
             int below = localArrayBase(slot);
-            if (below > 0) code_ << "    sub " << below << ",r2\n";
+            if (below > 0) emit("sub", cat(below, ",r2"));
         }
-        code_ << "    addr r0,r2\n";
+        emit("addr", "r0,r2");
         return;
     }
     // A plain pointer variable: load its own stored value (the base address) first.
     if (slot->kind == ir::SlotKind::Global) {
-        code_ << "    mvi " << label(slot) << ",r2\n";
+        emit("mvi", cat(label(slot), ",r2"));
     } else {
-        genSlotAddr(slot);     // r2 = the pointer variable's own address
-        code_ << "    mvi [r2],r3\n";
-        code_ << "    movr r3,r2\n";  // r2 = the pointer's stored value
+        genSlotAddr(slot);  // r2 = the pointer variable's own address
+        emit("mvi", "[r2],r3");
+        emit("movr", "r3,r2");  // r2 = the pointer's stored value
     }
-    code_ << "    addr r0,r2\n";
+    emit("addr", "r0,r2");
 }
 
 void CP1610Codegen::genIndex(const ir::Expr &e) {
@@ -979,15 +1045,15 @@ void CP1610Codegen::genLocalArrayInit(const ir::Slot *slot) {
     for (size_t i = 0; i < slot->arrayInit.size(); i++) {
         const ir::ArrayInitElem &elem = slot->arrayInit[i];
         if (elem.isSymbol) {
-            code_ << "    mvii " << (elem.slot ? label(elem.slot) : label(elem.func)) << ",r0\n";
+            emit("mvii", cat(elem.slot ? label(elem.slot) : label(elem.func), ",r0"));
         } else {
-            code_ << "    mvii " << static_cast<int>(static_cast<uint16_t>(elem.value)) << ",r0\n";
+            emit("mvii", cat(static_cast<int>(static_cast<uint16_t>(elem.value)), ",r0"));
         }
-        code_ << "    movr r4,r2\n";
+        emit("movr", "r4,r2");
         int elemW = widthOfType(slot->type);
         int below = localArrayBase(slot) - elemW * static_cast<int>(i);
-        if (below > 0) code_ << "    sub " << below << ",r2\n";
-        code_ << "    mvo r0,[r2]\n";
+        if (below > 0) emit("sub", cat(below, ",r2"));
+        emit("mvo", "r0,[r2]");
     }
 }
 
@@ -997,25 +1063,25 @@ void CP1610Codegen::genLocalArrayInit(const ir::Slot *slot) {
 void CP1610Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    mvii " << label(operand.slot) << ",r0\n";
+            emit("mvii", cat(label(operand.slot), ",r0"));
             return;
         }
-        code_ << "    movr r4,r0\n";
+        emit("movr", "r4,r0");
         if (operand.slot->kind == ir::SlotKind::Param) {
-            if (operand.slot->frameOffset > 0) code_ << "    add " << operand.slot->frameOffset << ",r0\n";
+            if (operand.slot->frameOffset > 0) emit("add", cat(operand.slot->frameOffset, ",r0"));
         } else {
             int below = ir::localOffsetDescendingWide(*operand.slot, typeWidths());
-            if (below > 0) code_ << "    sub " << below << ",r0\n";
+            if (below > 0) emit("sub", cat(below, ",r0"));
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Index) {
         genIndexAddr(operand.slot, *operand.lhs);
-        code_ << "    movr r2,r0\n";
+        emit("movr", "r2,r0");
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    mvii " << label(operand.func) << ",r0\n";
+        emit("mvii", cat(label(operand.func), ",r0"));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -1024,39 +1090,56 @@ void CP1610Codegen::genAddrOf(const ir::Expr &operand) {
 // Entry convention: r0 = old value, r1 = rhs value, both at `type`'s width/signedness.
 void CP1610Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    addr r1,r0\n"; return; }
-    if (op == "-") { code_ << "    subr r1,r0\n"; return; }
-    if (op == "&") { code_ << "    andr r1,r0\n"; return; }
-    if (op == "^") { code_ << "    xorr r1,r0\n"; return; }
+    if (op == "+") { emit("addr", "r1,r0"); return; }
+    if (op == "-") { emit("subr", "r1,r0"); return; }
+    if (op == "&") { emit("andr", "r1,r0"); return; }
+    if (op == "^") { emit("xorr", "r1,r0"); return; }
     if (op == "|") {
-        code_ << "    comr r0\n    comr r1\n    andr r1,r0\n    comr r0\n";  // De Morgan: a|b = ~(~a & ~b)
+        // De Morgan: a|b = ~(~a & ~b)
+        emit("comr", "r0");
+        emit("comr", "r1");
+        emit("andr", "r1,r0");
+        emit("comr", "r0");
         return;
     }
     if (op == "*") {
         // r0/r1 already hold the operands this needs; inline the same shift-and-add technique
         // genMul() uses rather than round-tripping through genExpr().
-        code_ << "    mvii 0,r2\n    mvii 16,r3\n";
+        emit("mvii", "0,r2");
+        emit("mvii", "16,r3");
         std::string Lloop = newLabel(), Ladd = newLabel(), Lskip = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n    tstr r3\n    bze " << Ldone << "\n";
-        code_ << "    clrc\n    rrc r1,1\n    bc " << Ladd << "\n    b " << Lskip << "\n";
-        code_ << Ladd << ":\n    addr r0,r2\n";
-        code_ << Lskip << ":\n    sll r0,1\n    decr r3\n    b " << Lloop << "\n";
-        code_ << Ldone << ":\n    movr r2,r0\n";
+        emitLabel(Lloop);
+        emit("tstr", "r3");
+        emit("bze", Ldone);
+        emit("clrc");
+        emit("rrc", "r1,1");
+        emit("bc", Ladd);
+        emit("b", Lskip);
+        emitLabel(Ladd);
+        emit("addr", "r0,r2");
+        emitLabel(Lskip);
+        emit("sll", "r0,1");
+        emit("decr", "r3");
+        emit("b", Lloop);
+        emitLabel(Ldone);
+        emit("movr", "r2,r0");
         return;
     }
     if (op == "<<" || op == ">>") {
         std::string Lloop = newLabel(), Ldone = newLabel();
-        code_ << Lloop << ":\n    tstr r1\n    bze " << Ldone << "\n";
+        emitLabel(Lloop);
+        emit("tstr", "r1");
+        emit("bze", Ldone);
         if (op == "<<") {
-            code_ << "    sll r0,1\n";
+            emit("sll", "r0,1");
         } else if (isUnsigned) {
-            code_ << "    slr r0,1\n";
+            emit("slr", "r0,1");
         } else {
-            code_ << "    sar r0,1\n";
+            emit("sar", "r0,1");
         }
-        code_ << "    decr r1\n";
-        code_ << "    b " << Lloop << "\n";
-        code_ << Ldone << ":\n";
+        emit("decr", "r1");
+        emit("b", Lloop);
+        emitLabel(Ldone);
         return;
     }
     // "/" or "%": r0 = old (dividend), r1 = rhs (divisor) - already exactly genDivMod()'s own
@@ -1065,54 +1148,76 @@ void CP1610Codegen::genCompoundOp(const std::string &op, Type type) {
     bool wantRemainder = (op == "%");
     if (!isUnsigned) {
         std::string Lskip1 = newLabel(), Lskip2 = newLabel();
-        code_ << "    mvii 0,r2\n    tstr r0\n    bpl " << Lskip1 << "\n";
-        code_ << "    mvii 1,r2\n    negr r0\n";
-        code_ << Lskip1 << ":\n    mvo r2,__dsign\n";
-        code_ << "    mvii 0,r2\n    tstr r1\n    bpl " << Lskip2 << "\n";
-        code_ << "    mvii 1,r2\n    negr r1\n";
-        code_ << Lskip2 << ":\n    mvo r2,__ssign\n";
+        emit("mvii", "0,r2");
+        emit("tstr", "r0");
+        emit("bpl", Lskip1);
+        emit("mvii", "1,r2");
+        emit("negr", "r0");
+        emitLabel(Lskip1);
+        emit("mvo", "r2,__dsign");
+        emit("mvii", "0,r2");
+        emit("tstr", "r1");
+        emit("bpl", Lskip2);
+        emit("mvii", "1,r2");
+        emit("negr", "r1");
+        emitLabel(Lskip2);
+        emit("mvo", "r2,__ssign");
     }
-    code_ << "    mvii 0,r2\n    mvii 0,r3\n";
+    emit("mvii", "0,r2");
+    emit("mvii", "0,r3");
     for (int i = 0; i < 16; i++) {
         std::string Lge = newLabel(), Lcont = newLabel();
-        code_ << "    clrc\n    sllc r0,1\n    rlc r2,1\n    cmpr r1,r2\n    bc " << Lge << "\n";
-        code_ << "    clrc\n    b " << Lcont << "\n";
-        code_ << Lge << ":\n    subr r1,r2\n    setc\n";
-        code_ << Lcont << ":\n    rlc r3,1\n";
+        emit("clrc");
+        emit("sllc", "r0,1");
+        emit("rlc", "r2,1");
+        emit("cmpr", "r1,r2");
+        emit("bc", Lge);
+        emit("clrc");
+        emit("b", Lcont);
+        emitLabel(Lge);
+        emit("subr", "r1,r2");
+        emit("setc");
+        emitLabel(Lcont);
+        emit("rlc", "r3,1");
     }
     if (!isUnsigned) {
         std::string LsameSign = newLabel(), LnoNegRem = newLabel();
-        code_ << "    mvi __dsign,r0\n    mvi __ssign,r1\n    cmpr r1,r0\n    bze " << LsameSign << "\n";
-        code_ << "    negr r3\n";
-        code_ << LsameSign << ":\n";
-        code_ << "    mvi __dsign,r0\n    tstr r0\n    bze " << LnoNegRem << "\n";
-        code_ << "    negr r2\n";
-        code_ << LnoNegRem << ":\n";
+        emit("mvi", "__dsign,r0");
+        emit("mvi", "__ssign,r1");
+        emit("cmpr", "r1,r0");
+        emit("bze", LsameSign);
+        emit("negr", "r3");
+        emitLabel(LsameSign);
+        emit("mvi", "__dsign,r0");
+        emit("tstr", "r0");
+        emit("bze", LnoNegRem);
+        emit("negr", "r2");
+        emitLabel(LnoNegRem);
     }
-    code_ << "    movr " << (wantRemainder ? "r2" : "r3") << ",r0\n";
+    emit("movr", cat(wantRemainder ? "r2" : "r3", ",r0"));
 }
 
 // r2 must already hold the resolved address on entry. The address rides the real stack (not a
 // register) across evaluating rhs, since that evaluation may use any register.
 void CP1610Codegen::genCompoundThroughR2(const ir::Expr &e) {
-    code_ << "    pshr r2\n";
+    emit("pshr", "r2");
     genExpr(*e.rhs);
-    code_ << "    movr r0,r1\n";
-    code_ << "    pulr r2\n";
-    code_ << "    mvi [r2],r0\n";
+    emit("movr", "r0,r1");
+    emit("pulr", "r2");
+    emit("mvi", "[r2],r0");
     if (isCharType(e.type)) narrowR0To(e.type);  // r0 = old
-    code_ << "    pshr r2\n";
-    if (e.yieldOld) code_ << "    pshr r0\n";
+    emit("pshr", "r2");
+    if (e.yieldOld) emit("pshr", "r0");
     genCompoundOp(e.op, e.type);  // r0 = new (raw)
     narrowR0To(e.type);
     if (e.yieldOld) {
-        code_ << "    pulr r1\n";      // r1 = old value (pushed last above, popped first)
-        code_ << "    pulr r2\n";      // r2 = address
-        code_ << "    mvo r0,[r2]\n";  // writes the new value (still in r0)
-        code_ << "    movr r1,r0\n";   // r0 = old (final result)
+        emit("pulr", "r1");      // r1 = old value (pushed last above, popped first)
+        emit("pulr", "r2");      // r2 = address
+        emit("mvo", "r0,[r2]");  // writes the new value (still in r0)
+        emit("movr", "r1,r0");   // r0 = old (final result)
     } else {
-        code_ << "    pulr r2\n";      // r2 = address
-        code_ << "    mvo r0,[r2]\n";  // r0 already = new
+        emit("pulr", "r2");      // r2 = address
+        emit("mvo", "r0,[r2]");  // r0 already = new
     }
 }
 
@@ -1128,14 +1233,14 @@ void CP1610Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pshr r0\n";
+        emit("pshr", "r0");
         genExpr(*e.rhs);
-        code_ << "    pulr r1\n";  // r1 = lhs, r0 = rhs
+        emit("pulr", "r1");  // r1 = lhs, r0 = rhs
         if (op == "+") {
-            code_ << "    addr r1,r0\n";
+            emit("addr", "r1,r0");
         } else {
-            code_ << "    subr r0,r1\n";  // r1 = r1 - r0 = lhs - rhs
-            code_ << "    movr r1,r0\n";
+            emit("subr", "r0,r1");  // r1 = r1 - r0 = lhs - rhs
+            emit("movr", "r1,r0");
         }
         return;
     }
@@ -1161,15 +1266,18 @@ void CP1610Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    pshr r0\n";
+        emit("pshr", "r0");
         genExpr(*e.rhs);
-        code_ << "    pulr r1\n";  // r1 = lhs, r0 = rhs
+        emit("pulr", "r1");  // r1 = lhs, r0 = rhs
         if (op == "&") {
-            code_ << "    andr r1,r0\n";
+            emit("andr", "r1,r0");
         } else if (op == "^") {
-            code_ << "    xorr r1,r0\n";
+            emit("xorr", "r1,r0");
         } else {  // "|" - De Morgan: a|b = ~(~a & ~b)
-            code_ << "    comr r0\n    comr r1\n    andr r1,r0\n    comr r0\n";
+            emit("comr", "r0");
+            emit("comr", "r1");
+            emit("andr", "r1,r0");
+            emit("comr", "r0");
         }
         return;
     }
@@ -1200,22 +1308,24 @@ void CP1610Codegen::genBinary(const ir::Expr &e) {
 // (the same technique genWideShift() uses per-word).
 void CP1610Codegen::genShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    pshr r0\n";
+    emit("pshr", "r0");
     genExpr(rhs);
-    code_ << "    movr r0,r1\n";  // r1 = shift count
-    code_ << "    pulr r0\n";     // r0 = value to shift
+    emit("movr", "r0,r1");  // r1 = shift count
+    emit("pulr", "r0");     // r0 = value to shift
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    tstr r1\n    bze " << Ldone << "\n";
+    emitLabel(Lloop);
+    emit("tstr", "r1");
+    emit("bze", Ldone);
     if (isLeft) {
-        code_ << "    sll r0,1\n";
+        emit("sll", "r0,1");
     } else if (isUnsigned) {
-        code_ << "    slr r0,1\n";
+        emit("slr", "r0,1");
     } else {
-        code_ << "    sar r0,1\n";  // arithmetic: real hardware sign-fill, no carry trick needed
+        emit("sar", "r0,1");  // arithmetic: real hardware sign-fill, no carry trick needed
     }
-    code_ << "    decr r1\n";
-    code_ << "    b " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("decr", "r1");
+    emit("b", Lloop);
+    emitLabel(Ldone);
 }
 
 void CP1610Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
@@ -1238,67 +1348,83 @@ void CP1610Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const
 void CP1610Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &branchIfTrue,
                                  bool swapOperands) {
     genExpr(lhs);
-    code_ << "    pshr r0\n";
+    emit("pshr", "r0");
     genExpr(rhs);
-    code_ << "    pulr r1\n";  // r1 = lhs, r0 = rhs
-    code_ << "    cmpr " << (swapOperands ? "r1,r0" : "r0,r1") << "\n";
+    emit("pulr", "r1");  // r1 = lhs, r0 = rhs
+    emit("cmpr", swapOperands ? "r1,r0" : "r0,r1");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    " << branchIfTrue << " " << Ltrue << "\n";
-    code_ << "    b " << Lfalse << "\n";
-    code_ << Lfalse << ":\n    mvii 0,r0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mvii 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit(branchIfTrue, Ltrue);
+    emit("b", Lfalse);
+    emitLabel(Lfalse);
+    emit("mvii", "0,r0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mvii", "1,r0");
+    emitLabel(Ldone);
 }
 
 void CP1610Codegen::testTruthy(const ir::Expr &e) {
     if (!isWide(e.type)) {
-        code_ << "    tstr r0\n";
+        emit("tstr", "r0");
         return;
     }
     int words = wordCountOf(e.type);
-    for (int i = 0; i < words; i++) code_ << "    pulr r0\n    mvo r0," << kWScratch[i] << "\n";
-    code_ << "    mvi " << kWScratch[0] << ",r0\n";
-    for (int i = 1; i < words; i++) {
-        code_ << "    mvi " << kWScratch[i] << ",r1\n";
-        code_ << "    comr r0\n    comr r1\n    andr r1,r0\n    comr r0\n";  // r0 |= r1 (De Morgan)
+    for (int i = 0; i < words; i++) {
+        emit("pulr", "r0");
+        emit("mvo", cat("r0,", kWScratch[i]));
     }
-    code_ << "    tstr r0\n";
+    emit("mvi", cat(kWScratch[0], ",r0"));
+    for (int i = 1; i < words; i++) {
+        emit("mvi", cat(kWScratch[i], ",r1"));
+        // r0 |= r1 (De Morgan)
+        emit("comr", "r0");
+        emit("comr", "r1");
+        emit("andr", "r1,r0");
+        emit("comr", "r0");
+    }
+    emit("tstr", "r0");
 }
 
 void CP1610Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    bze " << Lfalse << "\n";
+    emit("bze", Lfalse);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    bze " << Lfalse << "\n";
-    code_ << "    mvii 1,r0\n    b " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mvii 0,r0\n";
-    code_ << Ldone << ":\n";
+    emit("bze", Lfalse);
+    emit("mvii", "1,r0");
+    emit("b", Ldone);
+    emitLabel(Lfalse);
+    emit("mvii", "0,r0");
+    emitLabel(Ldone);
 }
 
 void CP1610Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
     testTruthy(lhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    bnze " << Ltrue << "\n";
+    emit("bnze", Ltrue);
     genExpr(rhs);
     testTruthy(rhs);
-    code_ << "    bnze " << Ltrue << "\n";
-    code_ << "    mvii 0,r0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mvii 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit("bnze", Ltrue);
+    emit("mvii", "0,r0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mvii", "1,r0");
+    emitLabel(Ldone);
 }
 
 void CP1610Codegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
     testTruthy(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    bze " << Ltrue << "\n";
-    code_ << "    mvii 0,r0\n    b " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mvii 1,r0\n";
-    code_ << Ldone << ":\n";
+    emit("bze", Ltrue);
+    emit("mvii", "0,r0");
+    emit("b", Ldone);
+    emitLabel(Ltrue);
+    emit("mvii", "1,r0");
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> CP1610Codegen::assembleInProcess(const std::string &asmText,

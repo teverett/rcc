@@ -81,7 +81,7 @@ namespace rcc {
 //
 // Every SPARC branch and `call` has a one-instruction delay slot, always filled with a
 // `nop` synthesized by SparcAssembler.cpp rather than emitted explicitly here.
-class SparcCodegen : public Backend {
+class SparcCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "sparc"; }
@@ -210,7 +210,6 @@ class SparcCodegen : public Backend {
         return name;
     }
 
-    std::ostringstream code_;
     std::vector<std::string> trailer_;  // "label: dw v0, v1, ..." data lines, emitted at the end
     std::map<std::string, std::string> perFileAsm_;
 

@@ -30,19 +30,19 @@ void SparcCodegen::loadSlotAddr(const std::string &reg, const ir::Slot *slot) {
         movReg(reg, "fp");
         return;
     }
-    code_ << "    add fp," << off << "," << reg << "\n";
+    emit("add", cat("fp,", off, ",", reg));
 }
 
 void SparcCodegen::loadImmediate(const std::string &reg, int32_t v) {
     if (v >= -4096 && v <= 4095) {
-        code_ << "    or g0," << v << "," << reg << "\n";
+        emit("or", cat("g0,", v, ",", reg));
         return;
     }
     uint32_t uv = static_cast<uint32_t>(v);
     uint32_t hi = (uv >> 10) & 0x3FFFFFu;
     uint32_t lo = uv & 0x3FFu;
-    code_ << "    sethi " << hi << "," << reg << "\n";
-    code_ << "    or " << reg << "," << lo << "," << reg << "\n";
+    emit("sethi", cat(hi, ",", reg));
+    emit("or", cat(reg, ",", lo, ",", reg));
 }
 
 // A literal element's decimal text; a symbol element is the referenced Slot's or
@@ -90,9 +90,9 @@ void SparcCodegen::genLocalArrayInit(const ir::Slot *slot) {
         if (w == 8 && !elem.isSymbol) {
             auto v = static_cast<uint64_t>(elem.value);
             loadImmediate("t0", static_cast<int32_t>(static_cast<uint32_t>(v)));
-            code_ << "    stind fp,t0," << disp << "\n";
+            emit("stind", cat("fp,t0,", disp));
             loadImmediate("t0", static_cast<int32_t>(static_cast<uint32_t>(v >> 32)));
-            code_ << "    stind fp,t0," << (disp + 4) << "\n";
+            emit("stind", cat("fp,t0,", (disp + 4)));
             continue;
         }
         if (elem.isSymbol) {
@@ -101,22 +101,22 @@ void SparcCodegen::genLocalArrayInit(const ir::Slot *slot) {
             loadImmediate("t0", static_cast<int32_t>(static_cast<uint32_t>(elem.value)));
         }
         if (w == 1) {
-            code_ << "    stindb fp,t0," << disp << "\n";
+            emit("stindb", cat("fp,t0,", disp));
         } else if (w == 2) {
-            code_ << "    stindh fp,t0," << disp << "\n";
+            emit("stindh", cat("fp,t0,", disp));
         } else {
-            code_ << "    stind fp,t0," << disp << "\n";
+            emit("stind", cat("fp,t0,", disp));
         }
     }
 }
 
 void SparcCodegen::loadAddress(const std::string &reg, const std::string &lbl) {
-    code_ << "    sethi " << lbl << "," << reg << "\n";
-    code_ << "    or " << reg << "," << lbl << "," << reg << "\n";
+    emit("sethi", cat(lbl, ",", reg));
+    emit("or", cat(reg, ",", lbl, ",", reg));
 }
 
 void SparcCodegen::movReg(const std::string &dst, const std::string &src) {
-    code_ << "    or g0," << src << "," << dst << "\n";
+    emit("or", cat("g0,", src, ",", dst));
 }
 
 // Loads/stores `slot`'s scalar value - a Global goes through its fixed label address
@@ -149,16 +149,16 @@ std::string SparcCodegen::generate(const ir::Program &prog, bool objectMode) {
     // `objectMode`, no object file emits this entry sequence itself - the linker
     // synthesizes exactly one once every object is merged and `main`'s address is
     // resolvable. An object file's base is `org 0`; placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kBaseAddress) << "\n\n";
+    { emitRaw(cat("org ", (objectMode ? 0 : kBaseAddress))); emitRaw(""); }
     if (!objectMode) {
-        code_ << "_start:\n";
+        emitLabel("_start");
         uint32_t hi = (kInitialSP >> 10) & 0x3FFFFFu;
         uint32_t lo = kInitialSP & 0x3FFu;
-        code_ << "    sethi " << hi << ",sp\n";
-        code_ << "    or sp," << lo << ",sp\n";
-        code_ << "    call " << label(mainFn) << "\n";
+        emit("sethi", cat(hi, ",sp"));
+        emit("or", cat("sp,", lo, ",sp"));
+        emit("call", label(mainFn));
         // The result sits in t0 the moment execution reaches `halt`.
-        code_ << "halt:\n    ba halt\n\n";
+        { emitLabel("halt"); emit("ba", "halt"); emitRaw(""); }
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -221,14 +221,14 @@ std::map<std::string, std::string> SparcCodegen::perFileAsm() const { return per
 // Because every call gets its own pushed frame, direct and mutual recursion each get
 // independent storage per call, limited only by the hardware stack (kInitialSP).
 void SparcCodegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    sub sp,4,sp\n    stind sp,lr\n";
-    code_ << "    sub sp,4,sp\n    stind sp,fp\n";
-    code_ << "    or g0,sp,fp\n";
-    if (fn.func->frameSize > 0) code_ << "    sub sp," << fn.func->frameSize << ",sp\n";
+    emitLabel(label(fn.func));
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,lr"); }
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,fp"); }
+    emit("or", "g0,sp,fp");
+    if (fn.func->frameSize > 0) emit("sub", cat("sp,", fn.func->frameSize, ",sp"));
     genStmt(*fn.body);
     emitEpilogue();
-    code_ << "    retl\n\n";
+    { emit("retl"); emitRaw(""); }
 }
 
 // Undoes genFunction()'s prologue, right before a `retl`. `fp` must still hold this
@@ -236,11 +236,11 @@ void SparcCodegen::genFunction(const ir::FunctionBody &fn) {
 // `fp` itself is overwritten. Never touches `t0`/`t1`, which already hold the return
 // value by now.
 void SparcCodegen::emitEpilogue() {
-    code_ << "    add fp,4,t2\n    ldind t2,t3\n";  // t3 = saved lr, at [fp+4]
-    code_ << "    ldind fp,t2\n";                   // t2 = saved fp, at [fp+0]
-    code_ << "    add fp,8,sp\n";                   // sp = fp+8 - the caller's own post-push sp
-    code_ << "    or g0,t3,lr\n";
-    code_ << "    or g0,t2,fp\n";
+    { emit("add", "fp,4,t2"); emit("ldind", "t2,t3"); }  // t3 = saved lr, at [fp+4]
+    emit("ldind", "fp,t2");                   // t2 = saved fp, at [fp+0]
+    emit("add", "fp,8,sp");                   // sp = fp+8 - the caller's own post-push sp
+    emit("or", "g0,t3,lr");
+    emit("or", "g0,t2,fp");
 }
 
 void SparcCodegen::genStmt(const ir::Stmt &s) {
@@ -251,46 +251,46 @@ void SparcCodegen::genStmt(const ir::Stmt &s) {
         }
         case ir::StmtKind::If: {
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or t0,t1,t0\n";
+            if (isWide(s.cond->type)) emit("or", "t0,t1,t0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp t0,0\n";
-            code_ << "    beq " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("cmp", "t0,0");
+            emit("beq", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    ba " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("ba", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genExpr(*s.cond);
-            if (isWide(s.cond->type)) code_ << "    or t0,t1,t0\n";
-            code_ << "    cmp t0,0\n";
-            code_ << "    beq " << Lend << "\n";
+            if (isWide(s.cond->type)) emit("or", "t0,t1,t0");
+            emit("cmp", "t0,0");
+            emit("beq", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    ba " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("ba", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    ba " << loopLabels_.back().second << "\n";
+            emit("ba", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    ba " << loopLabels_.back().first << "\n";
+            emit("ba", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
@@ -298,7 +298,7 @@ void SparcCodegen::genStmt(const ir::Stmt &s) {
             // An early exit bypasses genFunction()'s fall-through epilogue, so the same
             // frame teardown is inlined here too.
             emitEpilogue();
-            code_ << "    retl\n";
+            emit("retl");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -317,16 +317,16 @@ void SparcCodegen::genStmt(const ir::Stmt &s) {
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitRaw(s.asmText);
+            if (!s.asmText.empty() && s.asmText.back() != '\n') emitRaw("");
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    ba " << irLabel(s.labelId) << "\n";
+            emit("ba", irLabel(s.labelId));
             return;
         }
     }
@@ -357,9 +357,9 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 genIndexAddr(e.slot, *e.lhs);  // t2 = target address
-                code_ << "    sub sp,4,sp\n    stind sp,t2\n";
+                { emit("sub", "sp,4,sp"); emit("stind", "sp,t2"); }
                 genExpr(*e.rhs);
-                code_ << "    ldind sp,t2\n    add sp,4,sp\n";
+                { emit("ldind", "sp,t2"); emit("add", "sp,4,sp"); }
                 storeOperand("t2", e.slot->type);
                 return;
             }
@@ -372,9 +372,9 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
             // or a plain int word for untyped-int-as-address. storeOperand() handles a
             // wide (8-byte) pointee too, storing t0/t1 at addrReg/addrReg+4.
             genExpr(*e.lhs);  // t0 = pointer value
-            code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+            { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
             genExpr(*e.rhs);  // t0, or t1:t0 if wide
-            code_ << "    ldind sp,t2\n    add sp,4,sp\n";
+            { emit("ldind", "sp,t2"); emit("add", "sp,4,sp"); }
             storeOperand("t2", e.type);
             return;
         }
@@ -390,11 +390,11 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
             genExpr(*e.rhs);  // t0 = rhs
             movReg("t1", "t0");  // t1 = rhs
             loadSlotValue(e.slot);  // t0 = old
-            if (e.yieldOld) code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+            if (e.yieldOld) { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
             genCompoundOp(e.op, e.type);
             narrowT0To(e.type);
             storeSlotValue(e.slot);
-            if (e.yieldOld) code_ << "    ldind sp,t0\n    add sp,4,sp\n";
+            if (e.yieldOld) { emit("ldind", "sp,t0"); emit("add", "sp,4,sp"); }
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
@@ -405,16 +405,16 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Ternary: {
             genExpr(*e.lhs);
-            if (isWide(e.lhs->type)) code_ << "    or t0,t1,t0\n";
-            code_ << "    cmp t0,0\n";
+            if (isWide(e.lhs->type)) emit("or", "t0,t1,t0");
+            emit("cmp", "t0,0");
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    beq " << Lelse << "\n";
+            emit("beq", Lelse);
             genExpr(*e.rhs);
-            code_ << "    ba " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("ba", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::Unary: {
@@ -423,7 +423,7 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    sub g0,t0,t0\n";
+                    emit("sub", "g0,t0,t0");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
@@ -434,8 +434,8 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
                 loadOperand("t2", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    xor t0,-1,t0\n";
-                if (isWide(e.rhs->type)) code_ << "    xor t1,-1,t1\n";
+                emit("xor", "t0,-1,t0");
+                if (isWide(e.rhs->type)) emit("xor", "t1,-1,t1");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -456,15 +456,15 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
             for (size_t i = e.args.size(); i-- > 0;) {
                 genExpr(*e.args[i]);
                 if (isWide(e.args[i]->type)) {
-                    code_ << "    sub sp,8,sp\n    stind sp,t1\n    stind sp,t0,4\n";
+                    { emit("sub", "sp,8,sp"); emit("stind", "sp,t1"); emit("stind", "sp,t0,4"); }
                     totalBytes += 8;
                 } else {
-                    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+                    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
                     totalBytes += 4;
                 }
             }
-            code_ << "    call " << label(e.func) << "\n";
-            if (totalBytes > 0) code_ << "    add sp," << totalBytes << ",sp\n";
+            emit("call", label(e.func));
+            if (totalBytes > 0) emit("add", cat("sp,", totalBytes, ",sp"));
             return;
         }
         case ir::ExprKind::CallPtr: {
@@ -475,7 +475,7 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
             // direct `call` leaves, so the callee's `retl` epilogue returns correctly
             // regardless of how it was called.
             genExpr(*e.lhs);  // t0 = the callee's own entry address
-            code_ << "    jmpl t0,lr\n";
+            emit("jmpl", "t0,lr");
             return;
         }
         case ir::ExprKind::Binary: {
@@ -504,7 +504,7 @@ void SparcCodegen::genExpr(const ir::Expr &e) {
 void SparcCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);  // t0 = index
     int shift = elemShift(slot->type);
-    if (shift > 0) code_ << "    sll t0," << shift << ",t0\n";
+    if (shift > 0) emit("sll", cat("t0,", shift, ",t0"));
     bool isGlobal = slot->kind == ir::SlotKind::Global;
     if (slot->arraySize > 0) {
         if (isGlobal) {
@@ -512,16 +512,16 @@ void SparcCodegen::genIndexAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
         } else {
             loadSlotAddr("t2", slot);
         }
-        code_ << "    add t2,t0,t2\n";
+        emit("add", "t2,t0,t2");
     } else {
         if (isGlobal) {
             loadAddress("t1", label(slot));
-            code_ << "    ldind t1,t1\n";  // t1 = the pointer variable's own stored value
+            emit("ldind", "t1,t1");  // t1 = the pointer variable's own stored value
         } else {
             loadOperandDisp(slotFrameByteOffset(slot), Type{BaseType::Int, false});
             movReg("t1", "t0");
         }
-        code_ << "    add t1,t0,t2\n";
+        emit("add", "t1,t0,t2");
     }
 }
 
@@ -532,15 +532,15 @@ void SparcCodegen::genIndex(const ir::Expr &e) {
 
 void SparcCodegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add t0,t1,t0\n"; return; }
-    if (op == "-") { code_ << "    sub t0,t1,t0\n"; return; }
-    if (op == "*") { code_ << "    smul t0,t1,t0\n"; return; }
-    if (op == "&") { code_ << "    and t0,t1,t0\n"; return; }
-    if (op == "|") { code_ << "    or t0,t1,t0\n"; return; }
-    if (op == "^") { code_ << "    xor t0,t1,t0\n"; return; }
+    if (op == "+") { emit("add", "t0,t1,t0"); return; }
+    if (op == "-") { emit("sub", "t0,t1,t0"); return; }
+    if (op == "*") { emit("smul", "t0,t1,t0"); return; }
+    if (op == "&") { emit("and", "t0,t1,t0"); return; }
+    if (op == "|") { emit("or", "t0,t1,t0"); return; }
+    if (op == "^") { emit("xor", "t0,t1,t0"); return; }
     if (op == "<<" || op == ">>") {
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t1,t0\n";
+        emit(insn, "t0,t1,t0");
         return;
     }
     // "/" or "%" - t5 is free scratch here, used to swap old/rhs into t1/t0 so the same
@@ -550,18 +550,18 @@ void SparcCodegen::genCompoundOp(const std::string &op, Type type) {
     movReg("t0", "t1");  // t0 = rhs (divisor)
     movReg("t1", "t5");  // t1 = old (dividend)
     if (isUnsigned) {
-        code_ << "    wry g0,g0\n";
+        emit("wry", "g0,g0");
     } else {
-        code_ << "    sra t1,31,t2\n    wry t2,g0\n";
+        { emit("sra", "t1,31,t2"); emit("wry", "t2,g0"); }
     }
     const char *divInsn = isUnsigned ? "udiv" : "sdiv";
     const char *mulInsn = isUnsigned ? "umul" : "smul";
     if (op == "%") {
-        code_ << "    " << divInsn << " t1,t0,t2\n";  // t2 = quotient (old/rhs)
-        code_ << "    " << mulInsn << " t2,t0,t2\n";   // t2 = quotient * rhs
-        code_ << "    sub t1,t2,t0\n";                  // t0 = old - quotient*rhs = remainder
+        emit(divInsn, "t1,t0,t2");  // t2 = quotient (old/rhs)
+        emit(mulInsn, "t2,t0,t2");   // t2 = quotient * rhs
+        emit("sub", "t1,t2,t0");                  // t0 = old - quotient*rhs = remainder
     } else {
-        code_ << "    " << divInsn << " t1,t0,t0\n";
+        emit(divInsn, "t1,t0,t0");
     }
 }
 
@@ -569,19 +569,19 @@ void SparcCodegen::genCompoundOp(const std::string &op, Type type) {
 // stashed on the stack across `e.rhs`'s evaluation and again around genCompoundOp(),
 // since either can clobber it.
 void SparcCodegen::genCompoundThroughT2(const ir::Expr &e) {
-    code_ << "    sub sp,4,sp\n    stind sp,t2\n";
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t2"); }
     genExpr(*e.rhs);                 // t0 = rhs
     movReg("t1", "t0");                // t1 = rhs, held across the t2 reload below
-    code_ << "    ldind sp,t2\n    add sp,4,sp\n";  // t2 = address
+    { emit("ldind", "sp,t2"); emit("add", "sp,4,sp"); }  // t2 = address
     loadOperand("t2", e.type);            // t0 = old
-    if (e.yieldOld) code_ << "    sub sp,4,sp\n    stind sp,t0\n";
-    code_ << "    sub sp,4,sp\n    stind sp,t2\n";    // re-stash the address around genCompoundOp()
+    if (e.yieldOld) { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t2"); }    // re-stash the address around genCompoundOp()
     genCompoundOp(e.op, e.type);              // t0 = new (raw)
     narrowT0To(e.type);
-    code_ << "    ldind sp,t2\n    add sp,4,sp\n";       // t2 = address restored
+    { emit("ldind", "sp,t2"); emit("add", "sp,4,sp"); }       // t2 = address restored
     if (e.yieldOld) {
         movReg("t3", "t0");                       // t3 = new
-        code_ << "    ldind sp,t0\n    add sp,4,sp\n";  // t0 = old
+        { emit("ldind", "sp,t0"); emit("add", "sp,4,sp"); }  // t0 = old
         movReg("t4", "t0");                           // t4 = old, preserved across the store below
         movReg("t0", "t3");                            // t0 = new (storeOperand always stores from t0)
         storeOperand("t2", e.type);                       // t2 still addresses the target
@@ -620,28 +620,28 @@ void SparcCodegen::genAddrOf(const ir::Expr &operand) {
 void SparcCodegen::loadOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "ldindb" : "ldindsb") << " " << addrReg << ",t0\n";
+        emit((type.isUnsigned ? "ldindb" : "ldindsb"), cat(addrReg, ",t0"));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "ldindh" : "ldindsh") << " " << addrReg << ",t0\n";
+        emit((type.isUnsigned ? "ldindh" : "ldindsh"), cat(addrReg, ",t0"));
     } else if (w == 4) {
-        code_ << "    ldind " << addrReg << ",t0\n";
+        emit("ldind", cat(addrReg, ",t0"));
     } else {  // 8 - long long: t1:t0 (hi:lo), low word first
-        code_ << "    ldind " << addrReg << ",t0\n";
-        code_ << "    ldind " << addrReg << ",t1,4\n";
+        emit("ldind", cat(addrReg, ",t0"));
+        emit("ldind", cat(addrReg, ",t1,4"));
     }
 }
 
 void SparcCodegen::storeOperand(const std::string &addrReg, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb " << addrReg << ",t0\n";
+        emit("stindb", cat(addrReg, ",t0"));
     } else if (w == 2) {
-        code_ << "    stindh " << addrReg << ",t0\n";
+        emit("stindh", cat(addrReg, ",t0"));
     } else if (w == 4) {
-        code_ << "    stind " << addrReg << ",t0\n";
+        emit("stind", cat(addrReg, ",t0"));
     } else {
-        code_ << "    stind " << addrReg << ",t0\n";
-        code_ << "    stind " << addrReg << ",t1,4\n";
+        emit("stind", cat(addrReg, ",t0"));
+        emit("stind", cat(addrReg, ",t1,4"));
     }
 }
 
@@ -651,39 +651,39 @@ void SparcCodegen::storeOperand(const std::string &addrReg, Type type) {
 void SparcCodegen::loadOperandDisp(int disp, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "ldindb" : "ldindsb") << " fp,t0," << disp << "\n";
+        emit((type.isUnsigned ? "ldindb" : "ldindsb"), cat("fp,t0,", disp));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "ldindh" : "ldindsh") << " fp,t0," << disp << "\n";
+        emit((type.isUnsigned ? "ldindh" : "ldindsh"), cat("fp,t0,", disp));
     } else if (w == 4) {
-        code_ << "    ldind fp,t0," << disp << "\n";
+        emit("ldind", cat("fp,t0,", disp));
     } else {
-        code_ << "    ldind fp,t0," << disp << "\n";
-        code_ << "    ldind fp,t1," << (disp + 4) << "\n";
+        emit("ldind", cat("fp,t0,", disp));
+        emit("ldind", cat("fp,t1,", (disp + 4)));
     }
 }
 
 void SparcCodegen::storeOperandDisp(int disp, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    stindb fp,t0," << disp << "\n";
+        emit("stindb", cat("fp,t0,", disp));
     } else if (w == 2) {
-        code_ << "    stindh fp,t0," << disp << "\n";
+        emit("stindh", cat("fp,t0,", disp));
     } else if (w == 4) {
-        code_ << "    stind fp,t0," << disp << "\n";
+        emit("stind", cat("fp,t0,", disp));
     } else {
-        code_ << "    stind fp,t0," << disp << "\n";
-        code_ << "    stind fp,t1," << (disp + 4) << "\n";
+        emit("stind", cat("fp,t0,", disp));
+        emit("stind", cat("fp,t1,", (disp + 4)));
     }
 }
 
 void SparcCodegen::narrowT0To(Type to) {
     int w = widthOfType(to);
     if (w == 1) {
-        code_ << "    sll t0,24,t0\n";
-        code_ << "    " << (to.isUnsigned ? "srl" : "sra") << " t0,24,t0\n";
+        emit("sll", "t0,24,t0");
+        emit((to.isUnsigned ? "srl" : "sra"), "t0,24,t0");
     } else if (w == 2) {
-        code_ << "    sll t0,16,t0\n";
-        code_ << "    " << (to.isUnsigned ? "srl" : "sra") << " t0,16,t0\n";
+        emit("sll", "t0,16,t0");
+        emit((to.isUnsigned ? "srl" : "sra"), "t0,16,t0");
     }
     // 4 bytes (Int/Long): t0 already holds the full value. 8 never reaches here.
 }
@@ -702,9 +702,9 @@ void SparcCodegen::genConvert(const ir::Expr &e) {
         narrowT0To(to);  // t1 is simply discarded
     } else if (!fromWide && toWide) {
         if (from.isUnsigned) {
-            code_ << "    or g0,0,t1\n";
+            emit("or", "g0,0,t1");
         } else {
-            code_ << "    sra t0,31,t1\n";  // sign-extend t0 into t1
+            emit("sra", "t0,31,t1");  // sign-extend t0 into t1
         }
     } else if (!fromWide && !toWide) {
         narrowT0To(to);
@@ -717,28 +717,28 @@ void SparcCodegen::genConvert(const ir::Expr &e) {
 // via an unsigned `cmp`+branch test deciding whether the high-word add needs +1.
 void SparcCodegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);  // t1:t0 = lhs
-    code_ << "    sub sp,8,sp\n    stind sp,t0\n    stind sp,t1,4\n";
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t0"); emit("stind", "sp,t1,4"); }
     genExpr(rhs);  // t1:t0 = rhs
-    code_ << "    or g0,t0,t3\n    or g0,t1,t4\n";  // t3:t4 = rhs (lo:hi)
-    code_ << "    ldind sp,t0\n    ldind sp,t1,4\n    add sp,8,sp\n";  // t1:t0 = lhs
+    { emit("or", "g0,t0,t3"); emit("or", "g0,t1,t4"); }  // t3:t4 = rhs (lo:hi)
+    { emit("ldind", "sp,t0"); emit("ldind", "sp,t1,4"); emit("add", "sp,8,sp"); }  // t1:t0 = lhs
     std::string Lcarry = newLabel(), Ldone = newLabel();
     if (isAdd) {
-        code_ << "    add t0,t3,t5\n";              // t5 = lo sum
-        code_ << "    cmp t5,t0\n    bgeu " << Lcarry << "\n";  // unsigned: sum >= lhs_lo means no carry
-        code_ << "    or g0,1,t6\n    ba " << Ldone << "\n";
-        code_ << Lcarry << ":\n    or g0,0,t6\n";
-        code_ << Ldone << ":\n";
-        code_ << "    add t1,t4,t1\n    add t1,t6,t1\n";
-        code_ << "    or g0,t5,t0\n";
+        emit("add", "t0,t3,t5");              // t5 = lo sum
+        { emit("cmp", "t5,t0"); emit("bgeu", Lcarry); }  // unsigned: sum >= lhs_lo means no carry
+        { emit("or", "g0,1,t6"); emit("ba", Ldone); }
+        { emitLabel(Lcarry); emit("or", "g0,0,t6"); }
+        emitLabel(Ldone);
+        { emit("add", "t1,t4,t1"); emit("add", "t1,t6,t1"); }
+        emit("or", "g0,t5,t0");
     } else {
-        code_ << "    cmp t0,t3\n    bgeu " << Lcarry << "\n";  // unsigned: lhs_lo >= rhs_lo means no borrow
-        code_ << "    or g0,1,t6\n    ba " << Ldone << "\n";
-        code_ << Lcarry << ":\n    or g0,0,t6\n";
-        code_ << Ldone << ":\n";
-        code_ << "    sub t0,t3,t5\n";
-        code_ << "    sub t1,t4,t1\n";
-        code_ << "    sub t1,t6,t1\n";
-        code_ << "    or g0,t5,t0\n";
+        { emit("cmp", "t0,t3"); emit("bgeu", Lcarry); }  // unsigned: lhs_lo >= rhs_lo means no borrow
+        { emit("or", "g0,1,t6"); emit("ba", Ldone); }
+        { emitLabel(Lcarry); emit("or", "g0,0,t6"); }
+        emitLabel(Ldone);
+        emit("sub", "t0,t3,t5");
+        emit("sub", "t1,t4,t1");
+        emit("sub", "t1,t6,t1");
+        emit("or", "g0,t5,t0");
     }
 }
 
@@ -749,28 +749,28 @@ void SparcCodegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isA
 // `smul` (not `umul`) is used throughout.
 void SparcCodegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);  // t1:t0 = lhs
-    code_ << "    sub sp,8,sp\n    stind sp,t0\n    stind sp,t1,4\n";
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t0"); emit("stind", "sp,t1,4"); }
     genExpr(rhs);  // t1:t0 = rhs
-    code_ << "    or g0,t0,t5\n    or g0,t1,t6\n";  // t5:t6 = rhs (lo:hi)
-    code_ << "    ldind sp,t3\n    ldind sp,t4,4\n    add sp,8,sp\n";  // t3:t4 = lhs (lo:hi)
-    code_ << "    smul t3,t6,t0\n";  // lhs_lo*rhs_hi
-    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
-    code_ << "    smul t4,t5,t0\n";  // lhs_hi*rhs_lo
-    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
-    code_ << "    smul t3,t5,t0\n    rdy t1\n";  // lhs_lo*rhs_lo (final result_lo/carry)
-    code_ << "    ldind sp,t6\n    add sp,4,sp\n";   // crossB_lo (lhs_hi*rhs_lo)
-    code_ << "    ldind sp,t5\n    add sp,4,sp\n";   // crossA_lo (lhs_lo*rhs_hi)
-    code_ << "    add t1,t6,t1\n    add t1,t5,t1\n";
+    { emit("or", "g0,t0,t5"); emit("or", "g0,t1,t6"); }  // t5:t6 = rhs (lo:hi)
+    { emit("ldind", "sp,t3"); emit("ldind", "sp,t4,4"); emit("add", "sp,8,sp"); }  // t3:t4 = lhs (lo:hi)
+    emit("smul", "t3,t6,t0");  // lhs_lo*rhs_hi
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
+    emit("smul", "t4,t5,t0");  // lhs_hi*rhs_lo
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
+    { emit("smul", "t3,t5,t0"); emit("rdy", "t1"); }  // lhs_lo*rhs_lo (final result_lo/carry)
+    { emit("ldind", "sp,t6"); emit("add", "sp,4,sp"); }   // crossB_lo (lhs_hi*rhs_lo)
+    { emit("ldind", "sp,t5"); emit("add", "sp,4,sp"); }   // crossA_lo (lhs_lo*rhs_hi)
+    { emit("add", "t1,t6,t1"); emit("add", "t1,t5,t1"); }
 }
 
 void SparcCodegen::genNegate64() {
-    code_ << "    xor t0,-1,t0\n    xor t1,-1,t1\n";
-    code_ << "    add t0,1,t0\n";
+    { emit("xor", "t0,-1,t0"); emit("xor", "t1,-1,t1"); }
+    emit("add", "t0,1,t0");
     std::string Lcarry = newLabel(), Ldone = newLabel();
-    code_ << "    cmp t0,0\n    bne " << Lcarry << "\n";
-    code_ << "    add t1,1,t1\n    ba " << Ldone << "\n";
-    code_ << Lcarry << ":\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "t0,0"); emit("bne", Lcarry); }
+    { emit("add", "t1,1,t1"); emit("ba", Ldone); }
+    emitLabel(Lcarry);
+    emitLabel(Ldone);
 }
 
 // Classic bit-serial shift/compare/subtract long division, using the stack for scratch
@@ -779,96 +779,96 @@ void SparcCodegen::genNegate64() {
 // in place if set, then restored on the result per C's truncating-division rule.
 void SparcCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,8,sp\n    stind sp,t1\n    stind sp,t0,4\n";  // [sp]=lhs_hi,[sp+4]=lhs_lo
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t1"); emit("stind", "sp,t0,4"); }  // [sp]=lhs_hi,[sp+4]=lhs_lo
     genExpr(rhs);
-    code_ << "    sub sp,8,sp\n    stind sp,t1\n    stind sp,t0,4\n";  // [sp]=rhs_hi,[sp+4]=rhs_lo
-    code_ << "    sub sp,36,sp\n";
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t1"); emit("stind", "sp,t0,4"); }  // [sp]=rhs_hi,[sp+4]=rhs_lo
+    emit("sub", "sp,36,sp");
     // Scratch layout at sp+0: n_lo,n_hi,d_lo,d_hi,r_lo,r_hi,q_lo,q_hi,cnt (9 words, 36 bytes)
-    code_ << "    ldind sp,t0,44\n    stind sp,t0,0\n";   // n_lo = lhs_lo
-    code_ << "    ldind sp,t0,40\n    stind sp,t0,4\n";   // n_hi = lhs_hi
-    code_ << "    ldind sp,t0,36\n    stind sp,t0,8\n";   // d_lo = rhs_lo
-    code_ << "    ldind sp,t0,32\n    stind sp,t0,12\n";  // d_hi = rhs_hi
-    code_ << "    stind sp,g0,16\n    stind sp,g0,20\n";  // r = 0
-    code_ << "    stind sp,g0,24\n    stind sp,g0,28\n";  // q = 0
-    code_ << "    or g0,32,t0\n    stind sp,t0,32\n";     // cnt = 32 (per-word, so 2*32=64 total)
+    { emit("ldind", "sp,t0,44"); emit("stind", "sp,t0,0"); }   // n_lo = lhs_lo
+    { emit("ldind", "sp,t0,40"); emit("stind", "sp,t0,4"); }   // n_hi = lhs_hi
+    { emit("ldind", "sp,t0,36"); emit("stind", "sp,t0,8"); }   // d_lo = rhs_lo
+    { emit("ldind", "sp,t0,32"); emit("stind", "sp,t0,12"); }  // d_hi = rhs_hi
+    { emit("stind", "sp,g0,16"); emit("stind", "sp,g0,20"); }  // r = 0
+    { emit("stind", "sp,g0,24"); emit("stind", "sp,g0,28"); }  // q = 0
+    { emit("or", "g0,32,t0"); emit("stind", "sp,t0,32"); }     // cnt = 32 (per-word, so 2*32=64 total)
 
     if (!isUnsigned) {
-        code_ << "    ldind sp,t0,4\n    srl t0,31,t0\n    stind sp,t0,40\n";    // [sp+40] = lhsSign
-        code_ << "    ldind sp,t0,12\n    srl t0,31,t0\n    stind sp,t0,44\n";   // [sp+44] = rhsSign
+        { emit("ldind", "sp,t0,4"); emit("srl", "t0,31,t0"); emit("stind", "sp,t0,40"); }    // [sp+40] = lhsSign
+        { emit("ldind", "sp,t0,12"); emit("srl", "t0,31,t0"); emit("stind", "sp,t0,44"); }   // [sp+44] = rhsSign
         std::string LskipNegN = newLabel(), LskipNegD = newLabel();
-        code_ << "    ldind sp,t0,40\n    cmp t0,0\n    beq " << LskipNegN << "\n";
-        code_ << "    ldind sp,t0,0\n    ldind sp,t1,4\n";
+        { emit("ldind", "sp,t0,40"); emit("cmp", "t0,0"); emit("beq", LskipNegN); }
+        { emit("ldind", "sp,t0,0"); emit("ldind", "sp,t1,4"); }
         genNegate64();
-        code_ << "    stind sp,t0,0\n    stind sp,t1,4\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    ldind sp,t0,44\n    cmp t0,0\n    beq " << LskipNegD << "\n";
-        code_ << "    ldind sp,t0,8\n    ldind sp,t1,12\n";
+        { emit("stind", "sp,t0,0"); emit("stind", "sp,t1,4"); }
+        emitLabel(LskipNegN);
+        { emit("ldind", "sp,t0,44"); emit("cmp", "t0,0"); emit("beq", LskipNegD); }
+        { emit("ldind", "sp,t0,8"); emit("ldind", "sp,t1,12"); }
         genNegate64();
-        code_ << "    stind sp,t0,8\n    stind sp,t1,12\n";
-        code_ << LskipNegD << ":\n";
+        { emit("stind", "sp,t0,8"); emit("stind", "sp,t1,12"); }
+        emitLabel(LskipNegD);
     }
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), LshiftQ = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    ldind sp,t0,32\n    cmp t0,0\n    beq " << Ldone << "\n";
-    code_ << "    sub t0,1,t0\n    stind sp,t0,32\n";
+    emitLabel(Lloop);
+    { emit("ldind", "sp,t0,32"); emit("cmp", "t0,0"); emit("beq", Ldone); }
+    { emit("sub", "t0,1,t0"); emit("stind", "sp,t0,32"); }
 
     // n <<= 1 (0-filled), capturing its own old top bit into t3.
-    code_ << "    ldind sp,t0,4\n    srl t0,31,t0\n    or g0,t0,t3\n";
-    code_ << "    ldind sp,t0,0\n    srl t0,31,t0\n    or g0,t0,t4\n";
-    code_ << "    ldind sp,t0,0\n    sll t0,1,t0\n    stind sp,t0,0\n";
-    code_ << "    ldind sp,t0,4\n    sll t0,1,t0\n    or t0,t4,t0\n    stind sp,t0,4\n";
+    { emit("ldind", "sp,t0,4"); emit("srl", "t0,31,t0"); emit("or", "g0,t0,t3"); }
+    { emit("ldind", "sp,t0,0"); emit("srl", "t0,31,t0"); emit("or", "g0,t0,t4"); }
+    { emit("ldind", "sp,t0,0"); emit("sll", "t0,1,t0"); emit("stind", "sp,t0,0"); }
+    { emit("ldind", "sp,t0,4"); emit("sll", "t0,1,t0"); emit("or", "t0,t4,t0"); emit("stind", "sp,t0,4"); }
 
     // r = (r << 1) | (n's old top bit, in t3).
-    code_ << "    ldind sp,t0,16\n    srl t0,31,t0\n    or g0,t0,t5\n";
-    code_ << "    ldind sp,t0,16\n    sll t0,1,t0\n    or t0,t3,t0\n    stind sp,t0,16\n";
-    code_ << "    ldind sp,t0,20\n    sll t0,1,t0\n    or t0,t5,t0\n    stind sp,t0,20\n";
+    { emit("ldind", "sp,t0,16"); emit("srl", "t0,31,t0"); emit("or", "g0,t0,t5"); }
+    { emit("ldind", "sp,t0,16"); emit("sll", "t0,1,t0"); emit("or", "t0,t3,t0"); emit("stind", "sp,t0,16"); }
+    { emit("ldind", "sp,t0,20"); emit("sll", "t0,1,t0"); emit("or", "t0,t5,t0"); emit("stind", "sp,t0,20"); }
 
     // if (r >= d) { r -= d; quotient bit = 1 } else { quotient bit = 0 }
-    code_ << "    ldind sp,t0,20\n    ldind sp,t1,12\n    cmp t0,t1\n    bne " << LhiDiff << "\n";
-    code_ << "    ldind sp,t0,16\n    ldind sp,t1,8\n    cmp t0,t1\n    bltu " << LsubNo << "\n";
-    code_ << "    ba " << LsubYes << "\n";
-    code_ << LhiDiff << ":\n";
-    code_ << "    cmp t0,t1\n    bltu " << LsubNo << "\n";
-    code_ << "    ba " << LsubYes << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    ldind sp,t0,16\n    ldind sp,t1,8\n    cmp t0,t1\n    bgeu " << LshiftQ << "_nb\n";
-    code_ << "    or g0,1,t6\n    ba " << LshiftQ << "_bdone\n";
-    code_ << LshiftQ << "_nb:\n    or g0,0,t6\n";
-    code_ << LshiftQ << "_bdone:\n";
-    code_ << "    sub t0,t1,t0\n    stind sp,t0,16\n";
-    code_ << "    ldind sp,t0,20\n    ldind sp,t1,12\n    sub t0,t1,t0\n    sub t0,t6,t0\n    stind sp,t0,20\n";
-    code_ << "    or g0,1,t3\n    ba " << LshiftQ << "\n";
-    code_ << LsubNo << ":\n    or g0,0,t3\n";
-    code_ << LshiftQ << ":\n";
+    { emit("ldind", "sp,t0,20"); emit("ldind", "sp,t1,12"); emit("cmp", "t0,t1"); emit("bne", LhiDiff); }
+    { emit("ldind", "sp,t0,16"); emit("ldind", "sp,t1,8"); emit("cmp", "t0,t1"); emit("bltu", LsubNo); }
+    emit("ba", LsubYes);
+    emitLabel(LhiDiff);
+    { emit("cmp", "t0,t1"); emit("bltu", LsubNo); }
+    emit("ba", LsubYes);
+    emitLabel(LsubYes);
+    { emit("ldind", "sp,t0,16"); emit("ldind", "sp,t1,8"); emit("cmp", "t0,t1"); emit("bgeu", cat(LshiftQ, "_nb")); }
+    { emit("or", "g0,1,t6"); emit("ba", cat(LshiftQ, "_bdone")); }
+    { emitRaw(cat(LshiftQ, "_nb:")); emit("or", "g0,0,t6"); }
+    emitRaw(cat(LshiftQ, "_bdone:"));
+    { emit("sub", "t0,t1,t0"); emit("stind", "sp,t0,16"); }
+    { emit("ldind", "sp,t0,20"); emit("ldind", "sp,t1,12"); emit("sub", "t0,t1,t0"); emit("sub", "t0,t6,t0"); emit("stind", "sp,t0,20"); }
+    { emit("or", "g0,1,t3"); emit("ba", LshiftQ); }
+    { emitLabel(LsubNo); emit("or", "g0,0,t3"); }
+    emitLabel(LshiftQ);
 
     // q = (q << 1) | quotient bit (in t3).
-    code_ << "    ldind sp,t0,24\n    srl t0,31,t0\n    or g0,t0,t5\n";
-    code_ << "    ldind sp,t0,24\n    sll t0,1,t0\n    or t0,t3,t0\n    stind sp,t0,24\n";
-    code_ << "    ldind sp,t0,28\n    sll t0,1,t0\n    or t0,t5,t0\n    stind sp,t0,28\n";
-    code_ << "    ba " << Lloop << "\n";
+    { emit("ldind", "sp,t0,24"); emit("srl", "t0,31,t0"); emit("or", "g0,t0,t5"); }
+    { emit("ldind", "sp,t0,24"); emit("sll", "t0,1,t0"); emit("or", "t0,t3,t0"); emit("stind", "sp,t0,24"); }
+    { emit("ldind", "sp,t0,28"); emit("sll", "t0,1,t0"); emit("or", "t0,t5,t0"); emit("stind", "sp,t0,28"); }
+    emit("ba", Lloop);
 
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
     if (!isUnsigned) {
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    ldind sp,t3,40\n    ldind sp,t0,44\n    xor t3,t0,t3\n";
-        code_ << "    cmp t3,0\n    beq " << LskipNegQ << "\n";
-        code_ << "    ldind sp,t0,24\n    ldind sp,t1,28\n";
+        { emit("ldind", "sp,t3,40"); emit("ldind", "sp,t0,44"); emit("xor", "t3,t0,t3"); }
+        { emit("cmp", "t3,0"); emit("beq", LskipNegQ); }
+        { emit("ldind", "sp,t0,24"); emit("ldind", "sp,t1,28"); }
         genNegate64();
-        code_ << "    stind sp,t0,24\n    stind sp,t1,28\n";
-        code_ << LskipNegQ << ":\n";
-        code_ << "    ldind sp,t3,40\n    cmp t3,0\n    beq " << LskipNegR << "\n";
-        code_ << "    ldind sp,t0,16\n    ldind sp,t1,20\n";
+        { emit("stind", "sp,t0,24"); emit("stind", "sp,t1,28"); }
+        emitLabel(LskipNegQ);
+        { emit("ldind", "sp,t3,40"); emit("cmp", "t3,0"); emit("beq", LskipNegR); }
+        { emit("ldind", "sp,t0,16"); emit("ldind", "sp,t1,20"); }
         genNegate64();
-        code_ << "    stind sp,t0,16\n    stind sp,t1,20\n";
-        code_ << LskipNegR << ":\n";
+        { emit("stind", "sp,t0,16"); emit("stind", "sp,t1,20"); }
+        emitLabel(LskipNegR);
     }
-    code_ << "    ldind sp,t0,24\n    ldind sp,t1,28\n";  // quotient
-    code_ << "    ldind sp,t4,16\n    ldind sp,t5,20\n";  // remainder (saved past the scratch release)
-    code_ << "    add sp,52,sp\n";  // release the 9-word scratch + the 4 earlier stashed operand words
+    { emit("ldind", "sp,t0,24"); emit("ldind", "sp,t1,28"); }  // quotient
+    { emit("ldind", "sp,t4,16"); emit("ldind", "sp,t5,20"); }  // remainder (saved past the scratch release)
+    emit("add", "sp,52,sp");  // release the 9-word scratch + the 4 earlier stashed operand words
     if (wantRemainder) {
-        code_ << "    or g0,t4,t0\n    or g0,t5,t1\n";
+        { emit("or", "g0,t4,t0"); emit("or", "g0,t5,t1"); }
     }
 }
 
@@ -876,23 +876,23 @@ void SparcCodegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool 
 // carrying the bit that crosses the word boundary by hand.
 void SparcCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,8,sp\n    stind sp,t0\n    stind sp,t1,4\n";
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t0"); emit("stind", "sp,t1,4"); }
     genExpr(rhs);  // t0 = shift count (already promoted to a plain int)
-    code_ << "    or g0,t0,t3\n";
-    code_ << "    ldind sp,t0\n    ldind sp,t1,4\n    add sp,8,sp\n";  // t1:t0 restored = the value being shifted
+    emit("or", "g0,t0,t3");
+    { emit("ldind", "sp,t0"); emit("ldind", "sp,t1,4"); emit("add", "sp,8,sp"); }  // t1:t0 restored = the value being shifted
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    cmp t3,0\n    beq " << Ldone << "\n    sub t3,1,t3\n";
+    { emitLabel(Lloop); emit("cmp", "t3,0"); emit("beq", Ldone); emit("sub", "t3,1,t3"); }
     if (isLeft) {
-        code_ << "    srl t0,31,t4\n";       // t4 = t0's old top bit, carries into t1
-        code_ << "    sll t0,1,t0\n";
-        code_ << "    sll t1,1,t1\n    or t1,t4,t1\n";
+        emit("srl", "t0,31,t4");       // t4 = t0's old top bit, carries into t1
+        emit("sll", "t0,1,t0");
+        { emit("sll", "t1,1,t1"); emit("or", "t1,t4,t1"); }
     } else {
-        code_ << "    sll t1,31,t4\n";       // t4 = (t1&1)<<31, carries into t0's top
-        code_ << "    srl t0,1,t0\n    or t0,t4,t0\n";
-        code_ << "    " << (isUnsigned ? "srl" : "sra") << " t1,1,t1\n";
+        emit("sll", "t1,31,t4");       // t4 = (t1&1)<<31, carries into t0's top
+        { emit("srl", "t0,1,t0"); emit("or", "t0,t4,t0"); }
+        emit((isUnsigned ? "srl" : "sra"), "t1,1,t1");
     }
-    code_ << "    ba " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("ba", Lloop);
+    emitLabel(Ldone);
 }
 
 // A `long long` comparison - compare the high words first (signed or unsigned per
@@ -901,38 +901,38 @@ void SparcCodegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool i
 void SparcCodegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs,
                                      bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,8,sp\n    stind sp,t0\n    stind sp,t1,4\n";
+    { emit("sub", "sp,8,sp"); emit("stind", "sp,t0"); emit("stind", "sp,t1,4"); }
     genExpr(rhs);
-    code_ << "    or g0,t0,t5\n    or g0,t1,t6\n";  // t5:t6 = rhs (lo:hi)
-    code_ << "    ldind sp,t3\n    ldind sp,t4,4\n    add sp,8,sp\n";  // t3:t4 = lhs (lo:hi)
+    { emit("or", "g0,t0,t5"); emit("or", "g0,t1,t6"); }  // t5:t6 = rhs (lo:hi)
+    { emit("ldind", "sp,t3"); emit("ldind", "sp,t4,4"); emit("add", "sp,8,sp"); }  // t3:t4 = lhs (lo:hi)
     if (op == "==" || op == "!=") {
         std::string Lfalse = newLabel(), Ldone = newLabel();
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    cmp t3,t5\n    bne " << Lfalse << "\n";
-        code_ << "    cmp t4,t6\n    bne " << Lfalse << "\n";
-        code_ << "    or g0," << onEqual << ",t0\n    ba " << Ldone << "\n";
-        code_ << Lfalse << ":\n    or g0," << onDiffer << ",t0\n";
-        code_ << Ldone << ":\n";
+        { emit("cmp", "t3,t5"); emit("bne", Lfalse); }
+        { emit("cmp", "t4,t6"); emit("bne", Lfalse); }
+        { emit("or", cat("g0,", onEqual, ",t0")); emit("ba", Ldone); }
+        { emitLabel(Lfalse); emit("or", cat("g0,", onDiffer, ",t0")); }
+        emitLabel(Ldone);
         return;
     }
     // t0 = (hi differ) ? hiCompare(t4,t6) : loCompareUnsigned(t3,t5) - once the high
     // words are equal, the remaining 32 bits are a plain unsigned magnitude.
     std::string LhiDiff = newLabel(), Ldone = newLabel(), Lt = newLabel(), Lf = newLabel();
-    code_ << "    cmp t4,t6\n    bne " << LhiDiff << "\n";
+    { emit("cmp", "t4,t6"); emit("bne", LhiDiff); }
     std::string loBranch = op == "<" ? "bltu" : op == ">" ? "bgtu" : op == "<=" ? "bleu" : "bgeu";
-    code_ << "    cmp t3,t5\n    " << loBranch << " " << Lt << "\n    ba " << Lf << "\n";
-    code_ << Lt << ":\n    or g0,1,t0\n    ba " << Ldone << "\n";
-    code_ << Lf << ":\n    or g0,0,t0\n    ba " << Ldone << "\n";
-    code_ << LhiDiff << ":\n";
+    { emit("cmp", "t3,t5"); emit(loBranch, Lt); emit("ba", Lf); }
+    { emitLabel(Lt); emit("or", "g0,1,t0"); emit("ba", Ldone); }
+    { emitLabel(Lf); emit("or", "g0,0,t0"); emit("ba", Ldone); }
+    emitLabel(LhiDiff);
     std::string hiBranch;
     if (isUnsigned) {
         hiBranch = loBranch;
     } else {
         hiBranch = op == "<" ? "blt" : op == ">" ? "bgt" : op == "<=" ? "ble" : "bge";
     }
-    code_ << "    cmp t4,t6\n    " << hiBranch << " " << Lt << "\n    ba " << Lf << "\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "t4,t6"); emit(hiBranch, Lt); emit("ba", Lf); }
+    emitLabel(Ldone);
 }
 
 void SparcCodegen::genBinary(const ir::Expr &e) {
@@ -949,13 +949,13 @@ void SparcCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+        { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
         genExpr(*e.rhs);
-        code_ << "    ldind sp,t1\n    add sp,4,sp\n";  // t1 = lhs, t0 = rhs
+        { emit("ldind", "sp,t1"); emit("add", "sp,4,sp"); }  // t1 = lhs, t0 = rhs
         if (op == "+") {
-            code_ << "    add t1,t0,t0\n";  // t0 = lhs + rhs
+            emit("add", "t1,t0,t0");  // t0 = lhs + rhs
         } else {
-            code_ << "    sub t1,t0,t0\n";  // t0 = lhs - rhs
+            emit("sub", "t1,t0,t0");  // t0 = lhs - rhs
         }
         return;
     }
@@ -979,18 +979,18 @@ void SparcCodegen::genBinary(const ir::Expr &e) {
         const char *insn = op == "&" ? "and" : op == "|" ? "or" : "xor";
         if (wide) {
             genExpr(*e.lhs);
-            code_ << "    sub sp,8,sp\n    stind sp,t0\n    stind sp,t1,4\n";
+            { emit("sub", "sp,8,sp"); emit("stind", "sp,t0"); emit("stind", "sp,t1,4"); }
             genExpr(*e.rhs);
-            code_ << "    or g0,t0,t3\n    or g0,t1,t4\n";
-            code_ << "    ldind sp,t0\n    ldind sp,t1,4\n    add sp,8,sp\n";
-            code_ << "    " << insn << " t0,t3,t0\n    " << insn << " t1,t4,t1\n";
+            { emit("or", "g0,t0,t3"); emit("or", "g0,t1,t4"); }
+            { emit("ldind", "sp,t0"); emit("ldind", "sp,t1,4"); emit("add", "sp,8,sp"); }
+            { emit(insn, "t0,t3,t0"); emit(insn, "t1,t4,t1"); }
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+        { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
         genExpr(*e.rhs);
-        code_ << "    ldind sp,t1\n    add sp,4,sp\n";
-        code_ << "    " << insn << " t1,t0,t0\n";
+        { emit("ldind", "sp,t1"); emit("add", "sp,4,sp"); }
+        emit(insn, "t1,t0,t0");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -999,12 +999,12 @@ void SparcCodegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+        { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
         genExpr(*e.rhs);  // t0 = shift count
         movReg("t1", "t0");
-        code_ << "    ldind sp,t0\n    add sp,4,sp\n";  // t0 = value to shift
+        { emit("ldind", "sp,t0"); emit("add", "sp,4,sp"); }  // t0 = value to shift
         const char *insn = op == "<<" ? "sll" : (isUnsigned ? "srl" : "sra");
-        code_ << "    " << insn << " t0,t1,t0\n";
+        emit(insn, "t0,t1,t0");
         return;
     }
     if (op == "&&") {
@@ -1022,10 +1022,10 @@ void SparcCodegen::genBinary(const ir::Expr &e) {
 // for the low-order 32 bits `smul` keeps.
 void SparcCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
     genExpr(rhs);
-    code_ << "    ldind sp,t1\n    add sp,4,sp\n";  // t1 = lhs, t0 = rhs
-    code_ << "    smul t1,t0,t0\n";
+    { emit("ldind", "sp,t1"); emit("add", "sp,4,sp"); }  // t1 = lhs, t0 = rhs
+    emit("smul", "t1,t0,t0");
 }
 
 // Real hardware divide (`sdiv`/`udiv`) gives only the quotient, treating the dividend as
@@ -1036,23 +1036,23 @@ void SparcCodegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
 // multiply back out, then `sub` to recover `dividend - quotient * divisor`.
 void SparcCodegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
     genExpr(rhs);
-    code_ << "    ldind sp,t1\n    add sp,4,sp\n";  // t1 = lhs (dividend), t0 = rhs (divisor)
+    { emit("ldind", "sp,t1"); emit("add", "sp,4,sp"); }  // t1 = lhs (dividend), t0 = rhs (divisor)
     if (isUnsigned) {
-        code_ << "    wry g0,g0\n";
+        emit("wry", "g0,g0");
     } else {
-        code_ << "    sra t1,31,t2\n    wry t2,g0\n";
+        { emit("sra", "t1,31,t2"); emit("wry", "t2,g0"); }
     }
     const char *divInsn = isUnsigned ? "udiv" : "sdiv";
     const char *mulInsn = isUnsigned ? "umul" : "smul";
     if (!wantRemainder) {
-        code_ << "    " << divInsn << " t1,t0,t0\n";
+        emit(divInsn, "t1,t0,t0");
         return;
     }
-    code_ << "    " << divInsn << " t1,t0,t2\n";   // t2 = quotient (t1/t0)
-    code_ << "    " << mulInsn << " t2,t0,t2\n";   // t2 = quotient * divisor
-    code_ << "    sub t1,t2,t0\n";    // t0 = t1 - t2 = dividend - quotient*divisor
+    emit(divInsn, "t1,t0,t2");   // t2 = quotient (t1/t0)
+    emit(mulInsn, "t2,t0,t2");   // t2 = quotient * divisor
+    emit("sub", "t1,t2,t0");    // t0 = t1 - t2 = dividend - quotient*divisor
 }
 
 // SPARC has no compare-and-set instruction - a comparison needs `cmp` (`subcc
@@ -1066,10 +1066,10 @@ void SparcCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
     }
     bool isUnsigned = lhs.type.isUnsigned;
     genExpr(lhs);
-    code_ << "    sub sp,4,sp\n    stind sp,t0\n";
+    { emit("sub", "sp,4,sp"); emit("stind", "sp,t0"); }
     genExpr(rhs);
-    code_ << "    ldind sp,t1\n    add sp,4,sp\n";  // t1 = lhs, t0 = rhs
-    code_ << "    cmp t1,t0\n";
+    { emit("ldind", "sp,t1"); emit("add", "sp,4,sp"); }  // t1 = lhs, t0 = rhs
+    emit("cmp", "t1,t0");
     std::string branch;
     if (op == "<") branch = isUnsigned ? "bltu" : "blt";
     else if (op == ">") branch = isUnsigned ? "bgtu" : "bgt";
@@ -1079,49 +1079,49 @@ void SparcCodegen::genCompare(const std::string &op, const ir::Expr &lhs, const 
     else if (op == "!=") branch = "bne";
     else err(lhs.line, "internal: unhandled comparison operator '" + op + "'");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << branch << " " << Ltrue << "\n";
-    code_ << "    or g0,0,t0\n";
-    code_ << "    ba " << Ldone << "\n";
-    code_ << Ltrue << ":\n    or g0,1,t0\n";
-    code_ << Ldone << ":\n";
+    emit(branch, Ltrue);
+    emit("or", "g0,0,t0");
+    emit("ba", Ldone);
+    { emitLabel(Ltrue); emit("or", "g0,1,t0"); }
+    emitLabel(Ldone);
 }
 
 void SparcCodegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or t0,t1,t0\n";
+    if (isWide(lhs.type)) emit("or", "t0,t1,t0");
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp t0,0\n    beq " << Lfalse << "\n";
+    { emit("cmp", "t0,0"); emit("beq", Lfalse); }
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t1,t0\n";
-    code_ << "    cmp t0,0\n    beq " << Lfalse << "\n";
-    code_ << "    ba " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    or g0,0,t0\n    ba " << Ldone << "\n";
-    code_ << Ltrue << ":\n    or g0,1,t0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("or", "t0,t1,t0");
+    { emit("cmp", "t0,0"); emit("beq", Lfalse); }
+    emit("ba", Ltrue);
+    { emitLabel(Lfalse); emit("or", "g0,0,t0"); emit("ba", Ldone); }
+    { emitLabel(Ltrue); emit("or", "g0,1,t0"); }
+    emitLabel(Ldone);
 }
 
 void SparcCodegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    if (isWide(lhs.type)) code_ << "    or t0,t1,t0\n";
+    if (isWide(lhs.type)) emit("or", "t0,t1,t0");
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmp t0,0\n    bne " << Ltrue << "\n";
+    { emit("cmp", "t0,0"); emit("bne", Ltrue); }
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t1,t0\n";
-    code_ << "    cmp t0,0\n    bne " << Ltrue << "\n";
-    code_ << "    ba " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    or g0,1,t0\n    ba " << Ldone << "\n";
-    code_ << Lfalse << ":\n    or g0,0,t0\n";
-    code_ << Ldone << ":\n";
+    if (isWide(rhs.type)) emit("or", "t0,t1,t0");
+    { emit("cmp", "t0,0"); emit("bne", Ltrue); }
+    emit("ba", Lfalse);
+    { emitLabel(Ltrue); emit("or", "g0,1,t0"); emit("ba", Ldone); }
+    { emitLabel(Lfalse); emit("or", "g0,0,t0"); }
+    emitLabel(Ldone);
 }
 
 void SparcCodegen::genLogicalNot(const ir::Expr &rhs) {
     genExpr(rhs);
-    if (isWide(rhs.type)) code_ << "    or t0,t1,t0\n";
+    if (isWide(rhs.type)) emit("or", "t0,t1,t0");
     std::string Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmp t0,0\n    bne " << Lfalse << "\n";
-    code_ << "    or g0,1,t0\n    ba " << Ldone << "\n";
-    code_ << Lfalse << ":\n    or g0,0,t0\n";
-    code_ << Ldone << ":\n";
+    { emit("cmp", "t0,0"); emit("bne", Lfalse); }
+    { emit("or", "g0,1,t0"); emit("ba", Ldone); }
+    { emitLabel(Lfalse); emit("or", "g0,0,t0"); }
+    emitLabel(Ldone);
 }
 
 std::optional<std::string> SparcCodegen::assembleInProcess(const std::string &asmText,

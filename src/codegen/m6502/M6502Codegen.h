@@ -99,7 +99,7 @@ namespace rcc {
 // though the C program itself never touches those cells. `zeroPageBase()` skips past the
 // BIOS's own zero-page use ($0000-$001F) and `frameStackBase()` skips past the whole $0200-
 // $021B vector table.
-class M6502Codegen : public Backend {
+class M6502Codegen : public Backend, protected TextCodegenBase {
    public:
     enum class Variant { Plain, Atari2600, Nes2A03, Atari5200 };
 
@@ -349,7 +349,9 @@ class M6502Codegen : public Backend {
 
     Variant variant_;
 
-    std::ostringstream code_;
+    // emit()/emitLabel()/emitRaw()/emitEquate()/emitVerbatim() and `code_`
+    // itself come from TextCodegenBase (see Codegen.h) - shared by every
+    // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;  // "label: dblo e" / "dbhi e" data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
 

@@ -101,23 +101,29 @@ std::string I386Codegen::generate(const ir::Program &prog, bool objectMode) {
     // suppresses the Multiboot header/entry sequence here since I386LinkerFactory
     // synthesizes exactly one once every object is merged. An object file's base is `org 0`;
     // placing it is the linker's job.
-    code_ << "org " << (objectMode ? 0 : kLoadAddr) << "\n\n";
+    emitRaw(cat("org ", (objectMode ? 0 : kLoadAddr)));
+    emitRaw("");
     if (!objectMode) {
-        code_ << "dd " << kMbMagic << "," << kMbFlags << "," << kMbChecksum << "\n";
-        code_ << "dd " << kLoadAddr << "," << kLoadAddr << ",0,0\n";
-        code_ << "dd _start\n\n";
-        code_ << "_start:\n";
+        emitRaw(cat("dd ", kMbMagic, ",", kMbFlags, ",", kMbChecksum));
+        emitRaw(cat("dd ", kLoadAddr, ",", kLoadAddr, ",0,0"));
+        emitRaw("dd _start");
+        emitRaw("");
+        emitLabel("_start");
         // Masks both 8259 PICs: this backend builds no IDT, so an unmasked timer interrupt
         // (possible once `_ion()` runs) would triple-fault.
-        code_ << "    mov al,0xFF\n    out 0x21,al\n";
-        code_ << "    mov al,0xFF\n    out 0xA1,al\n";
+        emit("mov", "al,0xFF");
+        emit("out", "0x21,al");
+        emit("mov", "al,0xFF");
+        emit("out", "0xA1,al");
         // GRUB/qemu's own startup state for the x87 FPU isn't this backend's to assume -
         // FNINIT puts it in the documented post-reset state (empty register stack, default
         // control word) once, before any float/double code anywhere in the program runs.
-        code_ << "    fninit\n";
-        code_ << "    call " << label(mainFn) << "\n";
-        code_ << "    hlt\n";  // result sits in eax
-        code_ << "halt:\n    jmp halt\n\n";
+        emit("fninit");
+        emit("call", label(mainFn));
+        emit("hlt");  // result sits in eax
+        emitLabel("halt");
+        emit("jmp", "halt");
+        emitRaw("");
     }
 
     for (const auto &fb : prog.functionBodies) genFunction(fb);
@@ -169,16 +175,27 @@ std::string I386Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> I386Codegen::perFileAsm() const { return perFileAsm_; }
 
 void I386Codegen::genFunction(const ir::FunctionBody &fn) {
-    code_ << label(fn.func) << ":\n";
-    code_ << "    push ebp\n    mov ebp,esp\n";
-    if (fn.func->frameSize > 0) code_ << "    sub esp," << fn.func->frameSize << "\n";
-    if (hostedAbi_) code_ << "    push ebx\n    push esi\n    push edi\n";
+    emitLabel(label(fn.func));
+    emit("push", "ebp");
+    emit("mov", "ebp,esp");
+    if (fn.func->frameSize > 0) emit("sub", cat("esp,", fn.func->frameSize));
+    if (hostedAbi_) {
+        emit("push", "ebx");
+        emit("push", "esi");
+        emit("push", "edi");
+    }
 
     genStmt(*fn.body);
 
-    if (hostedAbi_) code_ << "    pop edi\n    pop esi\n    pop ebx\n";
-    code_ << "    mov esp,ebp\n    pop ebp\n";
-    code_ << "    ret\n\n";
+    if (hostedAbi_) {
+        emit("pop", "edi");
+        emit("pop", "esi");
+        emit("pop", "ebx");
+    }
+    emit("mov", "esp,ebp");
+    emit("pop", "ebp");
+    emit("ret");
+    emitRaw("");
 }
 
 void I386Codegen::genStmt(const ir::Stmt &s) {
@@ -191,47 +208,54 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
             genTruthToEax(*s.cond);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp eax,0\n    je " << (s.elseStmt ? Lelse : Ldone) << "\n";
+            emit("cmp", "eax,0");
+            emit("je", (s.elseStmt ? Lelse : Ldone));
             genStmt(*s.thenStmt);
             if (s.elseStmt) {
-                code_ << "    jmp " << Ldone << "\n";
-                code_ << Lelse << ":\n";
+                emit("jmp", Ldone);
+                emitLabel(Lelse);
                 genStmt(*s.elseStmt);
             }
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::StmtKind::While: {
             std::string Lstart = newLabel();
             std::string Lend = newLabel();
             std::string Lcont = s.postStmt ? newLabel() : Lstart;
-            code_ << Lstart << ":\n";
+            emitLabel(Lstart);
             genTruthToEax(*s.cond);
-            code_ << "    cmp eax,0\n    je " << Lend << "\n";
+            emit("cmp", "eax,0");
+            emit("je", Lend);
             loopLabels_.push_back({Lcont, Lend});
             genStmt(*s.loopBody);
             loopLabels_.pop_back();
             if (s.postStmt) {
-                code_ << Lcont << ":\n";
+                emitLabel(Lcont);
                 genStmt(*s.postStmt);
             }
-            code_ << "    jmp " << Lstart << "\n";
-            code_ << Lend << ":\n";
+            emit("jmp", Lstart);
+            emitLabel(Lend);
             return;
         }
         case ir::StmtKind::Break: {
-            code_ << "    jmp " << loopLabels_.back().second << "\n";
+            emit("jmp", loopLabels_.back().second);
             return;
         }
         case ir::StmtKind::Continue: {
-            code_ << "    jmp " << loopLabels_.back().first << "\n";
+            emit("jmp", loopLabels_.back().first);
             return;
         }
         case ir::StmtKind::Return: {
             if (s.initOrReturnOrExpr) genExpr(*s.initOrReturnOrExpr);
-            if (hostedAbi_) code_ << "    pop edi\n    pop esi\n    pop ebx\n";
-            code_ << "    mov esp,ebp\n    pop ebp\n";
-            code_ << "    ret\n";
+            if (hostedAbi_) {
+                emit("pop", "edi");
+                emit("pop", "esi");
+                emit("pop", "ebx");
+            }
+            emit("mov", "esp,ebp");
+            emit("pop", "ebp");
+            emit("ret");
             return;
         }
         case ir::StmtKind::LocalDecl: {
@@ -243,7 +267,7 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
                     storeFloatOperand(addr(s.declSlot), s.declSlot->type, /*pop=*/true);
                 } else {
                     genExpr(*s.initOrReturnOrExpr);
-                    code_ << "    mov " << addr(s.declSlot) << ",eax\n";
+                    emit("mov", cat(addr(s.declSlot), ",eax"));
                 }
             }
             return;
@@ -254,22 +278,21 @@ void I386Codegen::genStmt(const ir::Stmt &s) {
             // (unlike eax, ST0 is a true stack - nothing else ever reclaims this slot), so
             // it must be popped explicitly here or repeated statements would eventually
             // overflow it.
-            if (isFloatType(s.initOrReturnOrExpr->type)) code_ << "    fdiscard\n";
+            if (isFloatType(s.initOrReturnOrExpr->type)) emit("fdiscard");
             return;
         }
         case ir::StmtKind::Empty:
             return;
         case ir::StmtKind::Asm: {
-            code_ << s.asmText;
-            if (!s.asmText.empty() && s.asmText.back() != '\n') code_ << "\n";
+            emitVerbatim(s.asmText);
             return;
         }
         case ir::StmtKind::Label: {
-            code_ << irLabel(s.labelId) << ":\n";
+            emitLabel(irLabel(s.labelId));
             return;
         }
         case ir::StmtKind::Goto: {
-            code_ << "    jmp " << irLabel(s.labelId) << "\n";
+            emit("jmp", irLabel(s.labelId));
             return;
         }
     }
@@ -286,11 +309,11 @@ void I386Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::IntLit: {
             if (isWide(e.type)) {
                 auto v = static_cast<uint64_t>(e.intValue);
-                code_ << "    mov eax," << static_cast<uint32_t>(v) << "\n";
-                code_ << "    mov edx," << static_cast<uint32_t>(v >> 32) << "\n";
+                emit("mov", cat("eax,", static_cast<uint32_t>(v)));
+                emit("mov", cat("edx,", static_cast<uint32_t>(v >> 32)));
                 return;
             }
-            code_ << "    mov eax," << e.intValue << "\n";
+            emit("mov", cat("eax,", e.intValue));
             return;
         }
         case ir::ExprKind::Var: {
@@ -304,9 +327,9 @@ void I386Codegen::genExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 std::string addr = computeElementAddr(e.slot, *e.lhs);
-                code_ << "    push ebx\n";
+                emit("push", "ebx");
                 genExpr(*e.rhs);
-                code_ << "    pop ebx\n";
+                emit("pop", "ebx");
                 storeOperand("[ebx]", "[ebx+4]", e.slot->type);
                 return;
             }
@@ -324,18 +347,18 @@ void I386Codegen::genExpr(const ir::Expr &e) {
             // across rhs's evaluation.
             std::string mem = operandOf(e.slot);
             genExpr(*e.rhs);  // eax = rhs
-            code_ << "    mov ebx,eax\n";
+            emit("mov", "ebx,eax");
             loadOperand(mem, "", e.type);  // eax = old
-            if (e.yieldOld) code_ << "    push eax\n";
+            if (e.yieldOld) emit("push", "eax");
             genCompoundOp(e.op, e.type);
             narrowEaxTo(e.type);
             storeOperand(mem, "", e.type);
-            if (e.yieldOld) code_ << "    pop eax\n";
+            if (e.yieldOld) emit("pop", "eax");
             return;
         }
         case ir::ExprKind::CompoundDerefAssign: {
             genExpr(*e.lhs);  // eax = pointer value
-            code_ << "    mov ebx,eax\n";  // ebx = address
+            emit("mov", "ebx,eax");  // ebx = address
             genCompoundThroughEbx(e);
             return;
         }
@@ -345,19 +368,21 @@ void I386Codegen::genExpr(const ir::Expr &e) {
             genTruthToEax(*e.lhs);
             std::string Lelse = newLabel();
             std::string Ldone = newLabel();
-            code_ << "    cmp eax,0\n    je " << Lelse << "\n";
+            emit("cmp", "eax,0");
+            emit("je", Lelse);
             genExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // eax = pointer value
-            code_ << "    mov ebx,eax\n    push ebx\n";
+            emit("mov", "ebx,eax");
+            emit("push", "ebx");
             genExpr(*e.rhs);  // eax, or edx:eax if wide = value to store
-            code_ << "    pop ebx\n";
+            emit("pop", "ebx");
             storeOperand("[ebx]", "[ebx+4]", e.type);
             return;
         }
@@ -367,18 +392,18 @@ void I386Codegen::genExpr(const ir::Expr &e) {
                 if (isWide(e.rhs->type)) {
                     genNegate64();
                 } else {
-                    code_ << "    neg eax\n";
+                    emit("neg", "eax");
                 }
             } else if (e.op == "!") {
                 genLogicalNot(*e.rhs);
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // eax = pointer value
-                code_ << "    mov ebx,eax\n";
+                emit("mov", "ebx,eax");
                 loadOperand("[ebx]", "[ebx+4]", e.type);
             } else if (e.op == "~") {
                 genExpr(*e.rhs);
-                code_ << "    not eax\n";
-                if (isWide(e.rhs->type)) code_ << "    not edx\n";
+                emit("not", "eax");
+                if (isWide(e.rhs->type)) emit("not", "edx");
             } else {  // "&"
                 genAddrOf(*e.rhs);
             }
@@ -397,7 +422,7 @@ void I386Codegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Intrinsic: {
-            code_ << "    " << (e.op == "ion" ? "sti" : "cli") << "\n";
+            emit((e.op == "ion" ? "sti" : "cli"));
             return;
         }
         case ir::ExprKind::Convert: {
@@ -416,7 +441,7 @@ void I386Codegen::genTruthToEax(const ir::Expr &e) {
         return;
     }
     genExpr(e);
-    if (isWide(e.type)) code_ << "    or eax,edx\n";
+    if (isWide(e.type)) emit("or", "eax,edx");
 }
 
 void I386Codegen::genCall(const ir::Expr &e) {
@@ -428,9 +453,11 @@ void I386Codegen::genCall(const ir::Expr &e) {
         totalBytes += isFloatType(arg->type) ? widthOfType(arg->type) : (isWide(arg->type) ? 8 : 4);
     }
     if (hostedAbi_) {
-        code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
+        emit("push", "esi");
+        emit("mov", "esi,esp");
+        emit("and", "esp,-16");
         int padding = (16 - totalBytes % 16) % 16;
-        if (padding > 0) code_ << "    sub esp," << padding << "\n";
+        if (padding > 0) emit("sub", cat("esp,", padding));
     }
     for (size_t i = e.args.size(); i-- > 0;) {
         const ir::Expr &arg = *e.args[i];
@@ -439,25 +466,30 @@ void I386Codegen::genCall(const ir::Expr &e) {
             std::string tmp = allocFloatTemp(arg.type);
             storeFloatOperand("[" + tmp + "]", arg.type, /*pop=*/true);
             if (widthOfType(arg.type) == 8) {
-                code_ << "    mov eax,[" << tmp << "+4]\n    push eax\n";
-                code_ << "    mov eax,[" << tmp << "]\n    push eax\n";
+                emit("mov", cat("eax,[", tmp, "+4]"));
+                emit("push", "eax");
+                emit("mov", cat("eax,[", tmp, "]"));
+                emit("push", "eax");
             } else {
-                code_ << "    mov eax,[" << tmp << "]\n    push eax\n";
+                emit("mov", cat("eax,[", tmp, "]"));
+                emit("push", "eax");
             }
         } else {
             genExpr(arg);
             if (isWide(arg.type)) {
-                code_ << "    push edx\n    push eax\n";
+                emit("push", "edx");
+                emit("push", "eax");
             } else {
-                code_ << "    push eax\n";
+                emit("push", "eax");
             }
         }
     }
-    code_ << "    call " << label(e.func) << "\n";
+    emit("call", label(e.func));
     if (hostedAbi_) {
-        code_ << "    mov esp,esi\n    pop esi\n";
+        emit("mov", "esp,esi");
+        emit("pop", "esi");
     } else if (totalBytes > 0) {
-        code_ << "    add esp," << totalBytes << "\n";
+        emit("add", cat("esp,", totalBytes));
     }
 }
 
@@ -465,81 +497,93 @@ void I386Codegen::genCallPtr(const ir::Expr &e) {
     // e.args is always empty here: IRBuilder rejects any argument on this kind before it
     // reaches a backend, since the callee is never known at compile time.
     genExpr(*e.lhs);  // eax = the callee's entry address
-    if (hostedAbi_) code_ << "    push esi\n    mov esi,esp\n    and esp,-16\n";
-    code_ << "    call eax\n";
-    if (hostedAbi_) code_ << "    mov esp,esi\n    pop esi\n";
+    if (hostedAbi_) {
+        emit("push", "esi");
+        emit("mov", "esi,esp");
+        emit("and", "esp,-16");
+    }
+    emit("call", "eax");
+    if (hostedAbi_) {
+        emit("mov", "esp,esi");
+        emit("pop", "esi");
+    }
 }
 
 std::string I386Codegen::computeElementAddr(const ir::Slot *slot, const ir::Expr &idxExpr) {
     genExpr(idxExpr);
     int shift = elemShift(slot->type);
     if (shift > 0) {
-        code_ << "    shl eax," << shift << "\n";
+        emit("shl", cat("eax,", shift));
     } else if (shift < 0) {
         // Non-power-of-two element width (a struct's): scale by a real multiply instead -
         // this assembler's own `imul` is one-operand only (edx:eax = eax*reg), so the width
         // has to go through a register, not an immediate.
-        code_ << "    mov ebx," << widthOfType(slot->type) << "\n";
-        code_ << "    imul ebx\n";
+        emit("mov", cat("ebx,", widthOfType(slot->type)));
+        emit("imul", "ebx");
     }
-    code_ << "    mov ebx,eax\n";
+    emit("mov", "ebx,eax");
     if (slot->arraySize > 0) {
         if (slot->kind == ir::SlotKind::Global) {
-            code_ << "    add ebx," << label(slot) << "\n";
+            emit("add", cat("ebx,", label(slot)));
         } else {
-            code_ << "    lea eax," << localArrayAddr(slot) << "\n    add ebx,eax\n";
+            emit("lea", cat("eax,", localArrayAddr(slot)));
+            emit("add", "ebx,eax");
         }
     } else {
-        code_ << "    add ebx," << operandOf(slot) << "\n";
+        emit("add", cat("ebx,", operandOf(slot)));
     }
     return "[ebx]";
 }
 
 void I386Codegen::genCompoundOp(const std::string &op, Type type) {
     bool isUnsigned = type.isUnsigned;
-    if (op == "+") { code_ << "    add eax,ebx\n"; return; }
-    if (op == "-") { code_ << "    sub eax,ebx\n"; return; }
+    if (op == "+") { emit("add", "eax,ebx"); return; }
+    if (op == "-") { emit("sub", "eax,ebx"); return; }
     // One-operand multiply: edx:eax = eax*ebx, keep eax.
-    if (op == "*") { code_ << "    " << (isUnsigned ? "mul" : "imul") << " ebx\n"; return; }
-    if (op == "&") { code_ << "    and eax,ebx\n"; return; }
-    if (op == "|") { code_ << "    or eax,ebx\n"; return; }
-    if (op == "^") { code_ << "    xor eax,ebx\n"; return; }
+    if (op == "*") { emit((isUnsigned ? "mul" : "imul"), "ebx"); return; }
+    if (op == "&") { emit("and", "eax,ebx"); return; }
+    if (op == "|") { emit("or", "eax,ebx"); return; }
+    if (op == "^") { emit("xor", "eax,ebx"); return; }
     if (op == "<<" || op == ">>") {
-        code_ << "    mov ecx,ebx\n";
-        code_ << "    " << (op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar")) << " eax,cl\n";
+        emit("mov", "ecx,ebx");
+        emit((op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar")), "eax,cl");
         return;
     }
     // "/" or "%": div/idiv only forbid eax/edx (the dividend), so ebx is a valid divisor.
-    code_ << "    " << (isUnsigned ? "xor edx,edx\n" : "cdq\n");
-    code_ << "    " << (isUnsigned ? "div" : "idiv") << " ebx\n";
-    if (op == "%") code_ << "    mov eax,edx\n";
+    if (isUnsigned) {
+        emit("xor", "edx,edx");
+    } else {
+        emit("cdq");
+    }
+    emit((isUnsigned ? "div" : "idiv"), "ebx");
+    if (op == "%") emit("mov", "eax,edx");
 }
 
 // ebx must already hold the resolved address on entry. Only [ebx] is a valid memory base
 // in this dialect, so the address is shuttled back into ebx right before each memory access
 // rather than held in another register across rhs's evaluation.
 void I386Codegen::genCompoundThroughEbx(const ir::Expr &e) {
-    code_ << "    push ebx\n";  // stash address
+    emit("push", "ebx");  // stash address
     genExpr(*e.rhs);             // eax = rhs
-    code_ << "    push eax\n";    // stash rhs
-    code_ << "    pop ecx\n";      // ecx = rhs
-    code_ << "    pop ebx\n";       // ebx = address
+    emit("push", "eax");  // stash rhs
+    emit("pop", "ecx");  // ecx = rhs
+    emit("pop", "ebx");  // ebx = address
     loadOperand("[ebx]", "", e.type);  // eax = old
-    code_ << "    push ebx\n";           // re-stash address for the store below
-    if (e.yieldOld) code_ << "    push eax\n";  // stash old too
-    code_ << "    mov ebx,ecx\n";                // ebx = rhs
+    emit("push", "ebx");  // re-stash address for the store below
+    if (e.yieldOld) emit("push", "eax");  // stash old too
+    emit("mov", "ebx,ecx");  // ebx = rhs
     genCompoundOp(e.op, e.type);                   // eax = new (raw)
     narrowEaxTo(e.type);
     if (e.yieldOld) {
-        code_ << "    mov ecx,eax\n";  // ecx = new
-        code_ << "    pop eax\n";       // eax = old
-        code_ << "    pop ebx\n";        // ebx = address
-        code_ << "    mov edx,eax\n";     // edx = old (preserved across the store below)
-        code_ << "    mov eax,ecx\n";      // eax = new (storeOperand always stores from eax)
+        emit("mov", "ecx,eax");  // ecx = new
+        emit("pop", "eax");  // eax = old
+        emit("pop", "ebx");  // ebx = address
+        emit("mov", "edx,eax");  // edx = old (preserved across the store below)
+        emit("mov", "eax,ecx");  // eax = new (storeOperand always stores from eax)
         storeOperand("[ebx]", "", e.type);
-        code_ << "    mov eax,edx\n";        // eax = old (final result)
+        emit("mov", "eax,edx");  // eax = old (final result)
     } else {
-        code_ << "    pop ebx\n";  // ebx = address
+        emit("pop", "ebx");  // ebx = address
         storeOperand("[ebx]", "", e.type);  // eax already = new
     }
 }
@@ -547,9 +591,17 @@ void I386Codegen::genCompoundThroughEbx(const ir::Expr &e) {
 void I386Codegen::narrowEaxTo(Type to) {
     int w = widthOfType(to);
     if (w == 1) {
-        code_ << "    " << (to.isUnsigned ? "movzx eax,al\n" : "movsx eax,al\n");
+        if (to.isUnsigned) {
+            emit("movzx", "eax,al");
+        } else {
+            emit("movsx", "eax,al");
+        }
     } else if (w == 2) {
-        code_ << "    " << (to.isUnsigned ? "movzx eax,ax\n" : "movsx eax,ax\n");
+        if (to.isUnsigned) {
+            emit("movzx", "eax,ax");
+        } else {
+            emit("movsx", "eax,ax");
+        }
     }
     // 4 bytes: eax already holds the full value, nothing to do. 8 bytes never reaches here.
 }
@@ -557,28 +609,28 @@ void I386Codegen::narrowEaxTo(Type to) {
 void I386Codegen::loadOperand(const std::string &mem, const std::string &highMem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    " << (type.isUnsigned ? "movzx eax,byte " : "movsx eax,byte ") << mem << "\n";
+        emit(cat((type.isUnsigned ? "movzx eax,byte " : "movsx eax,byte "), mem));
     } else if (w == 2) {
-        code_ << "    " << (type.isUnsigned ? "movzx eax,word " : "movsx eax,word ") << mem << "\n";
+        emit(cat((type.isUnsigned ? "movzx eax,word " : "movsx eax,word "), mem));
     } else if (w == 4) {
-        code_ << "    mov eax," << mem << "\n";
+        emit("mov", cat("eax,", mem));
     } else {  // 8 - long long: edx:eax, low dword first
-        code_ << "    mov eax," << mem << "\n";
-        code_ << "    mov edx," << highMem << "\n";
+        emit("mov", cat("eax,", mem));
+        emit("mov", cat("edx,", highMem));
     }
 }
 
 void I386Codegen::storeOperand(const std::string &mem, const std::string &highMem, Type type) {
     int w = widthOfType(type);
     if (w == 1) {
-        code_ << "    mov byte " << mem << ",al\n";
+        emit("mov", cat("byte ", mem, ",al"));
     } else if (w == 2) {
-        code_ << "    mov word " << mem << ",ax\n";
+        emit("mov", cat("word ", mem, ",ax"));
     } else if (w == 4) {
-        code_ << "    mov " << mem << ",eax\n";
+        emit("mov", cat(mem, ",eax"));
     } else {  // 8
-        code_ << "    mov " << mem << ",eax\n";
-        code_ << "    mov " << highMem << ",edx\n";
+        emit("mov", cat(mem, ",eax"));
+        emit("mov", cat(highMem, ",edx"));
     }
 }
 
@@ -595,7 +647,11 @@ void I386Codegen::genConvert(const ir::Expr &e) {
     if (fromWide && !toWide) {
         narrowEaxTo(to);  // edx is simply discarded
     } else if (!fromWide && toWide) {
-        code_ << (from.isUnsigned ? "    xor edx,edx\n" : "    cdq\n");
+        if (from.isUnsigned) {
+            emit("xor", "edx,edx");
+        } else {
+            emit("cdq");
+        }
     } else if (!fromWide && !toWide) {
         narrowEaxTo(to);
     }
@@ -606,14 +662,19 @@ void I386Codegen::genConvert(const ir::Expr &e) {
 // rhs evaluates, then ripple the carry/borrow across the dword pair with adc/sbb.
 void I386Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAdd) {
     genExpr(lhs);                       // edx:eax = lhs
-    code_ << "    push edx\n    push eax\n";  // stack (top->bottom): lhs_lo, lhs_hi
+    emit("push", "edx");
+    emit("push", "eax");  // stack (top->bottom): lhs_lo, lhs_hi
     genExpr(rhs);                       // edx:eax = rhs
-    code_ << "    mov ebx,eax\n    mov ecx,edx\n";  // ebx=rhs_lo, ecx=rhs_hi
-    code_ << "    pop eax\n    pop edx\n";    // eax=lhs_lo, edx=lhs_hi
+    emit("mov", "ebx,eax");
+    emit("mov", "ecx,edx");  // ebx=rhs_lo, ecx=rhs_hi
+    emit("pop", "eax");
+    emit("pop", "edx");  // eax=lhs_lo, edx=lhs_hi
     if (isAdd) {
-        code_ << "    add eax,ebx\n    adc edx,ecx\n";
+        emit("add", "eax,ebx");
+        emit("adc", "edx,ecx");
     } else {
-        code_ << "    sub eax,ebx\n    sbb edx,ecx\n";
+        emit("sub", "eax,ebx");
+        emit("sbb", "edx,ecx");
     }
 }
 
@@ -623,24 +684,33 @@ void I386Codegen::genWideAdd(const ir::Expr &lhs, const ir::Expr &rhs, bool isAd
 // own mul leaves overflow in edx that's discarded (it only affects bit 64 and beyond).
 void I386Codegen::genWideMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     genExpr(lhs);
-    code_ << "    push edx\n    push eax\n";  // lhs_lo, lhs_hi
+    emit("push", "edx");
+    emit("push", "eax");  // lhs_lo, lhs_hi
     genExpr(rhs);
-    code_ << "    mov edi,edx\n    mov esi,eax\n";  // edi=rhs_hi, esi=rhs_lo
-    code_ << "    pop ebx\n    pop ecx\n";          // ebx=lhs_lo (top of stack), ecx=lhs_hi
-    code_ << "    mov eax,ebx\n    mul edi\n";      // edx:eax = lhs_lo*rhs_hi
-    code_ << "    push eax\n";                       // crossA_lo
-    code_ << "    mov eax,ecx\n    mul esi\n";      // edx:eax = lhs_hi*rhs_lo
-    code_ << "    push eax\n";                       // crossB_lo
-    code_ << "    mov eax,ebx\n    mul esi\n";      // edx:eax = lhs_lo*rhs_lo (final result_lo/carry)
-    code_ << "    pop ebx\n    pop ecx\n";          // ebx=crossB_lo, ecx=crossA_lo
-    code_ << "    add edx,ebx\n    add edx,ecx\n";
+    emit("mov", "edi,edx");
+    emit("mov", "esi,eax");  // edi=rhs_hi, esi=rhs_lo
+    emit("pop", "ebx");
+    emit("pop", "ecx");  // ebx=lhs_lo (top of stack), ecx=lhs_hi
+    emit("mov", "eax,ebx");
+    emit("mul", "edi");  // edx:eax = lhs_lo*rhs_hi
+    emit("push", "eax");  // crossA_lo
+    emit("mov", "eax,ecx");
+    emit("mul", "esi");  // edx:eax = lhs_hi*rhs_lo
+    emit("push", "eax");  // crossB_lo
+    emit("mov", "eax,ebx");
+    emit("mul", "esi");  // edx:eax = lhs_lo*rhs_lo (final result_lo/carry)
+    emit("pop", "ebx");
+    emit("pop", "ecx");  // ebx=crossB_lo, ecx=crossA_lo
+    emit("add", "edx,ebx");
+    emit("add", "edx,ecx");
 }
 
 void I386Codegen::genNegate64() {
-    code_ << "    not eax\n    not edx\n";
-    code_ << "    xor ecx,ecx\n";
-    code_ << "    add eax,1\n";
-    code_ << "    adc edx,ecx\n";
+    emit("not", "eax");
+    emit("not", "edx");
+    emit("xor", "ecx,ecx");
+    emit("add", "eax,1");
+    emit("adc", "edx,ecx");
 }
 
 // Bit-serial shift/compare/subtract long division: no native instruction here is wider
@@ -657,91 +727,171 @@ void I386Codegen::genNegate64() {
 // takes the dividend's sign.
 void I386Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push edx\n    push eax\n";  // lhs_hi, lhs_lo (lhs_lo on top)
+    emit("push", "edx");
+    emit("push", "eax");  // lhs_hi, lhs_lo (lhs_lo on top)
     genExpr(rhs);
-    code_ << "    push edx\n    push eax\n";  // rhs_hi, rhs_lo (rhs_lo on top)
-    code_ << "    sub esp,36\n    mov ebx,esp\n";
+    emit("push", "edx");
+    emit("push", "eax");  // rhs_hi, rhs_lo (rhs_lo on top)
+    emit("sub", "esp,36");
+    emit("mov", "ebx,esp");
     // Fetch the operands stashed just above the scratch block.
-    code_ << "    mov eax,[ebx+44]\n    mov [ebx+0],eax\n";   // n_lo = lhs_lo
-    code_ << "    mov eax,[ebx+48]\n    mov [ebx+4],eax\n";   // n_hi = lhs_hi
-    code_ << "    mov eax,[ebx+36]\n    mov [ebx+8],eax\n";   // d_lo = rhs_lo
-    code_ << "    mov eax,[ebx+40]\n    mov [ebx+12],eax\n";  // d_hi = rhs_hi
-    code_ << "    xor eax,eax\n";
-    code_ << "    mov [ebx+16],eax\n    mov [ebx+20],eax\n";  // r = 0
-    code_ << "    mov [ebx+24],eax\n    mov [ebx+28],eax\n";  // q = 0
-    code_ << "    mov eax,64\n    mov [ebx+32],eax\n";        // 64 iterations
+    emit("mov", "eax,[ebx+44]");
+    emit("mov", "[ebx+0],eax");  // n_lo = lhs_lo
+    emit("mov", "eax,[ebx+48]");
+    emit("mov", "[ebx+4],eax");  // n_hi = lhs_hi
+    emit("mov", "eax,[ebx+36]");
+    emit("mov", "[ebx+8],eax");  // d_lo = rhs_lo
+    emit("mov", "eax,[ebx+40]");
+    emit("mov", "[ebx+12],eax");  // d_hi = rhs_hi
+    emit("xor", "eax,eax");
+    emit("mov", "[ebx+16],eax");
+    emit("mov", "[ebx+20],eax");  // r = 0
+    emit("mov", "[ebx+24],eax");
+    emit("mov", "[ebx+28],eax");  // q = 0
+    emit("mov", "eax,64");
+    emit("mov", "[ebx+32],eax");  // 64 iterations
 
     std::string LskipNegN = newLabel(), LskipNegD = newLabel();
     if (!isUnsigned) {
-        code_ << "    mov eax,[ebx+4]\n    shr eax,31\n    mov [ebx+36],eax\n";  // lhsSign
-        code_ << "    mov eax,[ebx+12]\n    shr eax,31\n    mov [ebx+40],eax\n";  // rhsSign
-        code_ << "    mov eax,[ebx+36]\n    cmp eax,0\n    je " << LskipNegN << "\n";
-        code_ << "    mov eax,[ebx+0]\n    mov edx,[ebx+4]\n";
+        emit("mov", "eax,[ebx+4]");
+        emit("shr", "eax,31");
+        emit("mov", "[ebx+36],eax");  // lhsSign
+        emit("mov", "eax,[ebx+12]");
+        emit("shr", "eax,31");
+        emit("mov", "[ebx+40],eax");  // rhsSign
+        emit("mov", "eax,[ebx+36]");
+        emit("cmp", "eax,0");
+        emit("je", LskipNegN);
+        emit("mov", "eax,[ebx+0]");
+        emit("mov", "edx,[ebx+4]");
         genNegate64();
-        code_ << "    mov [ebx+0],eax\n    mov [ebx+4],edx\n";
-        code_ << LskipNegN << ":\n";
-        code_ << "    mov eax,[ebx+40]\n    cmp eax,0\n    je " << LskipNegD << "\n";
-        code_ << "    mov eax,[ebx+8]\n    mov edx,[ebx+12]\n";
+        emit("mov", "[ebx+0],eax");
+        emit("mov", "[ebx+4],edx");
+        emitLabel(LskipNegN);
+        emit("mov", "eax,[ebx+40]");
+        emit("cmp", "eax,0");
+        emit("je", LskipNegD);
+        emit("mov", "eax,[ebx+8]");
+        emit("mov", "edx,[ebx+12]");
         genNegate64();
-        code_ << "    mov [ebx+8],eax\n    mov [ebx+12],edx\n";
-        code_ << LskipNegD << ":\n";
+        emit("mov", "[ebx+8],eax");
+        emit("mov", "[ebx+12],edx");
+        emitLabel(LskipNegD);
     }
 
     std::string Lloop = newLabel(), Ldone = newLabel();
     std::string LhiDiff = newLabel(), LsubYes = newLabel(), LsubNo = newLabel(), LshiftQ = newLabel();
-    code_ << Lloop << ":\n";
-    code_ << "    mov eax,[ebx+32]\n    cmp eax,0\n    je " << Ldone << "\n";
-    code_ << "    sub eax,1\n    mov [ebx+32],eax\n";
+    emitLabel(Lloop);
+    emit("mov", "eax,[ebx+32]");
+    emit("cmp", "eax,0");
+    emit("je", Ldone);
+    emit("sub", "eax,1");
+    emit("mov", "[ebx+32],eax");
 
     // n <<= 1 (0-filled), capturing its own old top bit into edx.
-    code_ << "    mov eax,[ebx+4]\n    shr eax,31\n    mov edx,eax\n";  // edx = n's old top bit
-    code_ << "    mov eax,[ebx+0]\n    shr eax,31\n    mov esi,eax\n";  // esi = n_lo's old top bit
-    code_ << "    mov eax,[ebx+0]\n    shl eax,1\n    mov [ebx+0],eax\n";
-    code_ << "    mov eax,[ebx+4]\n    shl eax,1\n    or eax,esi\n    mov [ebx+4],eax\n";
+    emit("mov", "eax,[ebx+4]");
+    emit("shr", "eax,31");
+    emit("mov", "edx,eax");  // edx = n's old top bit
+    emit("mov", "eax,[ebx+0]");
+    emit("shr", "eax,31");
+    emit("mov", "esi,eax");  // esi = n_lo's old top bit
+    emit("mov", "eax,[ebx+0]");
+    emit("shl", "eax,1");
+    emit("mov", "[ebx+0],eax");
+    emit("mov", "eax,[ebx+4]");
+    emit("shl", "eax,1");
+    emit("or", "eax,esi");
+    emit("mov", "[ebx+4],eax");
 
     // r = (r << 1) | (n's old top bit, already in edx).
-    code_ << "    mov eax,[ebx+16]\n    shr eax,31\n    mov edi,eax\n";  // edi = r_lo's old top bit
-    code_ << "    mov eax,[ebx+16]\n    shl eax,1\n    or eax,edx\n    mov [ebx+16],eax\n";
-    code_ << "    mov eax,[ebx+20]\n    shl eax,1\n    or eax,edi\n    mov [ebx+20],eax\n";
+    emit("mov", "eax,[ebx+16]");
+    emit("shr", "eax,31");
+    emit("mov", "edi,eax");  // edi = r_lo's old top bit
+    emit("mov", "eax,[ebx+16]");
+    emit("shl", "eax,1");
+    emit("or", "eax,edx");
+    emit("mov", "[ebx+16],eax");
+    emit("mov", "eax,[ebx+20]");
+    emit("shl", "eax,1");
+    emit("or", "eax,edi");
+    emit("mov", "[ebx+20],eax");
 
     // if (r >= d) { r -= d; quotient bit = 1 } else { quotient bit = 0 } - always an
     // unsigned magnitude compare, since n and d were negated to non-negative above.
-    code_ << "    mov eax,[ebx+20]\n    mov edx,[ebx+12]\n    cmp eax,edx\n    jne " << LhiDiff << "\n";
-    code_ << "    mov eax,[ebx+16]\n    mov edx,[ebx+8]\n    cmp eax,edx\n    jae " << LsubYes << "\n";
-    code_ << "    jmp " << LsubNo << "\n";
-    code_ << LhiDiff << ":\n    jae " << LsubYes << "\n    jmp " << LsubNo << "\n";
-    code_ << LsubYes << ":\n";
-    code_ << "    mov eax,[ebx+16]\n    mov edx,[ebx+8]\n    sub eax,edx\n    mov [ebx+16],eax\n";
-    code_ << "    mov eax,[ebx+20]\n    mov edx,[ebx+12]\n    sbb eax,edx\n    mov [ebx+20],eax\n";
-    code_ << "    mov ecx,1\n    jmp " << LshiftQ << "\n";
-    code_ << LsubNo << ":\n    mov ecx,0\n";
-    code_ << LshiftQ << ":\n";
+    emit("mov", "eax,[ebx+20]");
+    emit("mov", "edx,[ebx+12]");
+    emit("cmp", "eax,edx");
+    emit("jne", LhiDiff);
+    emit("mov", "eax,[ebx+16]");
+    emit("mov", "edx,[ebx+8]");
+    emit("cmp", "eax,edx");
+    emit("jae", LsubYes);
+    emit("jmp", LsubNo);
+    emitLabel(LhiDiff);
+    emit("jae", LsubYes);
+    emit("jmp", LsubNo);
+    emitLabel(LsubYes);
+    emit("mov", "eax,[ebx+16]");
+    emit("mov", "edx,[ebx+8]");
+    emit("sub", "eax,edx");
+    emit("mov", "[ebx+16],eax");
+    emit("mov", "eax,[ebx+20]");
+    emit("mov", "edx,[ebx+12]");
+    emit("sbb", "eax,edx");
+    emit("mov", "[ebx+20],eax");
+    emit("mov", "ecx,1");
+    emit("jmp", LshiftQ);
+    emitLabel(LsubNo);
+    emit("mov", "ecx,0");
+    emitLabel(LshiftQ);
 
     // q = (q << 1) | quotient bit (in ecx).
-    code_ << "    mov eax,[ebx+24]\n    shr eax,31\n    mov esi,eax\n";  // esi = q_lo's old top bit
-    code_ << "    mov eax,[ebx+24]\n    shl eax,1\n    or eax,ecx\n    mov [ebx+24],eax\n";
-    code_ << "    mov eax,[ebx+28]\n    shl eax,1\n    or eax,esi\n    mov [ebx+28],eax\n";
-    code_ << "    jmp " << Lloop << "\n";
+    emit("mov", "eax,[ebx+24]");
+    emit("shr", "eax,31");
+    emit("mov", "esi,eax");  // esi = q_lo's old top bit
+    emit("mov", "eax,[ebx+24]");
+    emit("shl", "eax,1");
+    emit("or", "eax,ecx");
+    emit("mov", "[ebx+24],eax");
+    emit("mov", "eax,[ebx+28]");
+    emit("shl", "eax,1");
+    emit("or", "eax,esi");
+    emit("mov", "[ebx+28],eax");
+    emit("jmp", Lloop);
 
-    code_ << Ldone << ":\n";
+    emitLabel(Ldone);
     if (!isUnsigned) {
         std::string LskipNegQ = newLabel(), LskipNegR = newLabel();
-        code_ << "    mov ecx,[ebx+36]\n    mov eax,[ebx+40]\n    xor ecx,eax\n";
-        code_ << "    cmp ecx,0\n    je " << LskipNegQ << "\n";
-        code_ << "    mov eax,[ebx+24]\n    mov edx,[ebx+28]\n";
+        emit("mov", "ecx,[ebx+36]");
+        emit("mov", "eax,[ebx+40]");
+        emit("xor", "ecx,eax");
+        emit("cmp", "ecx,0");
+        emit("je", LskipNegQ);
+        emit("mov", "eax,[ebx+24]");
+        emit("mov", "edx,[ebx+28]");
         genNegate64();
-        code_ << "    mov [ebx+24],eax\n    mov [ebx+28],edx\n";
-        code_ << LskipNegQ << ":\n";
-        code_ << "    mov ecx,[ebx+36]\n    cmp ecx,0\n    je " << LskipNegR << "\n";
-        code_ << "    mov eax,[ebx+16]\n    mov edx,[ebx+20]\n";
+        emit("mov", "[ebx+24],eax");
+        emit("mov", "[ebx+28],edx");
+        emitLabel(LskipNegQ);
+        emit("mov", "ecx,[ebx+36]");
+        emit("cmp", "ecx,0");
+        emit("je", LskipNegR);
+        emit("mov", "eax,[ebx+16]");
+        emit("mov", "edx,[ebx+20]");
         genNegate64();
-        code_ << "    mov [ebx+16],eax\n    mov [ebx+20],edx\n";
-        code_ << LskipNegR << ":\n";
+        emit("mov", "[ebx+16],eax");
+        emit("mov", "[ebx+20],edx");
+        emitLabel(LskipNegR);
     }
-    code_ << "    mov eax,[ebx+24]\n    mov edx,[ebx+28]\n";  // eax:edx = quotient
-    code_ << "    mov esi,[ebx+16]\n    mov edi,[ebx+20]\n";  // esi:edi = remainder
-    code_ << "    add esp,52\n";  // release the 9-dword scratch block and the 4 earlier stashed operand dwords
-    if (wantRemainder) code_ << "    mov eax,esi\n    mov edx,edi\n";
+    emit("mov", "eax,[ebx+24]");
+    emit("mov", "edx,[ebx+28]");  // eax:edx = quotient
+    emit("mov", "esi,[ebx+16]");
+    emit("mov", "edi,[ebx+20]");  // esi:edi = remainder
+    emit("add", "esp,52");  // release the 9-dword scratch block and the 4 earlier stashed operand dwords
+    if (wantRemainder) {
+        emit("mov", "eax,esi");
+        emit("mov", "edx,edi");
+    }
 }
 
 // A long long shifted by a runtime count: a counted loop of 1-bit shifts, carrying the bit
@@ -749,22 +899,36 @@ void I386Codegen::genWideDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool w
 // matters for `>>`: the high dword's shift is sar (sign-preserving) or shr (zero-filling).
 void I386Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool isLeft, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push edx\n    push eax\n";
+    emit("push", "edx");
+    emit("push", "eax");
     genExpr(rhs);                   // eax = shift count (already promoted to a plain int)
-    code_ << "    mov ebx,eax\n";
-    code_ << "    pop eax\n    pop edx\n";  // eax:edx restored = the value being shifted
+    emit("mov", "ebx,eax");
+    emit("pop", "eax");
+    emit("pop", "edx");  // eax:edx restored = the value being shifted
     std::string Lloop = newLabel(), Ldone = newLabel();
-    code_ << Lloop << ":\n    cmp ebx,0\n    je " << Ldone << "\n    sub ebx,1\n";
+    emitLabel(Lloop);
+    emit("cmp", "ebx,0");
+    emit("je", Ldone);
+    emit("sub", "ebx,1");
     if (isLeft) {
-        code_ << "    mov ecx,eax\n    shr ecx,31\n";  // ecx = eax's old top bit, carries into edx
-        code_ << "    shl eax,1\n    shl edx,1\n    or edx,ecx\n";
+        emit("mov", "ecx,eax");
+        emit("shr", "ecx,31");  // ecx = eax's old top bit, carries into edx
+        emit("shl", "eax,1");
+        emit("shl", "edx,1");
+        emit("or", "edx,ecx");
     } else {
-        code_ << "    mov ecx,edx\n    shl ecx,31\n";  // ecx = (edx&1)<<31, carries into eax's top
-        code_ << "    shr eax,1\n    or eax,ecx\n";
-        code_ << "    " << (isUnsigned ? "shr edx,1\n" : "sar edx,1\n");
+        emit("mov", "ecx,edx");
+        emit("shl", "ecx,31");  // ecx = (edx&1)<<31, carries into eax's top
+        emit("shr", "eax,1");
+        emit("or", "eax,ecx");
+        if (isUnsigned) {
+            emit("shr", "edx,1");
+        } else {
+            emit("sar", "edx,1");
+        }
     }
-    code_ << "    jmp " << Lloop << "\n";
-    code_ << Ldone << ":\n";
+    emit("jmp", Lloop);
+    emitLabel(Ldone);
 }
 
 // A long long comparison: compare the high dwords first (signed or unsigned jcc per
@@ -772,35 +936,48 @@ void I386Codegen::genWideShift(const ir::Expr &lhs, const ir::Expr &rhs, bool is
 // dword matter, and that compare is always unsigned regardless of the type's signedness.
 void I386Codegen::genWideCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push edx\n    push eax\n";
+    emit("push", "edx");
+    emit("push", "eax");
     genExpr(rhs);
-    code_ << "    mov esi,eax\n    mov edi,edx\n";  // esi:edi = rhs (lo:hi)
-    code_ << "    pop ebx\n    pop ecx\n";          // ebx:ecx = lhs (lo:hi)
+    emit("mov", "esi,eax");
+    emit("mov", "edi,edx");  // esi:edi = rhs (lo:hi)
+    emit("pop", "ebx");
+    emit("pop", "ecx");  // ebx:ecx = lhs (lo:hi)
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
     if (op == "==" || op == "!=") {
         // == and != want opposite results on "equal", so swap which literal each label
         // writes instead of duplicating the comparison.
         const char *onEqual = op == "==" ? "1" : "0";
         const char *onDiffer = op == "==" ? "0" : "1";
-        code_ << "    cmp ebx,esi\n    jne " << Lfalse << "\n";
-        code_ << "    cmp ecx,edi\n    jne " << Lfalse << "\n";
-        code_ << "    mov eax," << onEqual << "\n    jmp " << Ldone << "\n";
-        code_ << Lfalse << ":\n    mov eax," << onDiffer << "\n";
-        code_ << Ldone << ":\n";
+        emit("cmp", "ebx,esi");
+        emit("jne", Lfalse);
+        emit("cmp", "ecx,edi");
+        emit("jne", Lfalse);
+        emit("mov", cat("eax,", onEqual));
+        emit("jmp", Ldone);
+        emitLabel(Lfalse);
+        emit("mov", cat("eax,", onDiffer));
+        emitLabel(Ldone);
         return;
     }
     std::string signedJcc = op == "<" ? "jl" : op == "<=" ? "jle" : op == ">" ? "jg" : "jge";
     std::string unsignedJcc = op == "<" ? "jb" : op == "<=" ? "jbe" : op == ">" ? "ja" : "jae";
     std::string hiJcc = isUnsigned ? unsignedJcc : signedJcc;
     std::string LhiDiff = newLabel();
-    code_ << "    cmp ecx,edi\n    jne " << LhiDiff << "\n";
-    code_ << "    cmp ebx,esi\n    " << unsignedJcc << " " << Ltrue << "\n";
-    code_ << "    jmp " << Lfalse << "\n";
-    code_ << LhiDiff << ":\n    " << hiJcc << " " << Ltrue << "\n";
-    code_ << "    jmp " << Lfalse << "\n";
-    code_ << Lfalse << ":\n    mov eax,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", "ecx,edi");
+    emit("jne", LhiDiff);
+    emit("cmp", "ebx,esi");
+    emit(unsignedJcc, Ltrue);
+    emit("jmp", Lfalse);
+    emitLabel(LhiDiff);
+    emit(hiJcc, Ltrue);
+    emit("jmp", Lfalse);
+    emitLabel(Lfalse);
+    emit("mov", "eax,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emitLabel(Ldone);
 }
 
 std::string I386Codegen::allocFloatTemp(Type type) {
@@ -810,23 +987,28 @@ std::string I386Codegen::allocFloatTemp(Type type) {
 }
 
 void I386Codegen::loadFloatOperand(const std::string &mem, Type type) {
-    code_ << "    fld " << (widthOfType(type) == 4 ? "dword " : "qword ") << mem << "\n";
+    emit("fld", cat((widthOfType(type) == 4 ? "dword " : "qword "), mem));
 }
 
 void I386Codegen::storeFloatOperand(const std::string &mem, Type type, bool pop) {
-    code_ << "    f" << (pop ? "stp " : "st ") << (widthOfType(type) == 4 ? "dword " : "qword ") << mem << "\n";
+    emit(cat("f", (pop ? "stp " : "st "), (widthOfType(type) == 4 ? "dword " : "qword "), mem));
 }
 
 void I386Codegen::genFloatTruthToEax() {
     // ST0 holds the condition's value; FCOMPP against a freshly-pushed 0.0 compares and
     // pops both, leaving the FPU status word's C0/C2/C3 bits to read via the same
     // FNSTSW+SAHF idiom genFloatCompare() uses - ZF ends up set exactly when ST0 was 0.0.
-    code_ << "    fldz\n    fcompp\n    fnstsw\n    sahf\n";
+    emit("fldz");
+    emit("fcompp");
+    emit("fnstsw");
+    emit("sahf");
     std::string Lzero = newLabel(), Ldone = newLabel();
-    code_ << "    je " << Lzero << "\n";
-    code_ << "    mov eax,1\n    jmp " << Ldone << "\n";
-    code_ << Lzero << ":\n    mov eax,0\n";
-    code_ << Ldone << ":\n";
+    emit("je", Lzero);
+    emit("mov", "eax,1");
+    emit("jmp", Ldone);
+    emitLabel(Lzero);
+    emit("mov", "eax,0");
+    emitLabel(Ldone);
 }
 
 void I386Codegen::applyFloatOp(const std::string &op, const ir::Expr &rhs, Type resultType) {
@@ -839,7 +1021,7 @@ void I386Codegen::applyFloatOp(const std::string &op, const ir::Expr &rhs, Type 
     const char *sizeWord = widthOfType(resultType) == 4 ? "dword " : "qword ";
     const char *insn = op == "+" ? "fadd" : op == "-" ? "fsub" : op == "*" ? "fmul" : op == "/" ? "fdiv" : nullptr;
     if (!insn) err(rhs.line, "unsupported operator '" + op + "' on float/double operands");
-    code_ << "    " << insn << " " << sizeWord << "[" << rhsTmp << "]\n";
+    emit(insn, cat(sizeWord, "[", rhsTmp, "]"));
 }
 
 void I386Codegen::genFloatCompare(const std::string &op, const ir::Expr &lhs, const ir::Expr &rhs) {
@@ -856,8 +1038,9 @@ void I386Codegen::genFloatCompare(const std::string &op, const ir::Expr &lhs, co
     // FNSTSW+SAHF idiom genFloatTruthToEax() uses maps the FPU's C0/C2/C3 bits onto
     // CF/PF/ZF as if this were an unsigned integer comparison, so the existing jcc
     // mnemonics below need no float-specific variants.
-    code_ << "    fcomp " << sizeWord << "[" << rhsTmp << "]\n";
-    code_ << "    fnstsw\n    sahf\n";
+    emit("fcomp", cat(sizeWord, "[", rhsTmp, "]"));
+    emit("fnstsw");
+    emit("sahf");
     std::string jumpIfTrue = op == "==" ? "je"
                               : op == "!=" ? "jne"
                               : op == "<" ? "jb"
@@ -867,10 +1050,12 @@ void I386Codegen::genFloatCompare(const std::string &op, const ir::Expr &lhs, co
                               : "";
     if (jumpIfTrue.empty()) err(lhs.line, "internal: unhandled float comparison operator '" + op + "'");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jumpIfTrue << " " << Ltrue << "\n";
-    code_ << "    mov eax,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n";
-    code_ << Ldone << ":\n";
+    emit(jumpIfTrue, Ltrue);
+    emit("mov", "eax,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emitLabel(Ldone);
 }
 
 void I386Codegen::genFloatBinary(const ir::Expr &e) {
@@ -916,15 +1101,17 @@ void I386Codegen::genFloatConvert(const ir::Expr &e) {
         trailer_.push_back(savedCw + ": dd 0");
         std::string truncCw = allocTemp();
         trailer_.push_back(truncCw + ": dd 0");
-        code_ << "    fstcw word [" << savedCw << "]\n";
-        code_ << "    mov eax,[" << savedCw << "]\n    mov ebx,0xC00\n    or eax,ebx\n";
-        code_ << "    mov [" << truncCw << "],eax\n";
-        code_ << "    fldcw word [" << truncCw << "]\n";
+        emit("fstcw", cat("word [", savedCw, "]"));
+        emit("mov", cat("eax,[", savedCw, "]"));
+        emit("mov", "ebx,0xC00");
+        emit("or", "eax,ebx");
+        emit("mov", cat("[", truncCw, "],eax"));
+        emit("fldcw", cat("word [", truncCw, "]"));
         std::string tmp = allocTemp();
         trailer_.push_back(tmp + ": dd 0");
-        code_ << "    fistp dword [" << tmp << "]\n";
-        code_ << "    fldcw word [" << savedCw << "]\n";
-        code_ << "    mov eax,[" << tmp << "]\n";
+        emit("fistp", cat("dword [", tmp, "]"));
+        emit("fldcw", cat("word [", savedCw, "]"));
+        emit("mov", cat("eax,[", tmp, "]"));
         narrowEaxTo(to);
         return;
     }
@@ -941,15 +1128,17 @@ void I386Codegen::genFloatConvert(const ir::Expr &e) {
     genExpr(*e.lhs);
     std::string tmp = allocTemp();
     trailer_.push_back(tmp + ": dd 0, 0");
-    code_ << "    mov [" << tmp << "],eax\n";
+    emit("mov", cat("[", tmp, "],eax"));
     if (fromWide) {
-        code_ << "    mov [" << tmp << "+4],edx\n";
+        emit("mov", cat("[", tmp, "+4],edx"));
     } else if (from.isUnsigned) {
-        code_ << "    mov eax,0\n    mov [" << tmp << "+4],eax\n";
+        emit("mov", "eax,0");
+        emit("mov", cat("[", tmp, "+4],eax"));
     } else {
-        code_ << "    cdq\n    mov [" << tmp << "+4],edx\n";
+        emit("cdq");
+        emit("mov", cat("[", tmp, "+4],edx"));
     }
-    code_ << "    fild qword [" << tmp << "]\n";
+    emit("fild", cat("qword [", tmp, "]"));
 }
 
 void I386Codegen::genFloatExpr(const ir::Expr &e) {
@@ -958,12 +1147,12 @@ void I386Codegen::genFloatExpr(const ir::Expr &e) {
             std::string lbl = allocTemp();
             if (e.type.base == BaseType::Float) {
                 trailer_.push_back(lbl + ": dd " + std::to_string(floatBitsOf(e.floatValue)));
-                code_ << "    fld dword [" << lbl << "]\n";
+                emit("fld", cat("dword [", lbl, "]"));
             } else {
                 uint64_t bits = doubleBitsOf(e.floatValue);
                 trailer_.push_back(lbl + ": dd " + std::to_string(static_cast<uint32_t>(bits)) + ", " +
                                     std::to_string(static_cast<uint32_t>(bits >> 32)));
-                code_ << "    fld qword [" << lbl << "]\n";
+                emit("fld", cat("qword [", lbl, "]"));
             }
             return;
         }
@@ -978,9 +1167,9 @@ void I386Codegen::genFloatExpr(const ir::Expr &e) {
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
                 std::string mem = computeElementAddr(e.slot, *e.lhs);
-                code_ << "    push ebx\n";
+                emit("push", "ebx");
                 genFloatExpr(*e.rhs);
-                code_ << "    pop ebx\n";
+                emit("pop", "ebx");
                 storeFloatOperand("[ebx]", e.slot->type, /*pop=*/false);
                 return;
             }
@@ -990,9 +1179,10 @@ void I386Codegen::genFloatExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::DerefAssign: {
             genExpr(*e.lhs);  // eax = pointer value (an address is always an int)
-            code_ << "    mov ebx,eax\n    push ebx\n";
+            emit("mov", "ebx,eax");
+            emit("push", "ebx");
             genFloatExpr(*e.rhs);
-            code_ << "    pop ebx\n";
+            emit("pop", "ebx");
             storeFloatOperand("[ebx]", e.type, /*pop=*/false);
             return;
         }
@@ -1023,10 +1213,10 @@ void I386Codegen::genFloatExpr(const ir::Expr &e) {
         case ir::ExprKind::Unary: {
             if (e.op == "-") {
                 genFloatExpr(*e.rhs);
-                code_ << "    fchs\n";
+                emit("fchs");
             } else if (e.op == "*") {
                 genExpr(*e.rhs);  // eax = pointer value
-                code_ << "    mov ebx,eax\n";
+                emit("mov", "ebx,eax");
                 loadFloatOperand("[ebx]", e.type);
             } else {
                 err(e.line, "unsupported unary operator '" + e.op + "' on a float/double operand");
@@ -1048,12 +1238,13 @@ void I386Codegen::genFloatExpr(const ir::Expr &e) {
         case ir::ExprKind::Ternary: {
             genTruthToEax(*e.lhs);
             std::string Lelse = newLabel(), Ldone = newLabel();
-            code_ << "    cmp eax,0\n    je " << Lelse << "\n";
+            emit("cmp", "eax,0");
+            emit("je", Lelse);
             genFloatExpr(*e.rhs);
-            code_ << "    jmp " << Ldone << "\n";
-            code_ << Lelse << ":\n";
+            emit("jmp", Ldone);
+            emitLabel(Lelse);
             genFloatExpr(*e.elseExpr);
-            code_ << Ldone << ":\n";
+            emitLabel(Ldone);
             return;
         }
         default:
@@ -1072,14 +1263,14 @@ void I386Codegen::genLocalArrayInit(const ir::Slot *slot) {
             // instruction needed at all for a literal (constant) initializer value.
             double v = elem.isFloat ? elem.floatValue : static_cast<double>(elem.value);
             if (w == 4) {
-                code_ << "    mov eax," << floatBitsOf(v) << "\n";
-                code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
+                emit("mov", cat("eax,", floatBitsOf(v)));
+                emit("mov", cat(localArrayAddr(slot, byteOffset), ",eax"));
             } else {
                 uint64_t bits = doubleBitsOf(v);
-                code_ << "    mov eax," << static_cast<uint32_t>(bits) << "\n";
-                code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
-                code_ << "    mov eax," << static_cast<uint32_t>(bits >> 32) << "\n";
-                code_ << "    mov " << localArrayAddr(slot, byteOffset + 4) << ",eax\n";
+                emit("mov", cat("eax,", static_cast<uint32_t>(bits)));
+                emit("mov", cat(localArrayAddr(slot, byteOffset), ",eax"));
+                emit("mov", cat("eax,", static_cast<uint32_t>(bits >> 32)));
+                emit("mov", cat(localArrayAddr(slot, byteOffset + 4), ",eax"));
             }
             continue;
         }
@@ -1087,19 +1278,19 @@ void I386Codegen::genLocalArrayInit(const ir::Slot *slot) {
             // A long long literal element is split across both dwords; a symbol element is
             // always a native-int-width address, handled by the general case below.
             auto v = static_cast<uint64_t>(elem.value);
-            code_ << "    mov eax," << static_cast<uint32_t>(v) << "\n";
-            code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
-            code_ << "    mov eax," << static_cast<uint32_t>(v >> 32) << "\n";
-            code_ << "    mov " << localArrayAddr(slot, byteOffset + 4) << ",eax\n";
+            emit("mov", cat("eax,", static_cast<uint32_t>(v)));
+            emit("mov", cat(localArrayAddr(slot, byteOffset), ",eax"));
+            emit("mov", cat("eax,", static_cast<uint32_t>(v >> 32)));
+            emit("mov", cat(localArrayAddr(slot, byteOffset + 4), ",eax"));
             continue;
         }
-        code_ << "    mov eax," << arrayElemText(elem) << "\n";
+        emit("mov", cat("eax,", arrayElemText(elem)));
         if (w == 1) {
-            code_ << "    mov byte " << localArrayAddr(slot, byteOffset) << ",al\n";
+            emit("mov", cat("byte ", localArrayAddr(slot, byteOffset), ",al"));
         } else if (w == 2) {
-            code_ << "    mov word " << localArrayAddr(slot, byteOffset) << ",ax\n";
+            emit("mov", cat("word ", localArrayAddr(slot, byteOffset), ",ax"));
         } else {
-            code_ << "    mov " << localArrayAddr(slot, byteOffset) << ",eax\n";
+            emit("mov", cat(localArrayAddr(slot, byteOffset), ",eax"));
         }
     }
 }
@@ -1113,11 +1304,11 @@ void I386Codegen::genIndex(const ir::Expr &e) {
 void I386Codegen::genAddrOf(const ir::Expr &operand) {
     if (operand.kind == ir::ExprKind::Var) {
         if (operand.slot->kind == ir::SlotKind::Global) {
-            code_ << "    mov eax," << label(operand.slot) << "\n";
+            emit("mov", cat("eax,", label(operand.slot)));
         } else if (operand.slot->kind == ir::SlotKind::Local && operand.slot->arraySize > 0) {
-            code_ << "    lea eax," << localArrayAddr(operand.slot) << "\n";
+            emit("lea", cat("eax,", localArrayAddr(operand.slot)));
         } else {
-            code_ << "    lea eax," << addr(operand.slot) << "\n";
+            emit("lea", cat("eax,", addr(operand.slot)));
         }
         return;
     }
@@ -1125,27 +1316,29 @@ void I386Codegen::genAddrOf(const ir::Expr &operand) {
         genExpr(*operand.lhs);
         int shift = elemShift(operand.slot->type);
         if (shift > 0) {
-            code_ << "    shl eax," << shift << "\n";
+            emit("shl", cat("eax,", shift));
         } else if (shift < 0) {
             // Non-power-of-two element width (a struct's) - see computeElementAddr()'s own
             // comment on why this goes through a register, not an immediate.
-            code_ << "    mov ebx," << widthOfType(operand.slot->type) << "\n";
-            code_ << "    imul ebx\n";
+            emit("mov", cat("ebx,", widthOfType(operand.slot->type)));
+            emit("imul", "ebx");
         }
         if (operand.slot->kind != ir::SlotKind::Global) {
-            code_ << "    mov ebx,eax\n    lea eax," << localArrayAddr(operand.slot) << "\n    add eax,ebx\n";
+            emit("mov", "ebx,eax");
+            emit("lea", cat("eax,", localArrayAddr(operand.slot)));
+            emit("add", "eax,ebx");
             return;
         }
         std::string lbl = label(operand.slot);
         if (operand.slot->arraySize > 0) {
-            code_ << "    add eax," << lbl << "\n";
+            emit("add", cat("eax,", lbl));
         } else {
-            code_ << "    add eax,[" << lbl << "]\n";
+            emit("add", cat("eax,[", lbl, "]"));
         }
         return;
     }
     if (operand.kind == ir::ExprKind::Func) {
-        code_ << "    mov eax," << label(operand.func) << "\n";
+        emit("mov", cat("eax,", label(operand.func)));
         return;
     }
     err(operand.line, "internal: unhandled addressable-operand kind");
@@ -1176,13 +1369,14 @@ void I386Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push eax\n";
+        emit("push", "eax");
         genExpr(*e.rhs);
-        code_ << "    pop ebx\n";
+        emit("pop", "ebx");
         if (op == "+") {
-            code_ << "    add eax,ebx\n";
+            emit("add", "eax,ebx");
         } else {
-            code_ << "    sub ebx,eax\n    mov eax,ebx\n";
+            emit("sub", "ebx,eax");
+            emit("mov", "eax,ebx");
         }
         return;
     }
@@ -1206,18 +1400,22 @@ void I386Codegen::genBinary(const ir::Expr &e) {
         const char *insn = (op == "&") ? "and" : (op == "|") ? "or" : "xor";
         if (wide) {
             genExpr(*e.lhs);
-            code_ << "    push edx\n    push eax\n";
+            emit("push", "edx");
+            emit("push", "eax");
             genExpr(*e.rhs);
-            code_ << "    mov ebx,eax\n    mov ecx,edx\n";
-            code_ << "    pop eax\n    pop edx\n";
-            code_ << "    " << insn << " eax,ebx\n    " << insn << " edx,ecx\n";
+            emit("mov", "ebx,eax");
+            emit("mov", "ecx,edx");
+            emit("pop", "eax");
+            emit("pop", "edx");
+            emit(insn, "eax,ebx");
+            emit(insn, "edx,ecx");
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push eax\n";
+        emit("push", "eax");
         genExpr(*e.rhs);
-        code_ << "    pop ebx\n";
-        code_ << "    " << insn << " eax,ebx\n";
+        emit("pop", "ebx");
+        emit(insn, "eax,ebx");
         return;
     }
     if (op == "<<" || op == ">>") {
@@ -1226,12 +1424,12 @@ void I386Codegen::genBinary(const ir::Expr &e) {
             return;
         }
         genExpr(*e.lhs);
-        code_ << "    push eax\n";
+        emit("push", "eax");
         genExpr(*e.rhs);
-        code_ << "    mov ecx,eax\n";
-        code_ << "    pop eax\n";
+        emit("mov", "ecx,eax");
+        emit("pop", "eax");
         const char *insn = op == "<<" ? "shl" : (isUnsigned ? "shr" : "sar");
-        code_ << "    " << insn << " eax,cl\n";
+        emit(insn, "eax,cl");
         return;
     }
     genCompare(op, *e.lhs, *e.rhs);
@@ -1256,15 +1454,17 @@ void I386Codegen::genCompare(const std::string &op, const ir::Expr &lhs, const i
 // unused since the caller already baked it into `jumpIfTrue`.
 void I386Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const std::string &jumpIfTrue, bool) {
     genExpr(lhs);
-    code_ << "    push eax\n";
+    emit("push", "eax");
     genExpr(rhs);
-    code_ << "    pop ebx\n";
-    code_ << "    cmp ebx,eax\n";
+    emit("pop", "ebx");
+    emit("cmp", "ebx,eax");
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    " << jumpIfTrue << " " << Ltrue << "\n";
-    code_ << "    mov eax,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n";
-    code_ << Ldone << ":\n";
+    emit(jumpIfTrue, Ltrue);
+    emit("mov", "eax,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emitLabel(Ldone);
 }
 
 // A wide operand's truthiness needs both dwords: `or eax,edx` folds them together before
@@ -1272,54 +1472,71 @@ void I386Codegen::emitCompare(const ir::Expr &lhs, const ir::Expr &rhs, const st
 void I386Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
     genTruthToEax(lhs);
     std::string Lfalse = newLabel(), Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp eax,0\n    je " << Lfalse << "\n";
+    emit("cmp", "eax,0");
+    emit("je", Lfalse);
     genTruthToEax(rhs);
-    code_ << "    cmp eax,0\n    je " << Lfalse << "\n";
-    code_ << "    jmp " << Ltrue << "\n";
-    code_ << Lfalse << ":\n    mov eax,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", "eax,0");
+    emit("je", Lfalse);
+    emit("jmp", Ltrue);
+    emitLabel(Lfalse);
+    emit("mov", "eax,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emitLabel(Ldone);
 }
 
 void I386Codegen::genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs) {
     genTruthToEax(lhs);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    code_ << "    cmp eax,0\n    jne " << Ltrue << "\n";
+    emit("cmp", "eax,0");
+    emit("jne", Ltrue);
     genTruthToEax(rhs);
-    code_ << "    cmp eax,0\n    jne " << Ltrue << "\n";
-    code_ << "    jmp " << Lfalse << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n    jmp " << Ldone << "\n";
-    code_ << Lfalse << ":\n    mov eax,0\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", "eax,0");
+    emit("jne", Ltrue);
+    emit("jmp", Lfalse);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emit("jmp", Ldone);
+    emitLabel(Lfalse);
+    emit("mov", "eax,0");
+    emitLabel(Ldone);
 }
 
 void I386Codegen::genLogicalNot(const ir::Expr &rhs) {
     genTruthToEax(rhs);
     std::string Ltrue = newLabel(), Ldone = newLabel();
-    code_ << "    cmp eax,0\n    je " << Ltrue << "\n";
-    code_ << "    mov eax,0\n    jmp " << Ldone << "\n";
-    code_ << Ltrue << ":\n    mov eax,1\n";
-    code_ << Ldone << ":\n";
+    emit("cmp", "eax,0");
+    emit("je", Ltrue);
+    emit("mov", "eax,0");
+    emit("jmp", Ldone);
+    emitLabel(Ltrue);
+    emit("mov", "eax,1");
+    emitLabel(Ldone);
 }
 
 void I386Codegen::genMul(const ir::Expr &lhs, const ir::Expr &rhs) {
     bool isUnsigned = lhs.type.isUnsigned;
     genExpr(lhs);
-    code_ << "    push eax\n";
+    emit("push", "eax");
     genExpr(rhs);
-    code_ << "    pop ebx\n";
-    code_ << "    " << (isUnsigned ? "mul" : "imul") << " ebx\n";  // edx:eax = eax*ebx; keep eax
+    emit("pop", "ebx");
+    emit((isUnsigned ? "mul" : "imul"), "ebx");  // edx:eax = eax*ebx; keep eax
 }
 
 void I386Codegen::genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder, bool isUnsigned) {
     genExpr(lhs);
-    code_ << "    push eax\n";
+    emit("push", "eax");
     genExpr(rhs);
-    code_ << "    mov ebx,eax\n";  // ebx = divisor
-    code_ << "    pop eax\n";      // eax = dividend
-    code_ << "    " << (isUnsigned ? "xor edx,edx\n" : "cdq\n");
-    code_ << "    " << (isUnsigned ? "div" : "idiv") << " ebx\n";  // eax = quotient, edx = remainder
-    if (wantRemainder) code_ << "    mov eax,edx\n";
+    emit("mov", "ebx,eax");  // ebx = divisor
+    emit("pop", "eax");  // eax = dividend
+    if (isUnsigned) {
+        emit("xor", "edx,edx");
+    } else {
+        emit("cdq");
+    }
+    emit((isUnsigned ? "div" : "idiv"), "ebx");  // eax = quotient, edx = remainder
+    if (wantRemainder) emit("mov", "eax,edx");
 }
 
 std::optional<std::string> I386Codegen::assembleInProcess(const std::string &asmText,

@@ -41,7 +41,7 @@ namespace rcc {
 //    function pointer value (ir::ExprKind::Func / CallPtr) is an index into a third global,
 //    "$funcs" (a ResizablePMCArray of every function's Sub PMC, built once at start via
 //    find_sub), since Parrot has no way to call through a raw integer address.
-class ParrotVmCodegen : public Backend {
+class ParrotVmCodegen : public Backend, protected TextCodegenBase {
    public:
     std::string generate(const ir::Program &prog, bool objectMode = false) override;
     std::string name() const override { return "parrotvm"; }
@@ -57,6 +57,9 @@ class ParrotVmCodegen : public Backend {
     std::map<std::string, std::string> perFileAsm() const override { return perFileAsm_; }
 
    private:
+    // This dialect's own convention uses 3 spaces, not TextCodegenBase's 4-space default.
+    std::string indent() const override { return "   "; }
+
     void genFunction(const ir::FunctionBody &fn);
     // Assigns every LocalDecl reachable from `s` its own offset in localOffsets_, in
     // encounter order - see the class comment on why this backend doesn't reuse
@@ -112,7 +115,6 @@ class ParrotVmCodegen : public Backend {
     // (see the class comment's "$funcs" global).
     int funcIndex(const ir::Function *fn);
 
-    std::ostringstream code_;
     std::map<std::string, std::string> perFileAsm_;
     std::string curFile_;
 
