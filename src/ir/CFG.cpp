@@ -213,10 +213,9 @@ CFG buildCFG(const FunctionBody &fb) {
     cfg.entry = cfg.blocks.back().get();
     cfg.entry->id = 1;
 
-    std::unordered_map<int, BasicBlock *> labelBlocks;
-    collectLabels(fb.body.get(), labelBlocks, cfg);
+    collectLabels(fb.body.get(), cfg.labelBlocks, cfg);
 
-    Builder builder(cfg, labelBlocks);
+    Builder builder(cfg, cfg.labelBlocks);
     builder.run(fb.body.get());
 
     return cfg;

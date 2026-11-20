@@ -8,7 +8,7 @@ backend is selected — since every backend-specific decision
 after the IR exists, an optimizer written once benefits every target
 (see `docs/platforms.md` for the full list).
 
-Today there are ten, run in this order (`src/main.cpp`). Nine implement
+Today there are eleven, run in this order (`src/main.cpp`). Ten implement
 the shared `Optimizer` interface; `AddressHoisting` is the exception (see
 below).
 
@@ -32,6 +32,24 @@ below).
   require undefined behavior the real target's own instruction
   handles fine instead — division/modulo by a constant zero, or a
   shift by an out-of-range amount.
+
+- **`ConstantConditionElimination`**
+  (`src/optimizers/constant_condition_elimination/ConstantConditionElimination.cpp`)
+  — collapses an `if`/`while` whose condition `ConstantFolding` has
+  already reduced to an `IntLit`: `if(1)`/`if(0)` becomes its taken
+  branch (or `Empty`, if the untaken one was the only one present), and
+  a loop whose condition is always false becomes `Empty` outright (its
+  body, and a `for`-loop's own post-expression, never run even once).
+  Builds a real `ir::CFG` (`src/ir/CFG.h`) rather than relying on a
+  structural scan, because the branch being dropped could still be a
+  live `goto` target from outside it — a `switch`'s own desugaring (see
+  `docs/ir.md`) is the only source of `Label`/`Goto` in this IR. A
+  branch is only dropped once every `Label` inside it is proven
+  unreachable with that branch's structural edge removed from the
+  graph; if some other, still-live edge reaches one of its `Label`s
+  instead, the `if`/`while` is left untouched. Runs right after
+  `ConstantFolding`, before every pass below, so none of them waste
+  work on a branch this one is about to delete.
 
 - **`AlgebraicSimplification`**
   (`src/optimizers/algebraic_simplification/AlgebraicSimplification.cpp`) — strength reduction:
@@ -158,9 +176,9 @@ below).
   last, after `DeadCodeElimination`, so a global touched only from
   now-unreachable code correctly looks unused too.
 
-Not yet attempted, because it'd need a real control-flow graph:
-constant-condition `if`/`while` removal, and a flow-sensitive
-(cross-block) CSE.
+Not yet attempted: a flow-sensitive (cross-block) CSE, which would need
+dominator information (`src/ir/Dominators.h`) to know whether an earlier
+computation still holds at a later use across a branch.
 
 See `docs/ir.md` for the IR these passes operate on, its printed-text
 grammar, and `IRValidator`'s self-check.

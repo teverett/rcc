@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <unordered_map>
 #include <vector>
 
 #include "IR.h"
@@ -47,6 +48,14 @@ struct CFG {
     std::vector<std::unique_ptr<BasicBlock>> blocks;  // owns every block, entry/exit included
     BasicBlock *entry = nullptr;
     BasicBlock *exit = nullptr;  // synthetic, no stmts; every Return and fall-off-the-end edge lands here
+
+    // Every Label in the function, keyed by its own labelId - the only
+    // other way (besides a Branch's two structural edges) that a block can
+    // be entered, since this IR has no surface-level goto/computed address
+    // (see IR.h's own StmtKind comment): a consumer checking whether some
+    // code is still reachable after removing a structural edge must also
+    // check every Label inside it against this map, not just the edge.
+    std::unordered_map<int, BasicBlock *> labelBlocks;
 };
 
 // Builds a CFG for one function body. The Stmt tree `fb` points into must

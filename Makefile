@@ -101,7 +101,7 @@ PREPROCESSOR_DIR := $(SRC_DIR)/preprocessor
 # below uses - Optimizer.h itself (the shared interface) stays directly
 # under OPTIMIZERS_DIR, same as Codegen.h does for BACKEND_DIRS.
 OPTIMIZERS_DIR    := $(SRC_DIR)/optimizers
-OPTIMIZERS_DIRS   := $(OPTIMIZERS_DIR)/constant_folding $(OPTIMIZERS_DIR)/constant_propagation $(OPTIMIZERS_DIR)/algebraic_simplification $(OPTIMIZERS_DIR)/local_cse $(OPTIMIZERS_DIR)/address_hoisting $(OPTIMIZERS_DIR)/induction_nonneg $(OPTIMIZERS_DIR)/guard_nonneg $(OPTIMIZERS_DIR)/dead_store_elimination $(OPTIMIZERS_DIR)/dead_code_elimination $(OPTIMIZERS_DIR)/unused_global_elimination $(OPTIMIZERS_DIR)/identical_code_folding
+OPTIMIZERS_DIRS   := $(OPTIMIZERS_DIR)/constant_folding $(OPTIMIZERS_DIR)/constant_propagation $(OPTIMIZERS_DIR)/algebraic_simplification $(OPTIMIZERS_DIR)/local_cse $(OPTIMIZERS_DIR)/address_hoisting $(OPTIMIZERS_DIR)/induction_nonneg $(OPTIMIZERS_DIR)/guard_nonneg $(OPTIMIZERS_DIR)/dead_store_elimination $(OPTIMIZERS_DIR)/dead_code_elimination $(OPTIMIZERS_DIR)/unused_global_elimination $(OPTIMIZERS_DIR)/identical_code_folding $(OPTIMIZERS_DIR)/constant_condition_elimination
 # Every file format this project reads/writes lives under one
 # subdirectory each here - see src/fileformat/FileFormat.h's own
 # header comment - instead of being split across src/coff/, src/elf/,
@@ -204,6 +204,7 @@ HAND_SRCS := \
     $(IR_DIR)/IRPrinter.cpp \
     $(IR_DIR)/IRValidator.cpp \
     $(IR_DIR)/CFG.cpp \
+    $(IR_DIR)/Dominators.cpp \
     $(OPTIMIZERS_DIR)/constant_folding/ConstantFolding.cpp \
     $(OPTIMIZERS_DIR)/constant_propagation/ConstantPropagation.cpp \
     $(OPTIMIZERS_DIR)/dead_code_elimination/DeadCodeElimination.cpp \
@@ -215,6 +216,7 @@ HAND_SRCS := \
     $(OPTIMIZERS_DIR)/dead_store_elimination/DeadStoreElimination.cpp \
     $(OPTIMIZERS_DIR)/unused_global_elimination/UnusedGlobalElimination.cpp \
     $(OPTIMIZERS_DIR)/identical_code_folding/IdenticalCodeFolding.cpp \
+    $(OPTIMIZERS_DIR)/constant_condition_elimination/ConstantConditionElimination.cpp \
     $(SRC_DIR)/codegen/pdp1/Pdp1Codegen.cpp \
     $(SRC_DIR)/codegen/pdp1/Pdp1Assembler.cpp \
     $(SRC_DIR)/codegen/pdp7/Pdp7Codegen.cpp \
@@ -456,6 +458,13 @@ $(BIN_DIR)/cfg_builder_test: tests/cfg_builder_test.cpp $(IR_DIR)/CFG.cpp $(IR_D
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/cfg_builder_test.cpp $(IR_DIR)/CFG.cpp $(FRONTEND_DIR)/c/CFrontend.cpp $(GEN_DIR)/CLexer.cpp $(GEN_DIR)/CParser.cpp $(GEN_DIR)/CParserBaseVisitor.cpp $(GEN_DIR)/CParserVisitor.cpp $(PREPROCESSOR_DIR)/Preprocessor.cpp $(AST_DIR)/BuildAst.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(IR_DIR)/IRBuilder.cpp $(IR_DIR)/IRValidator.cpp $(IR_DIR)/IRPrinter.cpp $(GEN_DIR)/RccIRLexer.cpp $(GEN_DIR)/RccIRParser.cpp $(GEN_DIR)/RccIRParserBaseVisitor.cpp $(GEN_DIR)/RccIRParserVisitor.cpp $(SRC_DIR)/Type.cpp $(SRC_DIR)/StructLayout.cpp $(LDFLAGS) $(LDLIBS) -o $@
 
+# Links against the same C-frontend pipeline as $(BIN_DIR)/cfg_builder_test
+# above, plus Dominators.cpp, to check immediate-dominator computation on a
+# real CFG.
+$(BIN_DIR)/dominators_test: tests/dominators_test.cpp $(IR_DIR)/CFG.cpp $(IR_DIR)/Dominators.cpp $(IR_DIR)/Dominators.h $(FRONTEND_DIR)/c/CFrontend.cpp $(GEN_DIR)/CLexer.cpp $(GEN_DIR)/CParser.cpp $(GEN_DIR)/CParserBaseVisitor.cpp $(GEN_DIR)/CParserVisitor.cpp $(PREPROCESSOR_DIR)/Preprocessor.cpp $(AST_DIR)/BuildAst.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(IR_DIR)/IRBuilder.cpp $(IR_DIR)/IRValidator.cpp $(IR_DIR)/IRPrinter.cpp $(GEN_DIR)/RccIRLexer.cpp $(GEN_DIR)/RccIRParser.cpp $(GEN_DIR)/RccIRParserBaseVisitor.cpp $(GEN_DIR)/RccIRParserVisitor.cpp $(SRC_DIR)/Type.cpp $(SRC_DIR)/StructLayout.cpp
+	@mkdir -p $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/dominators_test.cpp $(IR_DIR)/CFG.cpp $(IR_DIR)/Dominators.cpp $(FRONTEND_DIR)/c/CFrontend.cpp $(GEN_DIR)/CLexer.cpp $(GEN_DIR)/CParser.cpp $(GEN_DIR)/CParserBaseVisitor.cpp $(GEN_DIR)/CParserVisitor.cpp $(PREPROCESSOR_DIR)/Preprocessor.cpp $(AST_DIR)/BuildAst.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(IR_DIR)/IRBuilder.cpp $(IR_DIR)/IRValidator.cpp $(IR_DIR)/IRPrinter.cpp $(GEN_DIR)/RccIRLexer.cpp $(GEN_DIR)/RccIRParser.cpp $(GEN_DIR)/RccIRParserBaseVisitor.cpp $(GEN_DIR)/RccIRParserVisitor.cpp $(SRC_DIR)/Type.cpp $(SRC_DIR)/StructLayout.cpp $(LDFLAGS) $(LDLIBS) -o $@
+
 $(BIN_DIR)/m6502_assembler_test: tests/m6502_assembler_test.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.h $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp
 	@mkdir -p $(BIN_DIR)
 	$(CXX) $(CXXFLAGS) $(CPPFLAGS) tests/m6502_assembler_test.cpp $(SRC_DIR)/codegen/m6502/M6502Assembler.cpp $(GEN_DIR)/RccAsmLexer.cpp $(GEN_DIR)/RccAsmParser.cpp $(GEN_DIR)/RccAsmBaseVisitor.cpp $(GEN_DIR)/RccAsmVisitor.cpp $(LDFLAGS) $(LDLIBS) -o $@
@@ -557,7 +566,7 @@ test-hosted-internal: all $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_t
 	python3 tests/hosted_internal_linker_test.py $(TARGET)
 	python3 tests/hosted_linux_linker_test.py $(TARGET)
 
-test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test $(BIN_DIR)/basic_frontend_test $(BIN_DIR)/pascal_frontend_test $(BIN_DIR)/cfg_builder_test
+test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)/macho_data_test $(BIN_DIR)/cmd_format_test $(BIN_DIR)/colecorom_format_test $(BIN_DIR)/msxrom_format_test $(BIN_DIR)/smsrom_format_test $(BIN_DIR)/decb_format_test $(BIN_DIR)/vectrex_format_test $(BIN_DIR)/intvbin_format_test $(BIN_DIR)/prg_format_test $(BIN_DIR)/atari_exe_format_test $(BIN_DIR)/atari2600_rom_format_test $(BIN_DIR)/nes_rom_format_test $(BIN_DIR)/a5200_rom_format_test $(BIN_DIR)/sna_format_test $(BIN_DIR)/amsdos_format_test $(BIN_DIR)/dfs_format_test $(BIN_DIR)/m6809_assembler_test $(BIN_DIR)/m6502_assembler_test $(BIN_DIR)/m32c_assembler_test $(BIN_DIR)/r32c_assembler_test $(BIN_DIR)/riscv32_assembler_test $(BIN_DIR)/riscv64_assembler_test $(BIN_DIR)/z80_in_out_c_test $(BIN_DIR)/i8080_in_out_test $(BIN_DIR)/tms9900_assembler_test $(BIN_DIR)/z8000_assembler_test $(BIN_DIR)/cp1610_assembler_test $(BIN_DIR)/stm8_mul_test $(BIN_DIR)/parrotvm_codegen_test $(BIN_DIR)/moarvm_codegen_test $(BIN_DIR)/vex_assembler_test $(BIN_DIR)/basic_frontend_test $(BIN_DIR)/pascal_frontend_test $(BIN_DIR)/cfg_builder_test $(BIN_DIR)/dominators_test
 	$(BIN_DIR)/preprocessor_test
 	$(BIN_DIR)/archive_reader_test
 	$(BIN_DIR)/macho_data_test
@@ -590,6 +599,7 @@ test: all $(BIN_DIR)/preprocessor_test $(BIN_DIR)/archive_reader_test $(BIN_DIR)
 	$(BIN_DIR)/basic_frontend_test
 	$(BIN_DIR)/pascal_frontend_test
 	$(BIN_DIR)/cfg_builder_test
+	$(BIN_DIR)/dominators_test
 	python3 tests/qemu_wait_test.py
 	python3 tests/m6809_link_test.py $(TARGET)
 	python3 tests/i8080_link_test.py $(TARGET)

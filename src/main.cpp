@@ -39,6 +39,7 @@
 #include "ir/IRValidator.h"
 #include "optimizers/address_hoisting/AddressHoisting.h"
 #include "optimizers/algebraic_simplification/AlgebraicSimplification.h"
+#include "optimizers/constant_condition_elimination/ConstantConditionElimination.h"
 #include "optimizers/constant_folding/ConstantFolding.h"
 #include "optimizers/constant_propagation/ConstantPropagation.h"
 #include "optimizers/dead_code_elimination/DeadCodeElimination.h"
@@ -534,6 +535,11 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // initializers it collapses to a side-effect-free constant.
         rcc::ConstantFolding cf;
         cf.run(irProg, srcPath);
+        // After ConstantFolding so an `if`/`while` condition it just
+        // reduced to an IntLit is caught here too; before every pass below
+        // so they never waste work optimizing a branch this one deletes.
+        rcc::ConstantConditionElimination cce;
+        cce.run(irProg, srcPath);
         // Strength reduction only rewrites an op whose other operand isn't
         // a literal, so ordering after constant folding loses nothing.
         rcc::AlgebraicSimplification algsimp;
