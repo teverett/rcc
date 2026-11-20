@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Unit tests for the '@nonrecursive' function attribute: AST.h/IR.h's
 # own `isNonRecursive`, IRBuilder.cpp's `checkNonRecursiveFunctions()`
-# (same-file call-graph cycle rejection), and
+# (same-file call-graph cycle rejection), `autoMarkNonRecursive()` (the
+# same property auto-detected for a function with no explicit
+# annotation at all, whenever its own visible call graph never leads
+# back to itself and its address is never taken), and
 # src/codegen/pdp7/Pdp7Codegen.cpp's own use of it to grant the "leaf
 # fast path" (see Pdp7Codegen.h's own comment) to a function that calls
 # out, as long as it's never re-entered - see docs/language.md's own
@@ -12,10 +15,14 @@
 #       that calls another function, annotated '@nonrecursive', must use
 #       the flat per-slot storage scheme (no `lac __fp`/frame teardown at
 #       all) and still compute the right answer on the real simulator.
-#   test_same_function_without_annotation_keeps_real_frame - the exact
-#       same source, minus the annotation, must still use the ordinary
-#       frame-based scheme (`lac __fp` present) - confirms the leaf path
-#       is opt-in, not something calls alone now always qualify for.
+#   test_same_function_without_annotation_keeps_real_frame - a genuinely
+#       self-recursive function, with no annotation at all, must still
+#       use the ordinary frame-based scheme (`lac __fp` present) -
+#       confirms `autoMarkNonRecursive()` correctly declines to mark a
+#       function unsafe to mark, not that an unannotated function never
+#       gets the leaf path at all (a provably non-recursive one now
+#       does, automatically - see
+#       run_pdp7_auto_nonrecursive_tests.sh).
 #   test_direct_self_recursion_is_rejected - an '@nonrecursive' function
 #       calling itself must fail to compile.
 #   test_same_file_mutual_recursion_is_rejected - two '@nonrecursive'-
@@ -90,16 +97,12 @@ test_same_function_without_annotation_keeps_real_frame() {
     local dir="$tmpdir/control"
     mkdir -p "$dir"
     cat >"$dir/t.c" <<'EOF'
-int helper(int x) {
-    return x + 1;
-}
-int caller(int a, int b) {
-    int sum;
-    sum = helper(a) + helper(b);
-    return sum;
+int fact(int n) {
+    if (n <= 1) return 1;
+    return n * fact(n - 1);
 }
 int main() {
-    return caller(3, 4);
+    return fact(5);
 }
 EOF
     if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
@@ -107,11 +110,17 @@ EOF
         cat "$dir/log"
         return 1
     fi
+    if grep -q "auto-nonrecursive: fn fact" "$dir/log"; then
+        echo "FAIL test_same_function_without_annotation_keeps_real_frame: autoMarkNonRecursive()" \
+             "marked a genuinely self-recursive function:"
+        cat "$dir/log"
+        return 1
+    fi
     local fpCount
-    fpCount="$(awk '/^FN_caller:/{f=1} f{print} /jmp i __retaddr/{exit}' "$dir/t.s" | grep -c 'lac __fp')"
+    fpCount="$(awk '/^FN_fact:/{f=1} f{print} /jmp i __retaddr/{exit}' "$dir/t.s" | grep -c 'lac __fp')"
     if [ "$fpCount" -eq 0 ]; then
         echo "FAIL test_same_function_without_annotation_keeps_real_frame: expected the ordinary" \
-             "frame-based scheme ('lac __fp') without the annotation, found none"
+             "frame-based scheme ('lac __fp') for a genuinely recursive function, found none"
         return 1
     fi
     echo "PASS test_same_function_without_annotation_keeps_real_frame ($fpCount occurrence(s) of 'lac __fp')"

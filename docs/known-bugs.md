@@ -3,6 +3,48 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## PDP-7 codegen still emits avoidable "jump to a label that's itself just one more jump" chains
+
+Affects `src/codegen/pdp7/Pdp7Codegen.cpp`'s `emitSignedLtCells()`/
+`genCondBranch()`: every comparison whose sign dispatch takes more
+than the single cheapest path (see the sign-dispatch entry elsewhere
+in this file) creates a small relay label whose entire body is one
+more unconditional `jmp` to the real target, rather than jumping
+there directly - confirmed directly against real UnixV0-C kernel
+functions (`sys/s5.c`'s `fassign()`), not reasoned about: redirecting
+these by hand and deleting the now-dead relay saved real, measurable
+words there.
+
+A real attempt at an automated fix (a post-codegen text pass over
+each function's own already-generated assembly, redirecting every
+`jmp` at such a relay to its real target and deleting the relay once
+nothing else reached it) was built, passed every unit test this
+project's own `tests/run_pdp7_*.sh` scripts and the full `ctests`
+suite check for, confirmed a measurable ~100-word reduction across
+the real UnixV0-C kernel, and was still REVERTED: it hung the real
+cold-boot sequence (`real_init_boot_test.sh` in that project's own
+`src-assem/tests/`) - a genuine, reproducible correctness bug, not a
+flaky test, confirmed by toggling the pass on/off against freshly
+rebuilt kernel objects both ways. Two narrower variants were tried in
+turn - the first deleted a relay once it looked unreachable (no live
+`jmp` reference, line before it an unconditional terminator); a real
+bug in that exact safety proof was found and fixed (it didn't account
+for an *earlier* relay's own deletion, in the same pass, exposing a
+new fallthrough into a *later* one) - and the second, more
+conservative variant dropped relay deletion entirely, keeping only
+`jmp`-redirection (which can never change where control goes, by
+construction) and the separately-safe removal of a `jmp` immediately
+followed by its own target label. **Both variants still hung the same
+real boot sequence.** That the second, deliberately minimal variant
+still failed means the real root cause was never actually isolated -
+it's something more fundamental about this text-level approach than
+either diagnosed bug, not merely an edge case in the deletion-safety
+proof. Not safe to re-attempt the same way without first finding that
+root cause - a real control-flow-graph-based pass (tracking actual
+reachability per basic block, not inferring it from adjacent lines of
+already-linearized text) is the more likely correct shape for this,
+not attempted here.
+
 ## No verified M32C simulator/emulator is wired into `tests/run_tests.sh`
 
 Affects `tests/run_tests.sh`'s `check_m32c()`. No pip-installable Python M32C

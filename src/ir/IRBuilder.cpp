@@ -109,6 +109,146 @@ void checkNonRecursiveFunctions(const ir::Program &prog) {
     }
 }
 
+// The non-throwing twin of findCycleBackTo() above, used to PROVE a
+// function safe to auto-mark '@nonrecursive' rather than to validate
+// an already-written assertion.
+bool hasCycleBackTo(const ir::Function *start, const ir::Function *cur,
+                     const std::unordered_map<const ir::Function *, const ir::Stmt *> &bodyOf,
+                     std::unordered_set<const ir::Function *> &visited) {
+    auto it = bodyOf.find(cur);
+    if (it == bodyOf.end()) return false;
+    std::vector<std::pair<ir::Function *, int>> calls;
+    collectCallsInStmt(it->second, calls);
+    for (const auto &[callee, line] : calls) {
+        (void)line;
+        if (callee == start) return true;
+        if (visited.insert(callee).second && hasCycleBackTo(start, callee, bodyOf, visited)) return true;
+    }
+    return false;
+}
+
+// Every function whose own address is taken anywhere in this compile
+// (`&f`, or a Global array initializer storing it, the
+// `int g_xAddr[1] = {f};` idiom this language's own `&global`-as-a-
+// runtime-value bug - see pcc's own docs/known-bugs.md - makes
+// routine) - autoMarkNonRecursive() below never marks one of these,
+// even when its own ordinary call graph looks cycle-free, since a
+// function pointer can be called back into from a context that same
+// graph walk can't see (e.g. as a callback from inside another call
+// this same function makes).
+void collectFuncAddressesInExpr(const ir::Expr *e, std::unordered_set<const ir::Function *> &out) {
+    if (!e) return;
+    if (e->kind == ir::ExprKind::Func && e->func) out.insert(e->func);
+    collectFuncAddressesInExpr(e->lhs.get(), out);
+    collectFuncAddressesInExpr(e->rhs.get(), out);
+    collectFuncAddressesInExpr(e->elseExpr.get(), out);
+    for (const auto &a : e->args) collectFuncAddressesInExpr(a.get(), out);
+}
+
+void collectFuncAddressesInStmt(const ir::Stmt *s, std::unordered_set<const ir::Function *> &out) {
+    if (!s) return;
+    switch (s->kind) {
+        case ir::StmtKind::Block:
+            for (const auto &c : s->body) collectFuncAddressesInStmt(c.get(), out);
+            return;
+        case ir::StmtKind::If:
+            collectFuncAddressesInExpr(s->cond.get(), out);
+            collectFuncAddressesInStmt(s->thenStmt.get(), out);
+            collectFuncAddressesInStmt(s->elseStmt.get(), out);
+            return;
+        case ir::StmtKind::While:
+            collectFuncAddressesInExpr(s->cond.get(), out);
+            collectFuncAddressesInStmt(s->loopBody.get(), out);
+            collectFuncAddressesInStmt(s->postStmt.get(), out);
+            return;
+        case ir::StmtKind::Return:
+        case ir::StmtKind::LocalDecl:
+        case ir::StmtKind::ExprStmt:
+            collectFuncAddressesInExpr(s->initOrReturnOrExpr.get(), out);
+            return;
+        case ir::StmtKind::Break:
+        case ir::StmtKind::Continue:
+        case ir::StmtKind::Empty:
+        case ir::StmtKind::Asm:
+        case ir::StmtKind::Label:
+        case ir::StmtKind::Goto:
+            return;
+    }
+}
+
+// Whether `s` contains a raw `asm { ... }` block anywhere (including
+// nested inside an `if`/`while`). A hand-written block can read or
+// write `__fp`/`__sp`/`__retaddr`/a caller's own stack slot directly
+// (the real continuation-capture idiom `sys/s1.c`'s own `swap()`
+// uses, confirmed for real by a genuine regression caught testing
+// this very pass: auto-marking `swap()`/`sysexit()` silently broke
+// their own `*(fp+1)`-based resume mechanism, which depends on a real
+// call frame existing - exactly what the leaf fast path removes) in
+// ways this pass has no way to verify are still safe without one.
+// Never auto-mark a function containing one; the programmer writing
+// raw `asm{}` has already taken on verifying whatever it assumes
+// about the frame by hand, same as an explicit `@nonrecursive` on
+// such a function is a deliberate, individually-reasoned-about choice
+// rather than something to also infer automatically elsewhere.
+bool stmtHasAsm(const ir::Stmt *s) {
+    if (!s) return false;
+    switch (s->kind) {
+        case ir::StmtKind::Asm:
+            return true;
+        case ir::StmtKind::Block:
+            for (const auto &c : s->body) {
+                if (stmtHasAsm(c.get())) return true;
+            }
+            return false;
+        case ir::StmtKind::If:
+            return stmtHasAsm(s->thenStmt.get()) || stmtHasAsm(s->elseStmt.get());
+        case ir::StmtKind::While:
+            return stmtHasAsm(s->loopBody.get()) || stmtHasAsm(s->postStmt.get());
+        default:
+            return false;
+    }
+}
+
+// Auto-marks every function whose own visible call graph never leads
+// back to itself as '@nonrecursive' (ir::Function::isNonRecursive) -
+// the same leaf-storage codegen benefit (see Pdp7Codegen.cpp's own
+// header) an explicit source annotation already gets, without
+// requiring a human to notice and write the annotation by hand -
+// exactly how two real, sizeable misses (a kernel's own
+// `syscallDispatch()`, `smes()`/`rmes()`) went unnoticed for a long
+// time in one downstream project. Uses the identical same-file-only
+// call graph checkNonRecursiveFunctions() already validates an
+// explicit assertion against - the same "can't see past an extern
+// function this compile doesn't have a body for" limitation applies
+// equally here, so this is no less sound than a careful human doing
+// the exact same reasoning by hand; it just never forgets to. Skips
+// anything already marked explicitly (never downgrades a human's own
+// choice), anything whose address is ever taken (see
+// collectFuncAddressesInStmt()'s own comment on why), and anything
+// containing a raw `asm{}` block (see stmtHasAsm()'s own comment).
+void autoMarkNonRecursive(ir::Program &prog) {
+    std::unordered_map<const ir::Function *, const ir::Stmt *> bodyOf;
+    for (const auto &fb : prog.functionBodies) bodyOf[fb.func] = fb.body.get();
+
+    std::unordered_set<const ir::Function *> addressTaken;
+    for (const auto &fb : prog.functionBodies) collectFuncAddressesInStmt(fb.body.get(), addressTaken);
+    for (const auto &slot : prog.slots) {
+        for (const ir::ArrayInitElem &elem : slot->arrayInit) {
+            if (elem.isSymbol && elem.func) addressTaken.insert(elem.func);
+        }
+    }
+
+    for (const auto &fb : prog.functionBodies) {
+        if (fb.func->isNonRecursive || addressTaken.count(fb.func) || stmtHasAsm(fb.body.get())) continue;
+        std::unordered_set<const ir::Function *> visited{fb.func};
+        if (!hasCycleBackTo(fb.func, fb.func, bodyOf, visited)) {
+            fb.func->isNonRecursive = true;
+            std::cerr << fb.func->sourceFile << ": auto-nonrecursive: fn " << fb.func->sourceName
+                      << ": proved it never calls back into itself - marked '@nonrecursive'\n";
+        }
+    }
+}
+
 std::string typeText(Type t) {
     std::string prefix = t.isUnsigned ? "unsigned " : "";
     std::string base;
@@ -271,6 +411,7 @@ class Builder {
             fb.line = fn.line;
             prog_.functionBodies.push_back(std::move(fb));
         }
+        autoMarkNonRecursive(prog_);
         checkNonRecursiveFunctions(prog_);
         return std::move(prog_);
     }
