@@ -54,4 +54,9 @@ $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
 $ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
     "$GRAMMAR_DIR/basic/BasicLexer.g4" "$GRAMMAR_DIR/basic/BasicParser.g4"
 
+# PascalLexer.g4/PascalParser.g4 (see ../docs/pascal-language.md).
+# Grammar only for now - no src/frontend/pascal/ consumes this yet.
+$ANTLR -Dlanguage=Cpp -visitor -no-listener -o "$GEN_DIR" \
+    "$GRAMMAR_DIR/pascal/PascalLexer.g4" "$GRAMMAR_DIR/pascal/PascalParser.g4"
+
 echo "Regenerated $GEN_DIR - review the diff and commit it along with the .g4 change." >&2
