@@ -244,6 +244,11 @@ bool AddressHoisting::run(ir::Program &prog, const TypeWidths &widths, const std
         for (ir::Slot *arraySlot : arraySlots) {
             std::vector<ir::Expr *> &uses = occurrences[arraySlot];
             if (uses.size() < 2) continue;  // a single use gains nothing from hoisting.
+            if (arraySlot->kind == ir::SlotKind::Global &&
+                std::all_of(uses.begin(), uses.end(),
+                            [](const ir::Expr *u) { return u->lhs && u->lhs->kind == ir::ExprKind::IntLit; })) {
+                continue;
+            }
 
             Type ptrType = pointerTo(arraySlot->type);
             int elemWidth = widthOf(arraySlot->type, widths);
