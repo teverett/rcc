@@ -149,13 +149,13 @@ KnownMap intersectKnown(const KnownMap &a, const KnownMap &b) {
 }
 
 void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Slot *> &addressTaken, bool &changed,
-                     const std::string &sourceFile);
+                     const std::string &sourceFile, bool verbose);
 
 // Bottom-up, same shape as ConstantFolding/LocalCSE's own expression
 // walks; a nested Assign/CompoundAssign updates `known` on the way back
 // up, after its own rhs has already had a chance to become a literal.
 void propagateExpr(ir::ExprPtr &e, KnownMap &known, const std::unordered_set<ir::Slot *> &addressTaken,
-                     bool &changed, const std::string &sourceFile) {
+                     bool &changed, const std::string &sourceFile, bool verbose) {
     if (!e) return;
 
     // `&operand` needs operand's real lvalue, never a cached value copy -
@@ -164,21 +164,23 @@ void propagateExpr(ir::ExprPtr &e, KnownMap &known, const std::unordered_set<ir:
     // normal treatment below.
     if (e->kind == ir::ExprKind::Unary && e->op == "&") {
         if (e->rhs && e->rhs->kind == ir::ExprKind::Index) {
-            propagateExpr(e->rhs->lhs, known, addressTaken, changed, sourceFile);
+            propagateExpr(e->rhs->lhs, known, addressTaken, changed, sourceFile, verbose);
         }
         return;
     }
 
-    propagateExpr(e->lhs, known, addressTaken, changed, sourceFile);
-    propagateExpr(e->rhs, known, addressTaken, changed, sourceFile);
-    propagateExpr(e->elseExpr, known, addressTaken, changed, sourceFile);
-    for (auto &arg : e->args) propagateExpr(arg, known, addressTaken, changed, sourceFile);
+    propagateExpr(e->lhs, known, addressTaken, changed, sourceFile, verbose);
+    propagateExpr(e->rhs, known, addressTaken, changed, sourceFile, verbose);
+    propagateExpr(e->elseExpr, known, addressTaken, changed, sourceFile, verbose);
+    for (auto &arg : e->args) propagateExpr(arg, known, addressTaken, changed, sourceFile, verbose);
 
     if (e->kind == ir::ExprKind::Var && e->slot) {
         auto it = known.find(e->slot);
         if (it != known.end()) {
-            std::cerr << sourceFile << ": constant-propagation: line " << e->line << ": replaced `"
-                       << e->slot->sourceName << "` with its known value `" << it->second << "`\n";
+            if (verbose) {
+                std::cerr << sourceFile << ": constant-propagation: line " << e->line << ": replaced `"
+                           << e->slot->sourceName << "` with its known value `" << it->second << "`\n";
+            }
             e = makeIntLit(it->second, e->line, e->type);
             changed = true;
         }
@@ -209,18 +211,18 @@ void propagateExpr(ir::ExprPtr &e, KnownMap &known, const std::unordered_set<ir:
 }
 
 void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Slot *> &addressTaken, bool &changed,
-                     const std::string &sourceFile) {
+                     const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &child : s->body) propagateStmt(child.get(), known, addressTaken, changed, sourceFile);
+            for (auto &child : s->body) propagateStmt(child.get(), known, addressTaken, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::If: {
-            propagateExpr(s->cond, known, addressTaken, changed, sourceFile);
+            propagateExpr(s->cond, known, addressTaken, changed, sourceFile, verbose);
             KnownMap thenKnown = known;
-            propagateStmt(s->thenStmt.get(), thenKnown, addressTaken, changed, sourceFile);
+            propagateStmt(s->thenStmt.get(), thenKnown, addressTaken, changed, sourceFile, verbose);
             KnownMap elseKnown = known;
-            propagateStmt(s->elseStmt.get(), elseKnown, addressTaken, changed, sourceFile);
+            propagateStmt(s->elseStmt.get(), elseKnown, addressTaken, changed, sourceFile, verbose);
             known = intersectKnown(thenKnown, elseKnown);
             return;
         }
@@ -233,9 +235,9 @@ void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Sl
             // `1 <= 10` from `i`'s pre-loop value, looping forever).
             if (containsAsm(s->loopBody.get()) || containsAsm(s->postStmt.get())) {
                 known.clear();
-                propagateExpr(s->cond, known, addressTaken, changed, sourceFile);
-                propagateStmt(s->loopBody.get(), known, addressTaken, changed, sourceFile);
-                propagateStmt(s->postStmt.get(), known, addressTaken, changed, sourceFile);
+                propagateExpr(s->cond, known, addressTaken, changed, sourceFile, verbose);
+                propagateStmt(s->loopBody.get(), known, addressTaken, changed, sourceFile, verbose);
+                propagateStmt(s->postStmt.get(), known, addressTaken, changed, sourceFile, verbose);
                 known.clear();
                 return;
             }
@@ -244,9 +246,9 @@ void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Sl
             collectWrittenSlots(s->loopBody.get(), written);
             collectWrittenSlots(s->postStmt.get(), written);
             for (ir::Slot *slot : written) known.erase(slot);
-            propagateExpr(s->cond, known, addressTaken, changed, sourceFile);
-            propagateStmt(s->loopBody.get(), known, addressTaken, changed, sourceFile);
-            propagateStmt(s->postStmt.get(), known, addressTaken, changed, sourceFile);
+            propagateExpr(s->cond, known, addressTaken, changed, sourceFile, verbose);
+            propagateStmt(s->loopBody.get(), known, addressTaken, changed, sourceFile, verbose);
+            propagateStmt(s->postStmt.get(), known, addressTaken, changed, sourceFile, verbose);
             // A value (re)learned inside the loop only held for its last
             // iteration, not necessarily on exit after zero iterations -
             // drop it again rather than letting it leak past the loop.
@@ -255,10 +257,10 @@ void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Sl
         }
         case ir::StmtKind::Return:
         case ir::StmtKind::ExprStmt:
-            propagateExpr(s->initOrReturnOrExpr, known, addressTaken, changed, sourceFile);
+            propagateExpr(s->initOrReturnOrExpr, known, addressTaken, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::LocalDecl:
-            propagateExpr(s->initOrReturnOrExpr, known, addressTaken, changed, sourceFile);
+            propagateExpr(s->initOrReturnOrExpr, known, addressTaken, changed, sourceFile, verbose);
             if (s->declSlot && isCandidateSlot(s->declSlot) && !addressTaken.count(s->declSlot)) {
                 if (s->initOrReturnOrExpr && s->initOrReturnOrExpr->kind == ir::ExprKind::IntLit) {
                     known[s->declSlot] = s->initOrReturnOrExpr->intValue;
@@ -292,13 +294,13 @@ void propagateStmt(ir::Stmt *s, KnownMap &known, const std::unordered_set<ir::Sl
 
 }  // namespace
 
-bool ConstantPropagation::run(ir::Program &prog, const std::string &sourceFile) const {
+bool ConstantPropagation::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         std::unordered_set<ir::Slot *> addressTaken;
         collectAddressTaken(fb.body.get(), addressTaken);
         KnownMap known;
-        propagateStmt(fb.body.get(), known, addressTaken, changed, sourceFile);
+        propagateStmt(fb.body.get(), known, addressTaken, changed, sourceFile, verbose);
     }
     return changed;
 }

@@ -67,7 +67,7 @@ int main() {
     return caller(3, 4);
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_provably_nonrecursive_function_gets_marked_automatically: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -107,7 +107,7 @@ int main() {
     return isEven(4);
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_mutual_recursion_is_not_marked: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -150,7 +150,7 @@ int main() {
     return g_cb[0];
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_function_whose_address_is_taken_is_not_marked: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -188,7 +188,7 @@ int main() {
     return caller(3, 4);
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_explicit_annotation_is_never_overridden: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -223,7 +223,7 @@ int main() {
     return capturesFp(3);
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_function_with_raw_asm_block_is_not_marked: fixture failed to compile"
         cat "$dir/log"
         return 1

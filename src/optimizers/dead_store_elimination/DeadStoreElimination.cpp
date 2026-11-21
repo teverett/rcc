@@ -117,11 +117,11 @@ void visitExprReads(const ir::Expr *e, Pending &pending) {
 }
 
 void scanStmt(ir::Stmt *s, Pending &pending, const std::unordered_set<ir::Slot *> &addressTaken, bool &changed,
-               const std::string &sourceFile) {
+               const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &child : s->body) scanStmt(child.get(), pending, addressTaken, changed, sourceFile);
+            for (auto &child : s->body) scanStmt(child.get(), pending, addressTaken, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::If: {
             visitExprReads(s->cond.get(), pending);
@@ -131,18 +131,18 @@ void scanStmt(ir::Stmt *s, Pending &pending, const std::unordered_set<ir::Slot *
             // dropping one some path still needs.
             pending.clear();
             Pending thenPending;
-            scanStmt(s->thenStmt.get(), thenPending, addressTaken, changed, sourceFile);
+            scanStmt(s->thenStmt.get(), thenPending, addressTaken, changed, sourceFile, verbose);
             Pending elsePending;
-            scanStmt(s->elseStmt.get(), elsePending, addressTaken, changed, sourceFile);
+            scanStmt(s->elseStmt.get(), elsePending, addressTaken, changed, sourceFile, verbose);
             return;
         }
         case ir::StmtKind::While: {
             visitExprReads(s->cond.get(), pending);
             pending.clear();
             Pending bodyPending;
-            scanStmt(s->loopBody.get(), bodyPending, addressTaken, changed, sourceFile);
+            scanStmt(s->loopBody.get(), bodyPending, addressTaken, changed, sourceFile, verbose);
             Pending postPending;
-            scanStmt(s->postStmt.get(), postPending, addressTaken, changed, sourceFile);
+            scanStmt(s->postStmt.get(), postPending, addressTaken, changed, sourceFile, verbose);
             return;
         }
         case ir::StmtKind::Return:
@@ -159,9 +159,11 @@ void scanStmt(ir::Stmt *s, Pending &pending, const std::unordered_set<ir::Slot *
                 visitExprReads(e->rhs.get(), pending);  // rhs evaluates before the store
                 auto it = pending.find(e->slot);
                 if (it != pending.end()) {
-                    std::cerr << sourceFile << ": dead-store-elimination: line " << it->second->line
-                               << ": dropped store to `" << e->slot->sourceName
-                               << "`, overwritten at line " << s->line << " with no read in between\n";
+                    if (verbose) {
+                        std::cerr << sourceFile << ": dead-store-elimination: line " << it->second->line
+                                   << ": dropped store to `" << e->slot->sourceName << "`, overwritten at line "
+                                   << s->line << " with no read in between\n";
+                    }
                     neutralizeAssignStmt(it->second);
                     changed = true;
                 }
@@ -290,25 +292,27 @@ void collectWrittenSlots(const ir::Stmt *s, std::unordered_set<ir::Slot *> &writ
 }
 
 void removeWriteOnlyStores(ir::Stmt *s, const std::unordered_set<ir::Slot *> &writeOnly, bool &changed,
-                             const std::string &sourceFile) {
+                             const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &child : s->body) removeWriteOnlyStores(child.get(), writeOnly, changed, sourceFile);
+            for (auto &child : s->body) removeWriteOnlyStores(child.get(), writeOnly, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::If:
-            removeWriteOnlyStores(s->thenStmt.get(), writeOnly, changed, sourceFile);
-            removeWriteOnlyStores(s->elseStmt.get(), writeOnly, changed, sourceFile);
+            removeWriteOnlyStores(s->thenStmt.get(), writeOnly, changed, sourceFile, verbose);
+            removeWriteOnlyStores(s->elseStmt.get(), writeOnly, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::While:
-            removeWriteOnlyStores(s->loopBody.get(), writeOnly, changed, sourceFile);
-            removeWriteOnlyStores(s->postStmt.get(), writeOnly, changed, sourceFile);
+            removeWriteOnlyStores(s->loopBody.get(), writeOnly, changed, sourceFile, verbose);
+            removeWriteOnlyStores(s->postStmt.get(), writeOnly, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::LocalDecl:
             if (s->declSlot && writeOnly.count(s->declSlot) && s->initOrReturnOrExpr &&
                 !hasSideEffect(s->initOrReturnOrExpr.get())) {
-                std::cerr << sourceFile << ": dead-store-elimination: line " << s->line << ": dropped `"
-                           << s->declSlot->sourceName << "`'s own never-read initializer\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": dead-store-elimination: line " << s->line << ": dropped `"
+                               << s->declSlot->sourceName << "`'s own never-read initializer\n";
+                }
                 s->initOrReturnOrExpr = nullptr;
                 changed = true;
             }
@@ -318,8 +322,10 @@ void removeWriteOnlyStores(ir::Stmt *s, const std::unordered_set<ir::Slot *> &wr
         case ir::StmtKind::ExprStmt: {
             ir::Expr *e = s->initOrReturnOrExpr.get();
             if (e && e->kind == ir::ExprKind::Assign && !e->lhs && e->slot && writeOnly.count(e->slot)) {
-                std::cerr << sourceFile << ": dead-store-elimination: line " << s->line
-                           << ": dropped never-read store to `" << e->slot->sourceName << "`\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": dead-store-elimination: line " << s->line
+                               << ": dropped never-read store to `" << e->slot->sourceName << "`\n";
+                }
                 neutralizeAssignStmt(s);
                 changed = true;
             }
@@ -338,14 +344,14 @@ void removeWriteOnlyStores(ir::Stmt *s, const std::unordered_set<ir::Slot *> &wr
 
 }  // namespace
 
-bool DeadStoreElimination::run(ir::Program &prog, const std::string &sourceFile) const {
+bool DeadStoreElimination::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         std::unordered_set<ir::Slot *> addressTaken;
         collectAddressTaken(fb.body.get(), addressTaken);
 
         Pending pending;
-        scanStmt(fb.body.get(), pending, addressTaken, changed, sourceFile);
+        scanStmt(fb.body.get(), pending, addressTaken, changed, sourceFile, verbose);
 
         std::unordered_set<ir::Slot *> written;
         std::unordered_set<ir::Slot *> read;
@@ -355,7 +361,7 @@ bool DeadStoreElimination::run(ir::Program &prog, const std::string &sourceFile)
         for (ir::Slot *slot : written) {
             if (!read.count(slot) && !addressTaken.count(slot)) writeOnly.insert(slot);
         }
-        if (!writeOnly.empty()) removeWriteOnlyStores(fb.body.get(), writeOnly, changed, sourceFile);
+        if (!writeOnly.empty()) removeWriteOnlyStores(fb.body.get(), writeOnly, changed, sourceFile, verbose);
     }
     return changed;
 }

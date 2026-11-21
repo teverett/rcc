@@ -55,7 +55,7 @@ void collectLiveGlobals(const ir::Stmt *s, std::unordered_set<ir::Slot *> &live,
 
 }  // namespace
 
-bool UnusedGlobalElimination::run(ir::Program &prog, const std::string &) const {
+bool UnusedGlobalElimination::run(ir::Program &prog, const std::string &, bool) const {
     std::unordered_set<ir::Slot *> live;
     std::vector<ir::Slot *> worklist;
 

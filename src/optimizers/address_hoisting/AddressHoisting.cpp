@@ -222,7 +222,8 @@ void rewriteOccurrence(ir::Expr *e, ir::Slot *ptrTemp, Type ptrType, int elemWid
 
 }  // namespace
 
-bool AddressHoisting::run(ir::Program &prog, const TypeWidths &widths, const std::string &sourceFile) const {
+bool AddressHoisting::run(ir::Program &prog, const TypeWidths &widths, const std::string &sourceFile,
+                           bool verbose) const {
     bool changed = false;
     int tempCounter = 0;
     for (auto &fb : prog.functionBodies) {
@@ -251,9 +252,11 @@ bool AddressHoisting::run(ir::Program &prog, const TypeWidths &widths, const std
             ir::ExprPtr init = makeArrayBaseAddr(arraySlot, ptrType, declLine);
             fb.body->body.insert(fb.body->body.begin(), makeAddrDecl(temp, std::move(init), declLine));
 
-            std::cerr << sourceFile << ": address-hoisting: fn " << fb.func->sourceName << ": hoisted `"
-                       << arraySlot->sourceName << "`'s base address into `" << temp->sourceName << "` ("
-                       << uses.size() << " uses)\n";
+            if (verbose) {
+                std::cerr << sourceFile << ": address-hoisting: fn " << fb.func->sourceName << ": hoisted `"
+                           << arraySlot->sourceName << "`'s base address into `" << temp->sourceName << "` ("
+                           << uses.size() << " uses)\n";
+            }
 
             for (ir::Expr *use : uses) {
                 rewriteOccurrence(use, temp, ptrType, elemWidth);

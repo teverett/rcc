@@ -18,7 +18,8 @@ class Optimizer {
     // driver re-running passes to a fixpoint knows whether to continue.
     // `sourceFile` is used only to prefix this pass's own diagnostic
     // output, so callers that don't care about diagnostics may pass "".
-    virtual bool run(ir::Program &prog, const std::string &sourceFile) const = 0;
+    // `verbose` gates that diagnostic output; it is otherwise silent.
+    virtual bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const = 0;
 };
 
 }  // namespace rcc

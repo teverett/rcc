@@ -143,7 +143,7 @@ namespace {
 void usage(const char *argv0) {
     std::cerr << "Usage: " << argv0
               << " [--target=<target>[-<host>]] [--format=asm|<target-specific>] [--out file]\n"
-                 "       [--optimize] [--dump-ir] [--dump-asm] file.c|file.bas|file.pas [file2.c|file2.bas|file2.pas ...]\n"
+                 "       [--optimize] [--dump-ir] [--dump-asm] [--verbose] file.c|file.bas|file.pas [file2.c|file2.bas|file2.pas ...]\n"
                  "   or: " << argv0
               << " --link [--target=<target>[-<host>]] --format=<target-native> [--gc-sections] [--base=<word-addr>|0x<hex>|$<hex>] [--out file] file1.o [file2.o ...]\n"
                  "\n"
@@ -517,12 +517,13 @@ void listPlatforms() {
 // on this invocation. `allowExternal` (true only for --format=coff) is
 // threaded through to both buildIR() and Backend::generate()'s objectMode.
 std::string compileOneFile(const std::string &srcPath, const std::map<std::string, std::string> &predefinedMacros,
-                             rcc::Backend &backend, bool allowExternal, bool optimize, bool dumpIr, bool dumpAsm) {
+                             rcc::Backend &backend, bool allowExternal, bool optimize, bool dumpIr, bool dumpAsm,
+                             bool verbose) {
     rcc::Program prog;
     std::unique_ptr<rcc::Frontend> frontend = makeFrontend(srcPath);
     frontend->parseAndMergeFile(srcPath, predefinedMacros, prog);
 
-    rcc::ir::Program irProg = rcc::buildIR(prog, backend.typeWidths(), allowExternal);
+    rcc::ir::Program irProg = rcc::buildIR(prog, backend.typeWidths(), allowExternal, verbose);
 
     if (optimize) {
         // Constant propagation first: substituting a Var read with its
@@ -531,53 +532,53 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // reads are gone, feeds DeadCodeElimination a now-unused
         // declaration to drop.
         rcc::ConstantPropagation cprop;
-        cprop.run(irProg, srcPath);
+        cprop.run(irProg, srcPath, verbose);
         // Constant folding next, so DeadCodeElimination can reason about
         // initializers it collapses to a side-effect-free constant.
         rcc::ConstantFolding cf;
-        cf.run(irProg, srcPath);
+        cf.run(irProg, srcPath, verbose);
         // After ConstantFolding so an `if`/`while` condition it just
         // reduced to an IntLit is caught here too; before every pass below
         // so they never waste work optimizing a branch this one deletes.
         rcc::ConstantConditionElimination cce;
-        cce.run(irProg, srcPath);
+        cce.run(irProg, srcPath, verbose);
         // Strength reduction only rewrites an op whose other operand isn't
         // a literal, so ordering after constant folding loses nothing.
         rcc::AlgebraicSimplification algsimp;
-        algsimp.run(irProg, srcPath);
+        algsimp.run(irProg, srcPath, verbose);
         // After AlgebraicSimplification, before LocalCSE, for the same
         // canonicalization reason: a hand-desugared `t = t <op> e` this
         // pass folds into `t <op>= e` should look that way to every pass
         // below, not like two independent reads of `t`.
         rcc::CompoundAssignRecognition car;
-        car.run(irProg, srcPath);
+        car.run(irProg, srcPath, verbose);
         // Local CSE after the above so it matches each pass's canonicalized
         // form (e.g. a strength-reduced `x << 1`, not the original `x * 2`).
         rcc::LocalCSE cse;
-        cse.run(irProg, srcPath);
+        cse.run(irProg, srcPath, verbose);
         // After LocalCSE for the same canonicalization reason. Needs
         // backend.typeWidths() (to scale a hoisted index by the array's
         // element width), so unlike the passes above it isn't an
         // Optimizer - see AddressHoisting.h.
         rcc::AddressHoisting addrHoist;
-        addrHoist.run(irProg, backend.typeWidths(), srcPath);
+        addrHoist.run(irProg, backend.typeWidths(), srcPath, verbose);
         // After the above for the same canonicalization reason; narrow
         // enough (see InductionNonNegative.h) that ordering relative to
         // them doesn't actually matter beyond that.
         rcc::InductionNonNegative indNonNeg;
-        indNonNeg.run(irProg, srcPath);
+        indNonNeg.run(irProg, srcPath, verbose);
         // After InductionNonNegative so a slot it already proved
         // non-negative is skipped here too (see GuardNonNegative.h) -
         // the two passes recognize disjoint idioms, so ordering between
         // them otherwise doesn't matter.
         rcc::GuardNonNegative guardNonNeg;
-        guardNonNeg.run(irProg, srcPath);
+        guardNonNeg.run(irProg, srcPath, verbose);
         // Before DeadCodeElimination, so a LocalDecl this pass strips down
         // to a bare, unread declaration looks unused to it too.
         rcc::DeadStoreElimination dse;
-        dse.run(irProg, srcPath);
+        dse.run(irProg, srcPath, verbose);
         rcc::DeadCodeElimination dce;
-        dce.run(irProg, srcPath);
+        dce.run(irProg, srcPath, verbose);
         // LocalCSE may have introduced new locals after buildIR() already
         // assigned frame offsets once.
         rcc::recomputeFrameLayout(irProg, backend.typeWidths());
@@ -587,9 +588,9 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // compilation doesn't guarantee.
         if (!allowExternal) {
             rcc::IdenticalCodeFolding icf;
-            icf.run(irProg, srcPath);
+            icf.run(irProg, srcPath, verbose);
             rcc::UnusedGlobalElimination uge;
-            uge.run(irProg, srcPath);
+            uge.run(irProg, srcPath, verbose);
         }
     }
 
@@ -651,6 +652,7 @@ int main(int argc, char **argv) {
     bool optimize = false;
     bool dumpIr = false;
     bool dumpAsm = false;
+    bool verbose = false;
     bool link = false;
     bool gcSections = false;
     std::optional<uint32_t> baseAddressWords;
@@ -699,6 +701,8 @@ int main(int argc, char **argv) {
             dumpIr = true;
         } else if (arg == "--dump-asm") {
             dumpAsm = true;
+        } else if (arg == "--verbose") {
+            verbose = true;
         } else if (arg == "--link") {
             link = true;
         } else if (arg == "--gc-sections") {
@@ -1116,7 +1120,8 @@ int main(int argc, char **argv) {
                     }
                 }
                 std::string asmText =
-                    compileOneFile(srcPath, predefinedMacros, *fileBackend, allowExternal, optimize, dumpIr, dumpAsm);
+                    compileOneFile(srcPath, predefinedMacros, *fileBackend, allowExternal, optimize, dumpIr, dumpAsm,
+                                    verbose);
                 std::string bytes = assembleOne(*fileBackend, asmText, format);
                 writeToBuildDir(baseName(srcPath) + ".o", bytes, /*binary=*/true);
             }
@@ -1131,7 +1136,8 @@ int main(int argc, char **argv) {
     // when --out is omitted for an object format.
     try {
         std::string asmText =
-            compileOneFile(srcPaths[0], predefinedMacros, *backend, allowExternal, optimize, dumpIr, dumpAsm);
+            compileOneFile(srcPaths[0], predefinedMacros, *backend, allowExternal, optimize, dumpIr, dumpAsm,
+                            verbose);
         std::string bytes = assembleOne(*backend, asmText, format);
         if (backend->isObjectFormat(format) && outPath.empty()) {
             writeToBuildDir(baseName(srcPaths[0]) + ".o", bytes, /*binary=*/true);

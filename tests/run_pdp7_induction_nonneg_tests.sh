@@ -62,7 +62,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_safe_for_loop_skips_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -98,7 +98,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_reassigned_induction_variable_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -138,7 +138,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_address_taken_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -173,7 +173,7 @@ int main() {
     return sum;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_decrementing_loop_skips_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -207,7 +207,7 @@ int main() {
     return sum;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_decrementing_loop_insufficient_bound_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1

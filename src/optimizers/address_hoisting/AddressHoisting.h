@@ -29,7 +29,7 @@ namespace rcc {
 class AddressHoisting {
    public:
     std::string name() const { return "address-hoisting"; }
-    bool run(ir::Program &prog, const TypeWidths &widths, const std::string &sourceFile) const;
+    bool run(ir::Program &prog, const TypeWidths &widths, const std::string &sourceFile, bool verbose) const;
 };
 
 }  // namespace rcc

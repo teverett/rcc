@@ -22,7 +22,7 @@ namespace rcc {
 class ConstantConditionElimination : public Optimizer {
    public:
     std::string name() const override { return "constant-condition-elimination"; }
-    bool run(ir::Program &prog, const std::string &sourceFile) const override;
+    bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const override;
 };
 
 }  // namespace rcc

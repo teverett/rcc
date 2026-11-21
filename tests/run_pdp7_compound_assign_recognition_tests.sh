@@ -71,7 +71,7 @@ int flip(int i, int x) {
 }
 int main() { return flip(1, 5); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/d.s" "$dir/desugared.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/d.s" "$dir/desugared.c" >"$dir/log" 2>&1; then
         echo "FAIL test_array_element_self_xor_is_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -112,7 +112,7 @@ int flip(int p, int x) {
 }
 int main() { return flip(0, 5); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/d.s" "$dir/desugared.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/d.s" "$dir/desugared.c" >"$dir/log" 2>&1; then
         echo "FAIL test_pointer_dereference_self_add_is_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -147,7 +147,7 @@ int f(int i, int j, int y) {
 }
 int main() { return f(1, 2, 3); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_different_indices_are_not_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -172,7 +172,7 @@ int f(int x, int y) {
 }
 int main() { return f(5, 10); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_noncommutative_wrong_side_is_not_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -203,7 +203,7 @@ int h() {
 }
 int main() { return h(); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_side_effecting_kept_operand_is_not_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -228,7 +228,7 @@ int f(int x, int y) {
 }
 int main() { return f(5, 10); }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_commutative_self_on_right_is_folded: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -272,7 +272,7 @@ int main() {
     return (int)t;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_wide_target_is_not_folded: fixture failed to compile - the exact real" \
              "regression this test guards against:"
         cat "$dir/log"

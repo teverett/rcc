@@ -230,7 +230,7 @@ void scanStmt(ir::Stmt *s, const ir::Slot *slot, WriteScan &scan) {
 
 }  // namespace
 
-bool InductionNonNegative::run(ir::Program &prog, const std::string &sourceFile) const {
+bool InductionNonNegative::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         if (!fb.body || fb.body->kind != ir::StmtKind::Block) continue;
@@ -256,8 +256,10 @@ bool InductionNonNegative::run(ir::Program &prog, const std::string &sourceFile)
 
             c.slot->knownNonNegative = true;
             changed = true;
-            std::cerr << sourceFile << ": induction-nonneg: fn " << fb.func->sourceName << ": proved `"
-                      << c.slot->sourceName << "` stays non-negative\n";
+            if (verbose) {
+                std::cerr << sourceFile << ": induction-nonneg: fn " << fb.func->sourceName << ": proved `"
+                          << c.slot->sourceName << "` stays non-negative\n";
+            }
         }
     }
     return changed;

@@ -109,12 +109,13 @@ ir::Expr *matchSelfOperand(ir::Expr &rhs, IsTargetRead isTargetRead) {
     return nullptr;
 }
 
-void recognizeInExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile, const ir::Function *fn) {
+void recognizeInExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile, const ir::Function *fn,
+                      bool verbose) {
     if (!e) return;
-    recognizeInExpr(e->lhs, changed, sourceFile, fn);
-    recognizeInExpr(e->rhs, changed, sourceFile, fn);
-    recognizeInExpr(e->elseExpr, changed, sourceFile, fn);
-    for (auto &a : e->args) recognizeInExpr(a, changed, sourceFile, fn);
+    recognizeInExpr(e->lhs, changed, sourceFile, fn, verbose);
+    recognizeInExpr(e->rhs, changed, sourceFile, fn, verbose);
+    recognizeInExpr(e->elseExpr, changed, sourceFile, fn, verbose);
+    for (auto &a : e->args) recognizeInExpr(a, changed, sourceFile, fn, verbose);
 
     if (e->kind != ir::ExprKind::Assign && e->kind != ir::ExprKind::DerefAssign) return;
     if (!e->rhs || e->rhs->kind != ir::ExprKind::Binary || !isAssignableOp(e->rhs->op)) return;
@@ -145,10 +146,12 @@ void recognizeInExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFil
     if (!newRhs || !isSideEffectFree(newRhs)) return;
 
     bool isScalarOrIndex = e->kind == ir::ExprKind::Assign;
-    std::cerr << sourceFile << ": compound-assign-recognition: fn " << fn->sourceName << ": line " << e->line
-               << ": folded a hand-desugared `" << (isScalarOrIndex ? "t = t" : "*p = *p") << " " << e->rhs->op
-               << " <expr>` into the equivalent compound assignment, now computing "
-               << (isScalarOrIndex ? "the target's own address" : "the pointer") << " once instead of twice\n";
+    if (verbose) {
+        std::cerr << sourceFile << ": compound-assign-recognition: fn " << fn->sourceName << ": line " << e->line
+                   << ": folded a hand-desugared `" << (isScalarOrIndex ? "t = t" : "*p = *p") << " " << e->rhs->op
+                   << " <expr>` into the equivalent compound assignment, now computing "
+                   << (isScalarOrIndex ? "the target's own address" : "the pointer") << " once instead of twice\n";
+    }
 
     std::string op = e->rhs->op;
     ir::ExprPtr keptRhs = (e->rhs->lhs.get() == newRhs) ? std::move(e->rhs->lhs) : std::move(e->rhs->rhs);
@@ -158,26 +161,27 @@ void recognizeInExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFil
     changed = true;
 }
 
-void recognizeInStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile, const ir::Function *fn) {
+void recognizeInStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile, const ir::Function *fn,
+                      bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &c : s->body) recognizeInStmt(c.get(), changed, sourceFile, fn);
+            for (auto &c : s->body) recognizeInStmt(c.get(), changed, sourceFile, fn, verbose);
             return;
         case ir::StmtKind::If:
-            recognizeInExpr(s->cond, changed, sourceFile, fn);
-            recognizeInStmt(s->thenStmt.get(), changed, sourceFile, fn);
-            recognizeInStmt(s->elseStmt.get(), changed, sourceFile, fn);
+            recognizeInExpr(s->cond, changed, sourceFile, fn, verbose);
+            recognizeInStmt(s->thenStmt.get(), changed, sourceFile, fn, verbose);
+            recognizeInStmt(s->elseStmt.get(), changed, sourceFile, fn, verbose);
             return;
         case ir::StmtKind::While:
-            recognizeInExpr(s->cond, changed, sourceFile, fn);
-            recognizeInStmt(s->loopBody.get(), changed, sourceFile, fn);
-            recognizeInStmt(s->postStmt.get(), changed, sourceFile, fn);
+            recognizeInExpr(s->cond, changed, sourceFile, fn, verbose);
+            recognizeInStmt(s->loopBody.get(), changed, sourceFile, fn, verbose);
+            recognizeInStmt(s->postStmt.get(), changed, sourceFile, fn, verbose);
             return;
         case ir::StmtKind::Return:
         case ir::StmtKind::LocalDecl:
         case ir::StmtKind::ExprStmt:
-            recognizeInExpr(s->initOrReturnOrExpr, changed, sourceFile, fn);
+            recognizeInExpr(s->initOrReturnOrExpr, changed, sourceFile, fn, verbose);
             return;
         case ir::StmtKind::Break:
         case ir::StmtKind::Continue:
@@ -191,9 +195,9 @@ void recognizeInStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile, 
 
 }  // namespace
 
-bool CompoundAssignRecognition::run(ir::Program &prog, const std::string &sourceFile) const {
+bool CompoundAssignRecognition::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
-    for (auto &fb : prog.functionBodies) recognizeInStmt(fb.body.get(), changed, sourceFile, fb.func);
+    for (auto &fb : prog.functionBodies) recognizeInStmt(fb.body.get(), changed, sourceFile, fb.func, verbose);
     return changed;
 }
 

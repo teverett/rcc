@@ -187,7 +187,7 @@ void findReads(const ir::Stmt *s, const ir::Slot *slot, std::vector<const ir::Ex
 
 }  // namespace
 
-bool GuardNonNegative::run(ir::Program &prog, const std::string &sourceFile) const {
+bool GuardNonNegative::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         if (!fb.body || fb.body->kind != ir::StmtKind::Block) continue;
@@ -235,8 +235,10 @@ bool GuardNonNegative::run(ir::Program &prog, const std::string &sourceFile) con
 
             candidate->knownNonNegative = true;
             changed = true;
-            std::cerr << sourceFile << ": guard-nonneg: fn " << fb.func->sourceName << ": proved `"
-                      << candidate->sourceName << "` stays non-negative after its `>= 0` guard\n";
+            if (verbose) {
+                std::cerr << sourceFile << ": guard-nonneg: fn " << fb.func->sourceName << ": proved `"
+                          << candidate->sourceName << "` stays non-negative after its `>= 0` guard\n";
+            }
         }
     }
     return changed;

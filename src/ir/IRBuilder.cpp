@@ -226,7 +226,7 @@ bool stmtHasAsm(const ir::Stmt *s) {
 // choice), anything whose address is ever taken (see
 // collectFuncAddressesInStmt()'s own comment on why), and anything
 // containing a raw `asm{}` block (see stmtHasAsm()'s own comment).
-void autoMarkNonRecursive(ir::Program &prog) {
+void autoMarkNonRecursive(ir::Program &prog, bool verbose) {
     std::unordered_map<const ir::Function *, const ir::Stmt *> bodyOf;
     for (const auto &fb : prog.functionBodies) bodyOf[fb.func] = fb.body.get();
 
@@ -243,8 +243,10 @@ void autoMarkNonRecursive(ir::Program &prog) {
         std::unordered_set<const ir::Function *> visited{fb.func};
         if (!hasCycleBackTo(fb.func, fb.func, bodyOf, visited)) {
             fb.func->isNonRecursive = true;
-            std::cerr << fb.func->sourceFile << ": auto-nonrecursive: fn " << fb.func->sourceName
-                      << ": proved it never calls back into itself - marked '@nonrecursive'\n";
+            if (verbose) {
+                std::cerr << fb.func->sourceFile << ": auto-nonrecursive: fn " << fb.func->sourceName
+                          << ": proved it never calls back into itself - marked '@nonrecursive'\n";
+            }
         }
     }
 }
@@ -380,7 +382,8 @@ ir::ExprPtr promote(ir::ExprPtr e, int line) {
 
 class Builder {
    public:
-    Builder(bool allowExternal, const TypeWidths &widths) : allowExternal_(allowExternal), widths_(widths) {}
+    Builder(bool allowExternal, const TypeWidths &widths, bool verbose)
+        : allowExternal_(allowExternal), verbose_(verbose), widths_(widths) {}
 
     ir::Program build(const Program &prog) {
         registerStructs(prog);
@@ -411,7 +414,7 @@ class Builder {
             fb.line = fn.line;
             prog_.functionBodies.push_back(std::move(fb));
         }
-        autoMarkNonRecursive(prog_);
+        autoMarkNonRecursive(prog_, verbose_);
         checkNonRecursiveFunctions(prog_);
         return std::move(prog_);
     }
@@ -1959,6 +1962,7 @@ class Builder {
     int nextFuncId_ = 0;
     int nextStringLitId_ = 0;  // ExprKind::StringLit's own synthetic globals - see buildExpr's own case
     bool allowExternal_ = false;
+    bool verbose_ = false;
     int loopDepth_ = 0;  // >0 while building a While's own loopBody/postStmt - see Break/Continue
     // What a bare `break` currently resolves to, innermost last: -1 for a
     // loop (deferred to codegen's own per-backend loop-break-label stack,
@@ -1983,8 +1987,8 @@ class Builder {
 
 }  // namespace
 
-ir::Program buildIR(const Program &prog, const TypeWidths &widths, bool allowExternal) {
-    Builder b(allowExternal, widths);
+ir::Program buildIR(const Program &prog, const TypeWidths &widths, bool allowExternal, bool verbose) {
+    Builder b(allowExternal, widths, verbose);
     return b.build(prog);
 }
 

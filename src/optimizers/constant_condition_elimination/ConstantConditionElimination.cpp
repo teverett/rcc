@@ -159,7 +159,7 @@ ir::StmtPtr makeEmptyStmt(int line) {
 // the pointee), so decisions recorded against the original, pre-mutation
 // tree in collectDecisions() are still found correctly here.
 void applyDecisions(ir::StmtPtr &s, const std::unordered_map<const ir::Stmt *, Decision> &decisions, bool &changed,
-                     const std::string &sourceFile) {
+                     const std::string &sourceFile, bool verbose) {
     if (!s) return;
 
     auto it = decisions.find(s.get());
@@ -167,18 +167,24 @@ void applyDecisions(ir::StmtPtr &s, const std::unordered_map<const ir::Stmt *, D
         int line = s->line;
         switch (it->second) {
             case Decision::KeepThen:
-                std::cerr << sourceFile << ": constant-condition-elimination: line " << line
-                          << ": condition is always true, dropped the `else`\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": constant-condition-elimination: line " << line
+                              << ": condition is always true, dropped the `else`\n";
+                }
                 s = std::move(s->thenStmt);
                 break;
             case Decision::KeepElse:
-                std::cerr << sourceFile << ": constant-condition-elimination: line " << line
-                          << ": condition is always false, dropped the `then`\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": constant-condition-elimination: line " << line
+                              << ": condition is always false, dropped the `then`\n";
+                }
                 s = std::move(s->elseStmt);
                 break;
             case Decision::MakeEmpty:
-                std::cerr << sourceFile << ": constant-condition-elimination: line " << line
-                          << ": condition is always false, removed the statement\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": constant-condition-elimination: line " << line
+                              << ": condition is always false, removed the statement\n";
+                }
                 s = makeEmptyStmt(line);
                 break;
         }
@@ -187,15 +193,15 @@ void applyDecisions(ir::StmtPtr &s, const std::unordered_map<const ir::Stmt *, D
 
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &child : s->body) applyDecisions(child, decisions, changed, sourceFile);
+            for (auto &child : s->body) applyDecisions(child, decisions, changed, sourceFile, verbose);
             break;
         case ir::StmtKind::If:
-            applyDecisions(s->thenStmt, decisions, changed, sourceFile);
-            applyDecisions(s->elseStmt, decisions, changed, sourceFile);
+            applyDecisions(s->thenStmt, decisions, changed, sourceFile, verbose);
+            applyDecisions(s->elseStmt, decisions, changed, sourceFile, verbose);
             break;
         case ir::StmtKind::While:
-            applyDecisions(s->loopBody, decisions, changed, sourceFile);
-            applyDecisions(s->postStmt, decisions, changed, sourceFile);
+            applyDecisions(s->loopBody, decisions, changed, sourceFile, verbose);
+            applyDecisions(s->postStmt, decisions, changed, sourceFile, verbose);
             break;
         default:
             break;
@@ -204,7 +210,7 @@ void applyDecisions(ir::StmtPtr &s, const std::unordered_map<const ir::Stmt *, D
 
 }  // namespace
 
-bool ConstantConditionElimination::run(ir::Program &prog, const std::string &sourceFile) const {
+bool ConstantConditionElimination::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         ir::CFG cfg = ir::buildCFG(fb);
@@ -213,7 +219,7 @@ bool ConstantConditionElimination::run(ir::Program &prog, const std::string &sou
         collectDecisions(fb.body.get(), cfg, decisions);
         if (decisions.empty()) continue;
 
-        applyDecisions(fb.body, decisions, changed, sourceFile);
+        applyDecisions(fb.body, decisions, changed, sourceFile, verbose);
     }
     return changed;
 }

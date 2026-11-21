@@ -58,7 +58,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_guarded_use_skips_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -96,7 +96,7 @@ int main() {
     return count + x;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_use_outside_guard_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -137,7 +137,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_address_taken_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1
@@ -177,7 +177,7 @@ int main() {
     return count;
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_else_branch_read_keeps_outer_sign_check: fixture failed to compile"
         cat "$dir/log"
         return 1

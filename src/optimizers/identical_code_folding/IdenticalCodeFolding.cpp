@@ -218,7 +218,7 @@ void redirectArrayInit(std::vector<ir::ArrayInitElem> &init, const Redirect &red
 
 }  // namespace
 
-bool IdenticalCodeFolding::run(ir::Program &prog, const std::string &sourceFile) const {
+bool IdenticalCodeFolding::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     std::unordered_map<std::string, std::vector<size_t>> groups;
     for (size_t i = 0; i < prog.functionBodies.size(); i++) {
         ir::Function *f = prog.functionBodies[i].func;
@@ -247,8 +247,10 @@ bool IdenticalCodeFolding::run(ir::Program &prog, const std::string &sourceFile)
             ir::Function *loser = prog.functionBodies[idxs[k]].func;
             redirect[loser] = keeper;
             losers.insert(loser);
-            std::cerr << sourceFile << ": identical-code-folding: merged `" << loser->sourceName << "` into `"
-                       << keeper->sourceName << "` (identical body)\n";
+            if (verbose) {
+                std::cerr << sourceFile << ": identical-code-folding: merged `" << loser->sourceName << "` into `"
+                           << keeper->sourceName << "` (identical body)\n";
+            }
         }
     }
 

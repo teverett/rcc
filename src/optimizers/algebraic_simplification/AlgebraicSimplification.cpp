@@ -76,11 +76,11 @@ ir::ExprPtr applyIdentityRewrite(const std::string &op, ir::ExprPtr nonLit, long
 }
 
 // Simplifies children first, then tries to rewrite `e` itself in place.
-void simplifyExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile) {
+void simplifyExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile, bool verbose) {
     if (!e) return;
-    simplifyExpr(e->lhs, changed, sourceFile);
-    simplifyExpr(e->rhs, changed, sourceFile);
-    for (auto &arg : e->args) simplifyExpr(arg, changed, sourceFile);
+    simplifyExpr(e->lhs, changed, sourceFile, verbose);
+    simplifyExpr(e->rhs, changed, sourceFile, verbose);
+    for (auto &arg : e->args) simplifyExpr(arg, changed, sourceFile, verbose);
 
     if (e->kind != ir::ExprKind::Binary) return;
     bool lhsLit = e->lhs->kind == ir::ExprKind::IntLit;
@@ -90,10 +90,12 @@ void simplifyExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile) 
     long litVal = rhsLit ? e->rhs->intValue : e->lhs->intValue;
     if (!hasIdentityRewrite(e->op, litVal, /*literalWasLhs=*/lhsLit)) return;
 
-    std::cerr << sourceFile << ": algebraic-simplification: line " << e->line << ": rewrote `"
-               << (lhsLit ? std::to_string(litVal) + " " + e->op + " <expr>"
-                          : "<expr> " + e->op + " " + std::to_string(litVal))
-               << "`\n";
+    if (verbose) {
+        std::cerr << sourceFile << ": algebraic-simplification: line " << e->line << ": rewrote `"
+                   << (lhsLit ? std::to_string(litVal) + " " + e->op + " <expr>"
+                              : "<expr> " + e->op + " " + std::to_string(litVal))
+                   << "`\n";
+    }
 
     ir::ExprPtr nonLit = std::move(rhsLit ? e->lhs : e->rhs);
     Type resultType = e->type;
@@ -101,26 +103,26 @@ void simplifyExpr(ir::ExprPtr &e, bool &changed, const std::string &sourceFile) 
     changed = true;
 }
 
-void simplifyStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile) {
+void simplifyStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            for (auto &child : s->body) simplifyStmt(child.get(), changed, sourceFile);
+            for (auto &child : s->body) simplifyStmt(child.get(), changed, sourceFile, verbose);
             return;
         case ir::StmtKind::If:
-            simplifyExpr(s->cond, changed, sourceFile);
-            simplifyStmt(s->thenStmt.get(), changed, sourceFile);
-            simplifyStmt(s->elseStmt.get(), changed, sourceFile);
+            simplifyExpr(s->cond, changed, sourceFile, verbose);
+            simplifyStmt(s->thenStmt.get(), changed, sourceFile, verbose);
+            simplifyStmt(s->elseStmt.get(), changed, sourceFile, verbose);
             return;
         case ir::StmtKind::While:
-            simplifyExpr(s->cond, changed, sourceFile);
-            simplifyStmt(s->loopBody.get(), changed, sourceFile);
-            simplifyStmt(s->postStmt.get(), changed, sourceFile);
+            simplifyExpr(s->cond, changed, sourceFile, verbose);
+            simplifyStmt(s->loopBody.get(), changed, sourceFile, verbose);
+            simplifyStmt(s->postStmt.get(), changed, sourceFile, verbose);
             return;
         case ir::StmtKind::Return:
         case ir::StmtKind::LocalDecl:
         case ir::StmtKind::ExprStmt:
-            simplifyExpr(s->initOrReturnOrExpr, changed, sourceFile);
+            simplifyExpr(s->initOrReturnOrExpr, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::Break:
         case ir::StmtKind::Continue:
@@ -134,9 +136,9 @@ void simplifyStmt(ir::Stmt *s, bool &changed, const std::string &sourceFile) {
 
 }  // namespace
 
-bool AlgebraicSimplification::run(ir::Program &prog, const std::string &sourceFile) const {
+bool AlgebraicSimplification::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
-    for (auto &fb : prog.functionBodies) simplifyStmt(fb.body.get(), changed, sourceFile);
+    for (auto &fb : prog.functionBodies) simplifyStmt(fb.body.get(), changed, sourceFile, verbose);
     return changed;
 }
 

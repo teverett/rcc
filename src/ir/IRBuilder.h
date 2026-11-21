@@ -19,7 +19,10 @@ namespace rcc {
 // `widths` (the backend's TypeWidths) is used only to fold `sizeof` and to
 // compute Local/Param frame layout in real storage units; type-checking
 // itself stays target-independent.
-ir::Program buildIR(const Program &prog, const TypeWidths &widths, bool allowExternal = false);
+// `verbose` enables diagnostic messages about compiler-internal decisions
+// (e.g. auto-nonrecursive marking) that are otherwise silent.
+ir::Program buildIR(const Program &prog, const TypeWidths &widths, bool allowExternal = false,
+                     bool verbose = false);
 
 // Reassigns every Slot::frameOffset/Function::frameSize from the tree's
 // current declaration order. Needed after an optimizer (e.g. LocalCSE)

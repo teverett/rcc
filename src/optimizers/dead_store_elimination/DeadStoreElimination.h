@@ -39,7 +39,7 @@ namespace rcc {
 class DeadStoreElimination : public Optimizer {
    public:
     std::string name() const override { return "dead-store-elimination"; }
-    bool run(ir::Program &prog, const std::string &sourceFile) const override;
+    bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const override;
 };
 
 }  // namespace rcc

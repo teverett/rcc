@@ -14,7 +14,7 @@ namespace rcc {
 class ConstantFolding : public Optimizer {
    public:
     std::string name() const override { return "constant-folding"; }
-    bool run(ir::Program &prog, const std::string &sourceFile) const override;
+    bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const override;
 };
 
 }  // namespace rcc

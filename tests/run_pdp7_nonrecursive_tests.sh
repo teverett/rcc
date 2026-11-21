@@ -105,7 +105,7 @@ int main() {
     return fact(5);
 }
 EOF
-    if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
+    if ! "$RCC" --target=pdp7 --format=asm --optimize --verbose --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
         echo "FAIL test_same_function_without_annotation_keeps_real_frame: fixture failed to compile"
         cat "$dir/log"
         return 1

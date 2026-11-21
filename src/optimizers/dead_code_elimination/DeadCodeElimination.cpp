@@ -94,7 +94,7 @@ bool containsLabel(const ir::Stmt *s) {
 
 // Drops statements after the first `return` in a block and bare `;`
 // statements, then recurses. Pass 1 of 2; see run()'s comment on ordering.
-void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile) {
+void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block: {
@@ -108,8 +108,10 @@ void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile
                         }
                     }
                     if (targetedLater) break;  // a later statement is a jump target - can't truncate past it
-                    std::cerr << sourceFile << ": dce: line " << s->body[i]->line << ": removed "
-                               << (s->body.size() - i - 1) << " statement(s) after `return`\n";
+                    if (verbose) {
+                        std::cerr << sourceFile << ": dce: line " << s->body[i]->line << ": removed "
+                                   << (s->body.size() - i - 1) << " statement(s) after `return`\n";
+                    }
                     s->body.resize(i + 1);
                     changed = true;
                     break;
@@ -120,19 +122,22 @@ void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile
                                            [](const ir::StmtPtr &child) { return child->kind == ir::StmtKind::Empty; }),
                             s->body.end());
             if (s->body.size() != before) {
-                std::cerr << sourceFile << ": dce: removed " << (before - s->body.size()) << " empty statement(s)\n";
+                if (verbose) {
+                    std::cerr << sourceFile << ": dce: removed " << (before - s->body.size())
+                               << " empty statement(s)\n";
+                }
                 changed = true;
             }
-            for (auto &child : s->body) removeUnreachable(child.get(), changed, sourceFile);
+            for (auto &child : s->body) removeUnreachable(child.get(), changed, sourceFile, verbose);
             return;
         }
         case ir::StmtKind::If:
-            removeUnreachable(s->thenStmt.get(), changed, sourceFile);
-            removeUnreachable(s->elseStmt.get(), changed, sourceFile);
+            removeUnreachable(s->thenStmt.get(), changed, sourceFile, verbose);
+            removeUnreachable(s->elseStmt.get(), changed, sourceFile, verbose);
             return;
         case ir::StmtKind::While:
-            removeUnreachable(s->loopBody.get(), changed, sourceFile);
-            removeUnreachable(s->postStmt.get(), changed, sourceFile);
+            removeUnreachable(s->loopBody.get(), changed, sourceFile, verbose);
+            removeUnreachable(s->postStmt.get(), changed, sourceFile, verbose);
             return;
         default:
             return;
@@ -144,7 +149,7 @@ void removeUnreachable(ir::Stmt *s, bool &changed, const std::string &sourceFile
 // `used`, computed after pass 1 so a decl used only from removed
 // unreachable code is correctly treated as dead.
 void removeDeadDecls(ir::Stmt *s, const std::unordered_set<ir::Slot *> &used, bool &changed,
-                       const std::string &sourceFile) {
+                       const std::string &sourceFile, bool verbose) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block: {
@@ -155,30 +160,36 @@ void removeDeadDecls(ir::Stmt *s, const std::unordered_set<ir::Slot *> &used, bo
                     changed = true;
                     bool isArray = child->declSlot->arraySize > 0;
                     if (isArray || !child->initOrReturnOrExpr || !hasSideEffect(child->initOrReturnOrExpr.get())) {
-                        std::cerr << sourceFile << ": dce: line " << child->line << ": removed unused local `"
-                                   << child->declSlot->sourceName << "`\n";
+                        if (verbose) {
+                            std::cerr << sourceFile << ": dce: line " << child->line << ": removed unused local `"
+                                       << child->declSlot->sourceName << "`\n";
+                        }
                         continue;  // drop the declaration entirely
                     }
-                    std::cerr << sourceFile << ": dce: line " << child->line << ": local `" << child->declSlot->sourceName
-                               << "` is unused but its initializer has side effects; kept as an expression statement\n";
+                    if (verbose) {
+                        std::cerr << sourceFile << ": dce: line " << child->line << ": local `"
+                                   << child->declSlot->sourceName
+                                   << "` is unused but its initializer has side effects; kept as an expression "
+                                      "statement\n";
+                    }
                     child->kind = ir::StmtKind::ExprStmt;
                     child->declSlot = nullptr;
                     newBody.push_back(std::move(child));
                     continue;
                 }
-                removeDeadDecls(child.get(), used, changed, sourceFile);
+                removeDeadDecls(child.get(), used, changed, sourceFile, verbose);
                 newBody.push_back(std::move(child));
             }
             s->body = std::move(newBody);
             return;
         }
         case ir::StmtKind::If:
-            removeDeadDecls(s->thenStmt.get(), used, changed, sourceFile);
-            removeDeadDecls(s->elseStmt.get(), used, changed, sourceFile);
+            removeDeadDecls(s->thenStmt.get(), used, changed, sourceFile, verbose);
+            removeDeadDecls(s->elseStmt.get(), used, changed, sourceFile, verbose);
             return;
         case ir::StmtKind::While:
-            removeDeadDecls(s->loopBody.get(), used, changed, sourceFile);
-            removeDeadDecls(s->postStmt.get(), used, changed, sourceFile);
+            removeDeadDecls(s->loopBody.get(), used, changed, sourceFile, verbose);
+            removeDeadDecls(s->postStmt.get(), used, changed, sourceFile, verbose);
             return;
         default:
             return;
@@ -187,17 +198,17 @@ void removeDeadDecls(ir::Stmt *s, const std::unordered_set<ir::Slot *> &used, bo
 
 }  // namespace
 
-bool DeadCodeElimination::run(ir::Program &prog, const std::string &sourceFile) const {
+bool DeadCodeElimination::run(ir::Program &prog, const std::string &sourceFile, bool verbose) const {
     bool changed = false;
     for (auto &fb : prog.functionBodies) {
         // Pass 1 must settle reachability before pass 2 collects uses, or a
         // local referenced only from soon-to-be-removed code would wrongly
         // survive.
-        removeUnreachable(fb.body.get(), changed, sourceFile);
+        removeUnreachable(fb.body.get(), changed, sourceFile, verbose);
 
         std::unordered_set<ir::Slot *> used;
         collectStmtSlots(fb.body.get(), used);
-        removeDeadDecls(fb.body.get(), used, changed, sourceFile);
+        removeDeadDecls(fb.body.get(), used, changed, sourceFile, verbose);
     }
     return changed;
 }

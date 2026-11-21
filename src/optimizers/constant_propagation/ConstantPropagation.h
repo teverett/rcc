@@ -37,7 +37,7 @@ namespace rcc {
 class ConstantPropagation : public Optimizer {
    public:
     std::string name() const override { return "constant-propagation"; }
-    bool run(ir::Program &prog, const std::string &sourceFile) const override;
+    bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const override;
 };
 
 }  // namespace rcc
