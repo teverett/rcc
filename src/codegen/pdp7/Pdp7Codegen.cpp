@@ -1377,6 +1377,17 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Assign: {
             if (e.lhs) {  // slot[idx] = rhs
+                if (auto direct = directElementOperand(e.slot, *e.lhs)) {
+                    // The target address is a compile-time constant
+                    // baked into the store instruction's own operand -
+                    // nothing rhs's own evaluation could do (including
+                    // a nested call) changes it, so there's no address
+                    // to protect across that evaluation the way the
+                    // two branches below both need to.
+                    genExpr(*e.rhs);
+                    emit("dac", *direct);
+                    return;
+                }
                 if (isCallFree(*e.rhs)) {
                     computeElementAddressAC(e.slot, *e.lhs);
                     std::string T = allocTemp();
@@ -1431,6 +1442,10 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::CompoundAssign: {
             if (e.lhs) {  // slot[idx] <op>= rhs (including slot[idx]++/--)
+                if (auto direct = directElementOperand(e.slot, *e.lhs)) {
+                    genCompoundThroughDirectOperand(e, *direct);
+                    return;
+                }
                 if (isCallFree(*e.rhs)) {
                     computeElementAddressAC(e.slot, *e.lhs);
                     genCompoundThroughCell(e);
@@ -1616,6 +1631,43 @@ std::string Pdp7Codegen::genOperandPair(const ir::Expr &lhs, const ir::Expr &rhs
     return cell;
 }
 
+// A Global array's own element address, for a compile-time-constant
+// index, is itself a compile-time constant (the array's link-time
+// address plus a literal offset) - `label+offset` lets the assembler
+// resolve it the same way it resolves any other symbol (confirmed
+// directly: `RccAsm.g4`'s grammar and `Pdp7Assembler.cpp`'s own
+// `evalExpr()` already combine a signed syllable via real addition,
+// not just the unsigned-syllable OR convention), so the element can be
+// read/written with one ordinary memory-reference instruction instead
+// of computing its address at runtime first (`law`+`and`+`tad`, then a
+// separate `dac __addr; lac __addr i` to actually use it). Returns
+// nullopt for anything else - a Local/Param array (genuinely `__fp`-
+// relative, computed fresh every call) or a pointer variable (its
+// base is a runtime VALUE, not its own fixed storage address; see
+// `computeElementAddress()`'s own comment) - where this doesn't apply.
+std::optional<std::string> Pdp7Codegen::directElementOperand(const ir::Slot *slot, const ir::Expr &idxExpr) {
+    if (slot->kind != ir::SlotKind::Global || slot->arraySize <= 0) return std::nullopt;
+    if (idxExpr.kind != ir::ExprKind::IntLit) return std::nullopt;
+    long offset = idxExpr.intValue * widthOfType(slot->type);
+    if (offset == 0) return label(slot);
+    // A leading syllable with no explicit sign combines via OR, not
+    // addition (RccAsm.g4's own "unsigned means OR" default,
+    // Pdp7Assembler.cpp's `char op = syl.sign ? syl.sign : '|';`) -
+    // correct for this backend's own "jmp i F3"-style combination of
+    // disjoint bit ranges, but wrong here: when `slot` is defined in a
+    // different translation unit than this reference (confirmed
+    // directly - this exact shape broke `namei()`'s own real
+    // `dnode[D_NAME+N]`/`inode[...]` accesses against `sys/s8.c`'s
+    // `inode`/`dnode`, both defined in a different file), the
+    // assembler records that OR, not a real add, as the relocation
+    // it hands the linker - silently wrong whenever the real linked
+    // address and the literal offset don't happen to combine cleanly
+    // under OR. An explicit leading '+' makes the relocation (and the
+    // ordinary same-file case, where no relocation is needed at all
+    // and this is a no-op) use real addition instead.
+    return "+" + label(slot) + "+" + std::to_string(offset);
+}
+
 // &slot[idxExpr], pushed on the stack. slot is the array itself when
 // it's a declared array (slot->arraySize > 0); for a plain pointer
 // variable the base address to index from is its value (lac), not
@@ -1651,6 +1703,10 @@ void Pdp7Codegen::computeElementAddressAC(const ir::Slot *slot, const ir::Expr &
 }
 
 void Pdp7Codegen::genIndex(const ir::Expr &e) {
+    if (auto direct = directElementOperand(e.slot, *e.lhs)) {
+        emit("lac", *direct);
+        return;
+    }
     computeElementAddressAC(e.slot, *e.lhs);
     emit("dac", "__addr");
     emit("lac", "__addr i");
@@ -1796,6 +1852,22 @@ void Pdp7Codegen::finishCompoundOp(const ir::Expr &e, const std::string &rhsCell
         return;
     }
     err(e.line, "internal: unhandled compound-assignment operator '" + op + "'");
+}
+
+// Same as genCompoundThroughCell()/genCompoundThroughStackedAddress(),
+// but `operand` is already a direct, non-indirect memory reference
+// (a Global array element at a compile-time-constant address) - no
+// address to stage into a cell or protect across rhs's own
+// evaluation, so this reads and writes it directly.
+void Pdp7Codegen::genCompoundThroughDirectOperand(const ir::Expr &e, const std::string &operand) {
+    genExpr(*e.rhs);
+    std::string rhsCell = prepareCompoundRhs(e);
+    emit("lac", operand);  // AC = old
+    if (e.yieldOld) pushAC();
+    finishCompoundOp(e, rhsCell);
+    narrowAC(e.type);
+    emit("dac", operand);
+    if (e.yieldOld) popAC();
 }
 
 void Pdp7Codegen::genCompoundThroughCell(const ir::Expr &e) {

@@ -195,6 +195,11 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // AC = &slot[idxExpr], without touching the stack unless idxExpr
     // itself calls.
     void computeElementAddressAC(const ir::Slot *slot, const ir::Expr &idxExpr);
+    // `slot[idxExpr]`'s own address, as a direct "label+offset" operand
+    // usable in an ordinary memory-reference instruction - only when
+    // that address is itself a compile-time constant (a Global array,
+    // a literal index). See its own definition for why this is sound.
+    std::optional<std::string> directElementOperand(const ir::Slot *slot, const ir::Expr &idxExpr);
     void genIndex(const ir::Expr &e);       // slot[idx] read
     void genAddrOf(const ir::Expr &operand);  // &slot or &slot[idx]
     void genConvert(const ir::Expr &e);
@@ -230,6 +235,10 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // The same, for a call-free e.rhs: the target address is in AC on
     // entry and is kept in a static temp instead.
     void genCompoundThroughCell(const ir::Expr &e);
+    // The same, when `operand` is already a direct, non-indirect
+    // memory reference (see directElementOperand()) - no address to
+    // stage or protect at all.
+    void genCompoundThroughDirectOperand(const ir::Expr &e, const std::string &operand);
 
     // A Global/Function gets a name-based label (never `id`), since
     // separate compilation gives caller and definer independent `id`
