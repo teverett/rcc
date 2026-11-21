@@ -8,9 +8,9 @@ backend is selected — since every backend-specific decision
 after the IR exists, an optimizer written once benefits every target
 (see `docs/platforms.md` for the full list).
 
-Today there are eleven, run in this order (`src/main.cpp`). Ten implement
-the shared `Optimizer` interface; `AddressHoisting` is the exception (see
-below).
+Today there are thirteen, run in this order (`src/main.cpp`). Twelve
+implement the shared `Optimizer` interface; `AddressHoisting` is the
+exception (see below).
 
 - **`ConstantPropagation`**
   (`src/optimizers/constant_propagation/ConstantPropagation.cpp`) —
@@ -72,6 +72,29 @@ below).
   Helps every target, but especially one like pdp7 with no hardware
   multiply/divide shortcut for small constants.
 
+- **`CompoundAssignRecognition`**
+  (`src/optimizers/compound_assign_recognition/CompoundAssignRecognition.cpp`)
+  — recognizes a compound assignment hand-desugared into its own two
+  separate reads of the same target (`t = t <op> e`, or `*p = *p <op> e`)
+  and rewrites it into the real `CompoundAssign`/`CompoundDerefAssign` IR
+  node, so every backend computes the target's own address/pointer once
+  instead of twice. Only folds the two reads together when they're the
+  exact same side-effect-free expression (a narrow, explicit vocabulary
+  that excludes any `Call` or write), and only keeps the *other* operand
+  as the compound form's new rhs when that operand is itself
+  side-effect-free too — otherwise a call on one side could observe or
+  produce a different value depending on whether it runs before or after
+  the read of the old target value, and the desugared and compound forms
+  aren't free to pick different orders. Self-reference on the `Binary`'s
+  left operand folds for any op; on the right, only for a commutative op
+  (`t = e - t` is *not* `t -= e`, but `t = e + t` is `t += e`). Never
+  rewrites a `Long`/`LongLong` target, since this pass runs once,
+  backend-independently, with no target width to check a given backend's
+  own notion of "wide" against. Runs after `AlgebraicSimplification`,
+  before `LocalCSE`, so a hand-desugared `t = t <op> e` this pass folds
+  looks like one compound op to every later canonicalization-sensitive
+  pass, not two independent reads of `t`.
+
 - **`LocalCSE`** (`src/optimizers/local_cse/LocalCSE.cpp`) — simple local
   common-subexpression elimination / redundant-load elimination:
   purely syntactic (not flow-sensitive) matching of identical
@@ -130,6 +153,24 @@ below).
   enough that two sequential loops in one function reusing the same
   counter variable disqualify each other, since each sees the other's
   init/increment as an unrelated write.
+
+- **`GuardNonNegative`**
+  (`src/optimizers/guard_nonneg/GuardNonNegative.cpp`) — proves
+  non-negativity across an early-narrowing guard: a value that isn't a
+  loop induction variable at all, but is only ever used after a dominating
+  `if (slot >= 0) { ...uses of slot... }` (or `> 0`/`0 <= slot`/`0 <
+  slot`, any operand order) that the rest of the function never escapes
+  with a possibly-negative `slot`. Rather than real dominance analysis,
+  stays sound the same narrow way `InductionNonNegative` does: requires
+  every read of `slot` in the function (other than the one inside the
+  guard's own condition) to lie textually inside that one `If`'s
+  then-branch, and requires `slot` to have at most one write in the whole
+  function - a `Param`'s implicit binding, or a `Local`'s own initializer
+  - with no `&slot` taken anywhere. Marks the same `knownNonNegative` flag
+  (`ir/IR.h`) `InductionNonNegative` does. Runs after `InductionNonNegative`
+  so a slot it already proved non-negative is skipped here too; the two
+  passes recognize disjoint idioms, so ordering between them otherwise
+  doesn't matter.
 
 - **`DeadStoreElimination`**
   (`src/optimizers/dead_store_elimination/DeadStoreElimination.cpp`) —

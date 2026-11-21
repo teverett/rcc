@@ -40,6 +40,7 @@
 #include "optimizers/address_hoisting/AddressHoisting.h"
 #include "optimizers/algebraic_simplification/AlgebraicSimplification.h"
 #include "optimizers/constant_condition_elimination/ConstantConditionElimination.h"
+#include "optimizers/compound_assign_recognition/CompoundAssignRecognition.h"
 #include "optimizers/constant_folding/ConstantFolding.h"
 #include "optimizers/constant_propagation/ConstantPropagation.h"
 #include "optimizers/dead_code_elimination/DeadCodeElimination.h"
@@ -544,6 +545,12 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // a literal, so ordering after constant folding loses nothing.
         rcc::AlgebraicSimplification algsimp;
         algsimp.run(irProg, srcPath);
+        // After AlgebraicSimplification, before LocalCSE, for the same
+        // canonicalization reason: a hand-desugared `t = t <op> e` this
+        // pass folds into `t <op>= e` should look that way to every pass
+        // below, not like two independent reads of `t`.
+        rcc::CompoundAssignRecognition car;
+        car.run(irProg, srcPath);
         // Local CSE after the above so it matches each pass's canonicalized
         // form (e.g. a strength-reduced `x << 1`, not the original `x * 2`).
         rcc::LocalCSE cse;
