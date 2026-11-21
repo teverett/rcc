@@ -3,6 +3,39 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## PDP-7 leaf param binding's autoindex-register use is only safe under one caller's own current setup, not in general
+
+Affects `src/codegen/pdp7/Pdp7Codegen.cpp`'s `emitLeafParamBinding()`:
+every leaf function's own parameter-fetch prologue stages `__sp` into
+PDP-7 hardware autoindex register 15 (decimal) and reads each param
+through it in order (2 words/param instead of 5, via the register's
+own auto-increment). This is sound only because, in UnixV0-C (the only
+real user of this backend's leaf path at scale today), every call
+chain that could be interrupted mid-prologue is reached either through
+a real CAL-trap entry - which saves away every one of the user's own
+autoindex registers (8-15) before any kernel C code runs, see that
+project's own `src-assem/sys/s1_c_vectors.s` - or before any user
+context exists at all (cold boot); and the clock interrupt handler
+(`src-assem/sys/s7.s`'s `pibreak`) never itself references registers
+8-15, confirmed directly, not assumed.
+
+**The precondition this relies on**: nothing reachable from an
+interrupt can call into `rcc`-compiled C code that ALSO uses this same
+register for its own param-binding prologue while a different,
+already-interrupted use of it is still in flight (one prologue's burst
+getting clobbered mid-way by a second, nested one). Confirmed true
+today only because UnixV0-C's own interrupt-reachable code
+(`ttyrestart` and the rest of the `pibreak` chain) is still entirely
+hand-written assembly, never ported to `src-c`. **If any
+interrupt-reachable code is ever ported to C**, or if any other
+project links PDP-7 C code where some caller's own register 8-15 isn't
+guaranteed free across every call reachable from an interrupt, this
+exact register reuse becomes unsafe again, the same way `pcc`'s own
+`__addr` scratch cell once silently collided with this same register
+range at `--base=0` (see UnixV0-C's own `dsktrans_data_break_self_overlap`
+writeup). Re-verify this precondition before porting any further
+interrupt-reachable code to C.
+
 ## No verified M32C simulator/emulator is wired into `tests/run_tests.sh`
 
 Affects `tests/run_tests.sh`'s `check_m32c()`. No pip-installable Python M32C

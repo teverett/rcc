@@ -18,6 +18,17 @@ namespace {
 // rather than a signed decimal string.
 long pdp7Word(long v) { return v & 0777777; }
 
+// Decimal 15 (octal 17), the highest-numbered PDP-7 hardware autoindex
+// register: any *indirect* reference to a word address in [8,15]
+// (octal [10,17]) auto-increments it as a CPU side effect
+// (grammar/rccasm/RccAsm.g4's NUMBER token is plain decimal, so this
+// must stay written in decimal everywhere it's emitted, not as "17").
+// `emitLeafParamBinding()` is the only place this backend ever
+// deliberately uses it - see docs/known-bugs.md's own guard entry on
+// why that's safe only under UnixV0-C's current CAL-trap/interrupt
+// setup, not in general.
+const char *kParamCursorReg = "15";
+
 // See Pdp7Codegen.h's "Leaf fast path" comment. `exprMakesCall` walks
 // every sub-expression a Call/CallPtr could be hiding in;
 // `stmtRulesOutLeaf` adds the other disqualifier (a Local/Param
@@ -427,16 +438,38 @@ void Pdp7Codegen::emitEpilogueAndReturn(bool hasValue, Type retType) {
 }
 
 void Pdp7Codegen::emitLeafParamBinding(const ir::Function *fn) {
+    if (fn->params.empty()) return;
     // Params sit on the stack at entry, closest-first (Param 0 pushed
     // last by the caller), so Param k is at `__sp+k` - read without
     // advancing `__sp`, since the caller's own post-call cleanup
     // unconditionally reclaims every argument it pushed regardless of
     // whether the callee was a leaf.
+    //
+    // Rather than recomputing `__sp+k` from scratch for every k (`lac
+    // __sp; tad k; dac __addr; lac __addr i`, 4 words each - the same
+    // cost for every k regardless of how many params came before),
+    // stage `__sp` itself into the one PDP-7 hardware autoindex
+    // register this backend ever uses for this (kParamCursorReg - see
+    // its own comment) and read every param through it in increasing
+    // index order: `fn->params` is already built index-ascending with
+    // no gaps (IRBuilder.cpp sets `p->paramIndex` from the same loop
+    // index it pushes params in), so each indirect read both fetches
+    // Param k and advances the register to Param (k+1)'s own address
+    // for free, as a CPU side effect of referencing it indirectly.
+    // After the one-time staging, each param costs only `lac <reg>
+    // i; dac <local>` - 2 words instead of 5.
+    //
+    // This hardware autoindex register increments BEFORE the fetch it
+    // gates (confirmed directly against the real simulator, not
+    // assumed from the PDP-8-family lineage docs: staging `__sp`
+    // itself and reading made every param come out as its own
+    // successor's value), so it's staged one below `__sp` - the first
+    // pre-increment then lands exactly on Param 0's own address.
+    emit("lac", "__sp");
+    emit("tad", "__mone");
+    emit("dac", kParamCursorReg);
     for (ir::Slot *p : fn->params) {
-        emit("lac", "__sp");
-        emit("tad", literalLabel(p->paramIndex));
-        emit("dac", "__addr");
-        emit("lac", "__addr i");
+        emit("lac", std::string(kParamCursorReg) + " i");
         trailer_.push_back(leafLabel(p) + ": 0");
         emit("dac", leafLabel(p));
     }
