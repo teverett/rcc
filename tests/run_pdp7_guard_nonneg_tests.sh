@@ -71,8 +71,11 @@ EOF
     local smaCount
     smaCount="$(grep -c 'sma' "$dir/t.s")"
     if [ "$smaCount" -ne 2 ]; then
-        echo "FAIL test_guarded_use_skips_outer_sign_check: expected exactly 2 'sma' (the inner" \
-             "comparison's own outer sign check on \`x\` should be gone), found $smaCount"
+        echo "FAIL test_guarded_use_skips_outer_sign_check: expected exactly 2 'sma' (the outer" \
+             "\`x >= 0\` guard is a literal-zero comparison, always 1 'sma' via" \
+             "Pdp7Codegen.cpp's own bIsZero fast path regardless of this pass; the inner" \
+             "comparison's own SEPARATE sign check on \`x\` is the one this pass removes," \
+             "leaving just its 1-'sma' subtract), found $smaCount"
         return 1
     fi
     echo "PASS test_guarded_use_skips_outer_sign_check (2 occurrences of 'sma', diagnostic present)"
@@ -109,12 +112,14 @@ EOF
     fi
     local smaCount
     smaCount="$(grep -c 'sma' "$dir/t.s")"
-    if [ "$smaCount" -ne 4 ]; then
-        echo "FAIL test_use_outside_guard_keeps_outer_sign_check: expected the original 4 'sma'" \
-             "occurrences (unsafe to drop the outer sign check), found $smaCount"
+    if [ "$smaCount" -ne 3 ]; then
+        echo "FAIL test_use_outside_guard_keeps_outer_sign_check: expected 3 'sma' occurrences" \
+             "(unsafe to drop the INNER sign check on \`x\` - the outer \`x >= 0\` guard's own" \
+             "check collapses to 1 'sma' regardless, via Pdp7Codegen.cpp's bIsZero fast path)," \
+             "found $smaCount"
         return 1
     fi
-    echo "PASS test_use_outside_guard_keeps_outer_sign_check (4 occurrences of 'sma', no diagnostic)"
+    echo "PASS test_use_outside_guard_keeps_outer_sign_check (3 occurrences of 'sma', no diagnostic)"
     return 0
 }
 
@@ -149,12 +154,14 @@ EOF
     fi
     local smaCount
     smaCount="$(grep -c 'sma' "$dir/t.s")"
-    if [ "$smaCount" -ne 4 ]; then
-        echo "FAIL test_address_taken_keeps_outer_sign_check: expected the original 4 'sma'" \
-             "occurrences (unsafe to drop the outer sign check), found $smaCount"
+    if [ "$smaCount" -ne 3 ]; then
+        echo "FAIL test_address_taken_keeps_outer_sign_check: expected 3 'sma' occurrences" \
+             "(unsafe to drop the INNER sign check on \`x\` - the outer \`x >= 0\` guard's own" \
+             "check collapses to 1 'sma' regardless, via Pdp7Codegen.cpp's bIsZero fast path)," \
+             "found $smaCount"
         return 1
     fi
-    echo "PASS test_address_taken_keeps_outer_sign_check (4 occurrences of 'sma', no diagnostic)"
+    echo "PASS test_address_taken_keeps_outer_sign_check (3 occurrences of 'sma', no diagnostic)"
     return 0
 }
 
@@ -190,12 +197,14 @@ EOF
     fi
     local smaCount
     smaCount="$(grep -c 'sma' "$dir/t.s")"
-    if [ "$smaCount" -ne 4 ]; then
-        echo "FAIL test_else_branch_read_keeps_outer_sign_check: expected the original 4 'sma'" \
-             "occurrences (unsafe to drop the outer sign check), found $smaCount"
+    if [ "$smaCount" -ne 3 ]; then
+        echo "FAIL test_else_branch_read_keeps_outer_sign_check: expected 3 'sma' occurrences" \
+             "(unsafe to drop the INNER sign check on \`x\` - the outer \`x >= 0\` guard's own" \
+             "check collapses to 1 'sma' regardless, via Pdp7Codegen.cpp's bIsZero fast path)," \
+             "found $smaCount"
         return 1
     fi
-    echo "PASS test_else_branch_read_keeps_outer_sign_check (4 occurrences of 'sma', no diagnostic)"
+    echo "PASS test_else_branch_read_keeps_outer_sign_check (3 occurrences of 'sma', no diagnostic)"
     return 0
 }
 

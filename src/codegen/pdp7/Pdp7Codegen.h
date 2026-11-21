@@ -76,9 +76,15 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // of negating B's cell at runtime (`cma`/`tad __one`/`dac`), the
     // same "add a precomputed negative literal" idiom narrowAC() etc.
     // already use elsewhere in this file.
+    // `bIsZero`: B is the exact compile-time value 0 (in the already-
+    // flipped, post-unsignedCmp space) - then A<B is A<0, a pure sign
+    // test on A alone with no subtraction ever needed, regardless of
+    // whether A's own sign is separately known (`signA`). Checked
+    // first, ahead of every other dispatch below, since it fully
+    // decides the branch by itself.
     void emitSignedLtCells(const std::string &A, const std::string &B, const std::string &Ltrue,
                             const std::string &Lfalse, int signA = -1, int signB = -1,
-                            const std::string &negB = "");
+                            const std::string &negB = "", bool bIsZero = false);
     // Evaluates both sides of a relational comparison into cells for
     // emitSignedLtCells() (sign bits flipped first for an unsigned
     // comparison, mapping unsigned order onto signed order), setting
@@ -86,8 +92,11 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // compile time. `negB`, when non-null, is set to a literal cell
     // holding -B when B is itself a compile-time constant (see
     // emitSignedLtCells's own comment), left empty otherwise.
+    // `bIsZero`, when non-null, is set to whether B is that same
+    // compile-time constant and its value is exactly 0.
     void genCompareCells(const ir::Expr &a, const ir::Expr &b, bool unsignedCmp, std::string &A,
-                         std::string &B, int &signA, int &signB, std::string *negB = nullptr);
+                         std::string &B, int &signA, int &signB, std::string *negB = nullptr,
+                         bool *bIsZero = nullptr);
     void genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs);
     void genLogicalOr(const ir::Expr &lhs, const ir::Expr &rhs);
     void genLogicalNot(const ir::Expr &rhs);

@@ -22,7 +22,7 @@ std::string ListFormatWriter::write(const ObjectFile &obj) const {
     for (const ObjSymbol *sym : syms) {
         // Code symbol values are relative to .text start; data symbol values are already absolute.
         uint32_t addr = sym->isData ? sym->value : obj.base + sym->value;
-        std::snprintf(buf, sizeof(buf), "%-8.8s %#06o", sym->name.c_str(), addr & 0777777);
+        std::snprintf(buf, sizeof(buf), "%-30.30s %#06o", sym->name.c_str(), addr & 0777777);
         out << buf << "\n";
     }
     return out.str();

@@ -110,6 +110,29 @@ bool stmtHasCall(const ir::Stmt *s) {
     if (stmtHasCall(s->postStmt.get())) return true;
     return false;
 }
+
+// Conservative "every path through this statement already returns"
+// check: a Block falls through iff its own last statement does (an
+// earlier Return makes everything after it dead code, a separate
+// concern this doesn't need to catch), an If needs BOTH arms to
+// return (no `else` always falls through), and a loop/anything else
+// is never assumed to - this only needs to catch the common,
+// provably-safe case (a function whose last top-level statement is a
+// Return, directly or through an if/else), not every real path
+// control flow could take.
+bool stmtAlwaysReturns(const ir::Stmt *s) {
+    if (!s) return false;
+    switch (s->kind) {
+        case ir::StmtKind::Return:
+            return true;
+        case ir::StmtKind::Block:
+            return !s->body.empty() && stmtAlwaysReturns(s->body.back().get());
+        case ir::StmtKind::If:
+            return s->elseStmt && stmtAlwaysReturns(s->thenStmt.get()) && stmtAlwaysReturns(s->elseStmt.get());
+        default:
+            return false;
+    }
+}
 }  // namespace
 
 bool Pdp7Codegen::computeIsLeaf(const ir::Function *fn, const ir::Stmt *body) {
@@ -350,8 +373,9 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
         emitLeafParamBinding(fn.func);
         genStmt(*fn.body);
         // Default return if the body doesn't return on every path;
-        // dead code otherwise.
-        emitLeafReturn(/*hasValue=*/false);
+        // skipped as dead code when stmtAlwaysReturns() can already
+        // prove every path through the body returns on its own.
+        if (!stmtAlwaysReturns(fn.body.get())) emitLeafReturn(/*hasValue=*/false);
     } else {
         emitPrologue(fn.func);
         // A qualifying 'register'/'const' Param's cell starts empty -
@@ -369,7 +393,12 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
             emit("dac", leafLabel(p));
         }
         genStmt(*fn.body);
-        emitEpilogueAndReturn(/*hasValue=*/false, Type{});
+        // Same dead-code skip as the leaf path above, for the full
+        // frame-based epilogue (7 words here, not 1 - every function
+        // with an `asm{}` block anywhere in it, a recursive call, or a
+        // wide/array/struct local takes this path, so this matters
+        // more here than in the leaf case).
+        if (!stmtAlwaysReturns(fn.body.get())) emitEpilogueAndReturn(/*hasValue=*/false, Type{});
     }
 }
 
@@ -1974,7 +2003,28 @@ void Pdp7Codegen::emitEq(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
 }
 
 void Pdp7Codegen::emitSignedLtCells(const std::string &A, const std::string &B, const std::string &Ltrue,
-                                     const std::string &Lfalse, int signA, int signB, const std::string &negB) {
+                                     const std::string &Lfalse, int signA, int signB, const std::string &negB,
+                                     bool bIsZero) {
+    // A<0 is a pure sign test on A, independent of B entirely (any
+    // "same-sign subtract" of A-0 would just re-derive A's own sign a
+    // second time) - skips the whole dispatch/subtract machinery
+    // below. Always does the real runtime test on A, even when signA
+    // claims a known sign: unlike every other dispatch in this
+    // function (which only ever uses a known sign to skip a
+    // *redundant* pre-check ahead of a subtraction that still reads
+    // A/B live), this is the one case where the "redundant" pre-check
+    // and the real check are the exact same instruction - fully
+    // trusting signA here would mean trusting it with NO live check
+    // left at all, which a provability bug upstream (a slot wrongly
+    // marked knownNonNegative) could turn into a silent wrong answer
+    // instead of just a missed optimization.
+    if (bIsZero) {
+        emit("lac", A);
+        emit("sma");
+        emit("jmp", Lfalse);
+        emit("jmp", Ltrue);
+        return;
+    }
     // Neither operand's sign is known: the inline sequence below would
     // need both of signA's dispatch arms *and* B's own sign dispatch on
     // each of them (branchOnB() can't shortcut when signB == -1 either)
@@ -2079,19 +2129,19 @@ void Pdp7Codegen::emitSignedLtCells(const std::string &A, const std::string &B, 
 }
 
 void Pdp7Codegen::genCompareCells(const ir::Expr &a, const ir::Expr &b, bool unsignedCmp, std::string &A,
-                                  std::string &B, int &signA, int &signB, std::string *negB) {
+                                  std::string &B, int &signA, int &signB, std::string *negB, bool *bIsZero) {
     signA = signB = -1;
+    if (bIsZero) *bIsZero = false;
     // B ends up as a literal cell (below) exactly when `b` is itself a
     // compile-time constant - precompute its negation the same way, so
     // emitSignedLtCells()'s same-sign subtract can add it directly
     // instead of negating B's cell at runtime.
-    if (negB) {
-        negB->clear();
-        if (b.kind == ir::ExprKind::IntLit) {
-            long w = pdp7Word(b.intValue);
-            if (unsignedCmp) w ^= 0400000L;
-            *negB = literalLabel(-w);
-        }
+    if (negB) negB->clear();
+    if (b.kind == ir::ExprKind::IntLit) {
+        long w = pdp7Word(b.intValue);
+        if (unsignedCmp) w ^= 0400000L;
+        if (negB) *negB = literalLabel(-w);
+        if (bIsZero) *bIsZero = (w == 0);
     }
     auto flip = [&]() {
         if (unsignedCmp) emit("xor", literalLabel(0400000L));
@@ -2191,9 +2241,10 @@ void Pdp7Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
     // operands at opposite extremes, which a naive subtract overflows.
     std::string A, B, negB;
     int signA, signB;
-    genCompareCells(lhs, rhs, lhs.type.isUnsigned, A, B, signA, signB, &negB);
+    bool bIsZero;
+    genCompareCells(lhs, rhs, lhs.type.isUnsigned, A, B, signA, signB, &negB, &bIsZero);
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel();
-    emitSignedLtCells(A, B, Ltrue, Lfalse, signA, signB, negB);
+    emitSignedLtCells(A, B, Ltrue, Lfalse, signA, signB, negB, bIsZero);
     emitLabel(Ltrue);
     emit("lac", "__one");
     emit("jmp", Ldone);
@@ -2234,15 +2285,16 @@ void Pdp7Codegen::genCondBranch(const ir::Expr &cond, const std::string &Lfalse)
             if (op == ">" || op == "<=") std::swap(a, b);
             std::string A, B, negB;
             int signA, signB;
-            genCompareCells(*a, *b, a->type.isUnsigned, A, B, signA, signB, &negB);
+            bool bIsZero;
+            genCompareCells(*a, *b, a->type.isUnsigned, A, B, signA, signB, &negB, &bIsZero);
             // emitSignedLtCells() tests A<B directly; negate just
             // picks which outcome continues to Lfalse.
             std::string Ltrue = newLabel();
             if (!negate) {
-                emitSignedLtCells(A, B, Ltrue, Lfalse, signA, signB, negB);
+                emitSignedLtCells(A, B, Ltrue, Lfalse, signA, signB, negB, bIsZero);
                 emitLabel(Ltrue);
             } else {
-                emitSignedLtCells(A, B, Lfalse, Ltrue, signA, signB, negB);
+                emitSignedLtCells(A, B, Lfalse, Ltrue, signA, signB, negB, bIsZero);
                 emitLabel(Ltrue);
             }
             return;
