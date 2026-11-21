@@ -1896,13 +1896,24 @@ void Pdp7Codegen::emitSignedLtCells(const std::string &A, const std::string &B, 
     }
     std::string Lsub = newLabel();
     bool subUsed = false;
+    // What `branchOnB(ifNonNeg, ifNeg)` below would jump to, when B's sign
+    // is statically known (signB == 0 or 1): a pure function of its two
+    // arguments and signB, with no runtime component at all. A caller that
+    // would otherwise jump to a label whose entire body is this one
+    // collapsed `jmp` can use this to jump straight to the real target
+    // instead, skipping that label (and the two instructions needed to
+    // reach it) entirely.
+    auto resolvedBranchOnB = [&](const std::string &ifNonNeg,
+                                  const std::string &ifNeg) -> std::optional<std::string> {
+        if (ifNonNeg == Lsub || ifNeg == Lsub) subUsed = true;
+        if (signB == 0) return ifNonNeg;
+        if (signB == 1) return ifNeg;
+        return std::nullopt;
+    };
     // Jumps to `ifNonNeg`/`ifNeg` on B's sign.
     auto branchOnB = [&](const std::string &ifNonNeg, const std::string &ifNeg) {
-        if (ifNonNeg == Lsub || ifNeg == Lsub) subUsed = true;
-        if (signB == 0) {
-            emit("jmp", ifNonNeg);
-        } else if (signB == 1) {
-            emit("jmp", ifNeg);
+        if (auto direct = resolvedBranchOnB(ifNonNeg, ifNeg)) {
+            emit("jmp", *direct);
         } else {
             emit("lac", B);
             emit("sma");
@@ -1916,15 +1927,30 @@ void Pdp7Codegen::emitSignedLtCells(const std::string &A, const std::string &B, 
     } else if (signA == 0) {
         branchOnB(Lsub, Lfalse);
     } else {
-        std::string LaNeg = newLabel(), LaPos = newLabel();
+        // Resolve both arms before emitting A's own sign dispatch: when
+        // signB is known, both resolve (resolution depends only on signB,
+        // not on which arm), so neither LaNeg nor LaPos - and the relay
+        // jump each would otherwise be - is ever created; A's dispatch
+        // jumps straight to the real destination. When signB is unknown,
+        // neither resolves and this falls back to the original two-label
+        // relay form, since branchOnB genuinely needs B's own runtime sign
+        // check in that case.
+        std::optional<std::string> direct1 = resolvedBranchOnB(Ltrue, Lsub);
+        std::optional<std::string> direct2 = resolvedBranchOnB(Lsub, Lfalse);
+        std::string LaNeg = direct1 ? std::string() : newLabel();
+        std::string LaPos = direct2 ? std::string() : newLabel();
         emit("lac", A);
         emit("sma");
-        emit("jmp", LaPos);
-        emit("jmp", LaNeg);
-        emitLabel(LaNeg);
-        branchOnB(Ltrue, Lsub);
-        emitLabel(LaPos);
-        branchOnB(Lsub, Lfalse);
+        emit("jmp", direct2 ? *direct2 : LaPos);
+        emit("jmp", direct1 ? *direct1 : LaNeg);
+        if (!direct1) {
+            emitLabel(LaNeg);
+            branchOnB(Ltrue, Lsub);
+        }
+        if (!direct2) {
+            emitLabel(LaPos);
+            branchOnB(Lsub, Lfalse);
+        }
     }
     if (!subUsed) return;
     emitLabel(Lsub);
