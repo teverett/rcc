@@ -1,7 +1,7 @@
 # pascal-vex
 
 The Pascal-frontend analog of `../basic-vex/main.bas` (parsed by `src/frontend/pascal/
-PascalFrontend.cpp` - see `docs/pascal-language.md`), running on Vex (an 8-register, 32-bit
+PascalFrontend.cpp` - see `docs/pascal-language.md`), running on Vex (a 9-register, 32-bit
 register machine): sums 1 to 10 with a `for` loop, doubles the result through a `var` parameter
 (`DoubleIt`), and `writeln`s both along the way, via `src/rt/vex/pascal_vex.c`'s implementation
 of the runtime calls `write`/`writeln` lower to (`__pascal_write_int`/`__pascal_write_str`/

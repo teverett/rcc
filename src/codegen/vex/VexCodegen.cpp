@@ -80,7 +80,7 @@ std::string VexCodegen::generate(const ir::Program &prog, bool objectMode) {
         emitLabel("_start");
         ldiNum(5, kVexStackTop);
         calTo(label(mainFn));
-        // Normal halt (this final `ret` pops the zero word below RS_TOP, never written by
+        // Normal halt (this final `ret` pops the zero word below SP_RESET, never written by
         // anything - docs/SPEC.md section 3's own "Why RET halts on a popped zero") - see
         // VexCodegen.h's own class comment for why this, not an explicit DEO-to-port-0, is this
         // backend's entry convention.

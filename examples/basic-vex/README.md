@@ -2,7 +2,7 @@
 
 The same BASIC program as `../basic-6502-dos33/main.bas` (parsed by `src/frontend/basic/
 BasicFrontend.cpp` - see `docs/basic-language.md`), running on Vex (`/Users/tom/projects/vex`, an
-8-register, 32-bit register machine) instead of the Apple ][: sums 1 to 10 with a `FOR`/`NEXT`
+9-register, 32-bit register machine) instead of the Apple ][: sums 1 to 10 with a `FOR`/`NEXT`
 loop, doubles the result via `GOSUB`/`RETURN`, and `PRINT`s both along the way, via
 `src/rt/vex/basic_vex.c`'s implementation of the runtime calls PRINT lowers to
 (`__basic_print_int`/`__basic_print_str`/`__basic_print_newline`), themselves built on

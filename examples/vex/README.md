@@ -1,6 +1,6 @@
 # vex
 
-A "hello world" for Vex (`/Users/tom/projects/vex`), an 8-register, 32-bit register machine:
+A "hello world" for Vex (`/Users/tom/projects/vex`), a 9-register, 32-bit register machine:
 prints `Hello, Vex!` via `vex_puts()` (see `src/rt/vex/vex.h`), which writes it to standard
 output one byte at a time through the machine's own console device (`DEO` to port `0x18`).
 

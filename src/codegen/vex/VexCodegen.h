@@ -13,27 +13,28 @@
 namespace rcc {
 
 // Generates vex assembly (see VexAssembler.h) for the IR built by IRBuilder. Vex
-// (/Users/tom/projects/vex) is v1.3: an 8-register (R0-R7), 32-bit register machine - no
+// (/Users/tom/projects/vex) is v1.4: a 9-register (R0-R8), 32-bit register machine - no
 // dedicated data stack, no stack-relative addressing mode at all; the one return stack
 // holds return addresses (CAL pushes, RET pops), PSH/POP scratch values, and interrupt
 // entry/IRET's saved PC, all sharing the same region of ordinary memory, addressed
-// through RS - a register of its own, readable/settable with GSP/SSP (see docs/SPEC.md
-// section 1/7). This backend therefore looks like every other small-register-file
-// target here (see M6809Codegen.h/MipsCodegen.h-style backends), not like a stack-
-// machine port: a register holds one live value, and a *separate*, backend-owned
-// software stack (synthesized from LD/ST through R5 as this backend's own stack
-// pointer - see "Stack frame" below) is the real spill area for anything beyond what a
-// handful of named registers can hold live at once. Ordinary C codegen never emits
-// PSH/POP/GSP/SSP itself: C has no notion of an interrupt handler or scheduler to
-// save/restore registers or redirect RS around, and routing arbitrarily deep
-// expression-spilling or call-frame storage through the one return stack instead of
-// this backend's own, separate one would risk exactly the "unbalanced PSH left on the
-// stack corrupts a later RET" hazard docs/SPEC.md's own "Stack" section describes - for
-// no benefit, since nothing here is bounded by call depth the way CAL/RET's own use of
-// that stack already is. PSH/POP/IRET/SEI/CLI/GSP/SSP are
-// still real, assembler-level instructions (VexAssembler.h) available from an `asm { }`
-// block, for a hand-written interrupt handler or scheduler in the style docs/SPEC.md
-// section 4's "Preemptive multitasking" describes - just never generated for ordinary C.
+// through R8 - an ordinary register, read and redirected with MOV/LD/ST/arithmetic
+// exactly like R0-R7, with no separate GSP/SSP opcode (see docs/SPEC.md section 1/7).
+// This backend therefore looks like every other small-register-file target here (see
+// M6809Codegen.h/MipsCodegen.h-style backends), not like a stack-machine port: a
+// register holds one live value, and a *separate*, backend-owned software stack
+// (synthesized from LD/ST through R5 as this backend's own stack pointer - see "Stack
+// frame" below) is the real spill area for anything beyond what a handful of named
+// registers can hold live at once. Ordinary C codegen never emits PSH/POP/R8 itself: C
+// has no notion of an interrupt handler or scheduler to save/restore registers or
+// redirect R8 around, and routing arbitrarily deep expression-spilling or call-frame
+// storage through the one return stack instead of this backend's own, separate one
+// would risk exactly the "unbalanced PSH left on the stack corrupts a later RET" hazard
+// docs/SPEC.md's own "Stack" section describes - for no benefit, since nothing here is
+// bounded by call depth the way CAL/RET's own use of that stack already is. PSH/POP/
+// IRET/SEI/CLI are still real, assembler-level instructions (VexAssembler.h) available
+// from an `asm { }` block, for a hand-written interrupt handler or scheduler in the
+// style docs/SPEC.md section 4's "Preemptive multitasking" describes - just never
+// generated for ordinary C.
 //
 // --- Register convention -------------------------------------------------
 //

@@ -11,7 +11,7 @@
  *
  * Usage: vex [-t] [-d] [-s steps] [-i] [-I period] [-n count] program.rom
  *   -t        trace every instruction to stderr
- *   -d        dump the final registers and return stack to stderr
+ *   -d        dump the final registers (including SP, R8) to stderr
  *   -s N      stop with status 3 after N instructions (0 = unlimited)
  *   -i        raise the maskable interrupt every IRQ_PERIOD_MS milliseconds
  *             of wall-clock time (off by default)
@@ -71,16 +71,16 @@ static double now_ms(void)
 
 #define MEM_SIZE  UINT64_C(0x100000000)
 #define LOAD_ADDR 0x0100
-#define NREGS     8
+#define NREGS     9
+#define SP        8   /* R8: the stack pointer (docs/SPEC.md section 1) */
 
-/* RS (the return-stack pointer, docs/SPEC.md section 1) starts here and
- * grows downward through ordinary memory, exactly like rcc's own R5/SP
- * convention (VexCodegen.h's kVexStackTop, 0x01000000) - a different,
- * comfortably separated region so the two never collide under normal
- * use. mem is calloc'd (see main()), so the word at RS_TOP is already
- * zero without any extra setup - see OP_RET's own comment for why that
- * matters. */
-#define RS_TOP 0x00800000
+/* R8/SP starts here and grows downward through ordinary memory, exactly
+ * like rcc's own R5/SP convention (VexCodegen.h's kVexStackTop,
+ * 0x01000000) - a different, comfortably separated region so the two
+ * never collide under normal use. mem is calloc'd (see main()), so the
+ * word at SP_RESET is already zero without any extra setup - see
+ * OP_RET's own comment for why that matters. */
+#define SP_RESET 0x00800000
 
 /* Interrupt vectors: fixed memory words below LOAD_ADDR (free memory, docs/SPEC.md
  * section 1), read once per interrupt delivery - see docs/SPEC.md section 3,
@@ -101,27 +101,25 @@ enum {
     OP_RET, OP_LDI, OP_MOV, OP_LD, OP_ST, OP_DEI, OP_DEO, OP_JMP, OP_JCN, OP_CAL,
     OP_ADD, OP_SUB, OP_MUL, OP_DIV, OP_AND, OP_ORA, OP_XOR,
     OP_CEQ, OP_CLT, OP_NOP, OP_PSH, OP_POP, OP_IRET, OP_SEI, OP_CLI, OP_HLT,
-    OP_GSP, OP_SSP,
     OP_COUNT
 };
 
 /* total instruction length in bytes, including the opcode byte itself */
 static const uint8_t OPLEN[OP_COUNT] = {
-    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 2, 2, 1, 1, 1, 1, 2, 2
+    1, 6, 3, 3, 3, 3, 3, 2, 3, 2, 4, 4, 4, 4, 4, 4, 4, 4, 4, 1, 2, 2, 1, 1, 1, 1
 };
 
 static const char *const OPNAME[OP_COUNT] = {
     "RET", "LDI", "MOV", "LD", "ST", "DEI", "DEO", "JMP", "JCN", "CAL",
     "ADD", "SUB", "MUL", "DIV", "AND", "ORA", "XOR", "CEQ", "CLT", "NOP",
-    "PSH", "POP", "IRET", "SEI", "CLI", "HLT", "GSP", "SSP"
+    "PSH", "POP", "IRET", "SEI", "CLI", "HLT"
 };
 
 typedef struct {
     uint8_t *mem;    /* MEM_SIZE bytes, heap-allocated - see main() */
-    uint32_t rs;     /* return-stack pointer (docs/SPEC.md section 1) - an
-                       * ordinary address into mem, read/written by GSP/SSP;
-                       * grows downward, like R5 (see RS_TOP above) */
-    uint32_t regs[NREGS];
+    uint32_t regs[NREGS];   /* R0-R7 general-purpose, R8 (SP) the stack
+                               pointer - an ordinary address into mem,
+                               grows downward (see SP_RESET above) */
     uint32_t pc;     /* address of the next instruction */
     uint32_t ipc;    /* address of the instruction being executed */
     int halted;
@@ -176,25 +174,25 @@ static void mwr(VM *m, uint32_t addr, uint32_t v, int n)
     }
 }
 
-/* ---- the return stack: ordinary memory, addressed through RS (docs/SPEC.md
- * section 1) - CAL/PSH/interrupt entry pre-decrement RS and write there;
- * RET/POP/IRET read at RS and post-increment, mirroring rcc's own R5/SP
+/* ---- the stack: ordinary memory, addressed through R8/SP (docs/SPEC.md
+ * section 1) - CAL/PSH/interrupt entry pre-decrement SP and write there;
+ * RET/POP/IRET read at SP and post-increment, mirroring rcc's own R5/SP
  * convention (VexCodegen.h) exactly. There is no dedicated overflow/
- * underflow check any more: running RS below 0 or past other memory
- * eventually trips mrd()/mwr()'s own out-of-range fault, same as any other
- * runaway pointer - docs/SPEC.md section 7 discusses the tradeoff this
- * accepts in exchange for RS being a plain, saveable/settable register
- * (GSP/SSP) rather than fixed, opaque hardware state. */
-static void rs_push(VM *m, uint32_t v)
+ * underflow check: running SP below 0 or past other memory eventually
+ * trips mrd()/mwr()'s own out-of-range fault, same as any other runaway
+ * pointer - docs/SPEC.md section 7 discusses the tradeoff this accepts
+ * in exchange for SP being an ordinary register, directly readable and
+ * writable like R0-R7, rather than fixed, opaque hardware state. */
+static void sp_push(VM *m, uint32_t v)
 {
-    m->rs -= 4;
-    mwr(m, m->rs, v, 4);
+    m->regs[SP] -= 4;
+    mwr(m, m->regs[SP], v, 4);
 }
 
-static uint32_t rs_pop(VM *m)
+static uint32_t sp_pop(VM *m)
 {
-    uint32_t v = mrd(m, m->rs, 4);
-    m->rs += 4;
+    uint32_t v = mrd(m, m->regs[SP], 4);
+    m->regs[SP] += 4;
     return v;
 }
 
@@ -248,12 +246,12 @@ static uint8_t fetch_byte(VM *m)
     return b;
 }
 
-/* A register operand (docs/SPEC.md section 2): bits 2-0 select R0-R7,
- * bits 7-3 are reserved and must be 0. */
+/* A register operand (docs/SPEC.md section 2): selects R0-R8 (R8 is SP);
+ * any other value is reserved. */
 static uint8_t fetch_reg(VM *m)
 {
     uint8_t b = fetch_byte(m);
-    if (b & 0xF8)
+    if (b >= NREGS)
         fault(m, "reserved bits set in register operand 0x%02x", b);
     return b;
 }
@@ -272,17 +270,17 @@ static void step(VM *m)
         /* Peeks rather than unconditionally popping: a fully unwound call
          * chain finds zero at the word it would pop - mem is calloc'd and
          * nothing legitimate ever stores there (every CAL/PSH/interrupt-
-         * entry writes strictly below RS before advancing it) - and RET
+         * entry writes strictly below SP before advancing it) - and RET
          * repurposes that as "halt normally" (a real return address of 0
          * would jump into the NMI vector anyway, never a valid
-         * destination), leaving RS exactly where it was rather than
+         * destination), leaving SP exactly where it was rather than
          * advancing past a slot nothing was ever really popped from. */
-        uint32_t target = mrd(m, m->rs, 4);
+        uint32_t target = mrd(m, m->regs[SP], 4);
         if (target == 0) {
             m->halted = 1;
             m->exit_code = 0;
         } else {
-            m->rs += 4;
+            m->regs[SP] += 4;
             m->pc = target;
         }
         break;
@@ -323,7 +321,7 @@ static void step(VM *m)
         break;
     case OP_CAL:
         ra = fetch_reg(m);
-        rs_push(m, m->pc);
+        sp_push(m, m->pc);
         m->pc = m->regs[ra];
         break;
 
@@ -355,14 +353,14 @@ static void step(VM *m)
 
     case OP_PSH:
         ra = fetch_reg(m);
-        rs_push(m, m->regs[ra]);
+        sp_push(m, m->regs[ra]);
         break;
     case OP_POP:
         rd = fetch_reg(m);
-        m->regs[rd] = rs_pop(m);
+        m->regs[rd] = sp_pop(m);
         break;
     case OP_IRET:
-        m->pc = rs_pop(m);
+        m->pc = sp_pop(m);
         break;
     case OP_SEI:
         /* Takes effect after the *next* instruction, not immediately -
@@ -384,22 +382,6 @@ static void step(VM *m)
          * into a handler call depends on ie, same as any other boundary. */
         m->waiting = 1;
         break;
-    case OP_GSP:
-        /* Reads RS, the return-stack pointer (docs/SPEC.md section 1) -
-         * an ordinary register value, saveable/restorable like any
-         * other, unlike the old opaque hardware stack it replaces. */
-        rd = fetch_reg(m);
-        m->regs[rd] = m->rs;
-        break;
-    case OP_SSP:
-        /* Redirects RS - e.g. to give a freshly forked thread its own
-         * private return-stack region before resuming it. Takes effect
-         * immediately; the next CAL/RET/PSH/POP/interrupt entry uses the
-         * new value. */
-        ra = fetch_reg(m);
-        m->rs = m->regs[ra];
-        break;
-
     default:
         fault(m, "unknown opcode 0x%02x", op);
     }
@@ -413,7 +395,7 @@ static void step(VM *m)
 static void deliver_interrupt(VM *m, uint32_t vector)
 {
     m->ipc = m->pc;
-    rs_push(m, m->pc);
+    sp_push(m, m->pc);
     m->ie = 0;
     m->pc = mrd(m, vector, 4);
 }
@@ -430,13 +412,13 @@ static void trace_line(const VM *m)
         int len = snprintf(text, sizeof text, "%s", OPNAME[op]);
         uint8_t instrlen = OPLEN[op];
         if (op == OP_LDI) {
-            uint8_t rd = m->mem[pc + 1] & 7;
+            uint8_t rd = m->mem[pc + 1];
             uint32_t imm = ((uint32_t)m->mem[pc + 2] << 24) | ((uint32_t)m->mem[pc + 3] << 16)
                          | ((uint32_t)m->mem[pc + 4] << 8)  | m->mem[pc + 5];
             len += snprintf(text + len, sizeof text - (size_t)len, " R%u,0x%08x", rd, imm);
         } else {
             for (int i = 1; i < instrlen; i++)
-                len += snprintf(text + len, sizeof text - (size_t)len, " R%u", m->mem[pc + i] & 7);
+                len += snprintf(text + len, sizeof text - (size_t)len, " R%u", m->mem[pc + i]);
         }
     } else {
         snprintf(text, sizeof text, "??? 0x%02x", op);
@@ -444,22 +426,17 @@ static void trace_line(const VM *m)
     fprintf(stderr, "%08x  %-24s regs=", pc, text);
     for (int i = 0; i < NREGS; i++)
         fprintf(stderr, "%08x ", m->regs[i]);
-    fprintf(stderr, "rs=%08x\n", m->rs);
+    fputc('\n', stderr);
 }
 
-/* RS is just a register now (docs/SPEC.md section 1/7) - its value, not a
- * byte-dump of "everything between it and some fixed top", since GSP/SSP
- * means there's no longer one universal top to dump relative to (a
- * program is free to point it anywhere). A balanced program that never
- * calls SSP halts with rs back at RS_TOP, same as the old dump showing an
- * empty stack. */
+/* SP (R8) is just a register (docs/SPEC.md section 1/7), already covered
+ * by the regs loop above - no separate line for it. */
 static void dump(const VM *m)
 {
     fprintf(stderr, "regs:");
     for (int i = 0; i < NREGS; i++)
         fprintf(stderr, " %08x", m->regs[i]);
     fputc('\n', stderr);
-    fprintf(stderr, "rs: %08x\n", m->rs);
 }
 
 /* Blocks the host for a short while when HLT has parked the machine -
@@ -623,7 +600,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    vm.rs = RS_TOP;
+    vm.regs[SP] = SP_RESET;
     vm.pc = LOAD_ADDR;
     vm.irq_enabled = irq_enabled;
     vm.irq_test_period = irq_test_period;

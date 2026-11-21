@@ -1105,26 +1105,27 @@ pair - see `docs/using.md`.
   ~2017), so this backend has no real-interpreter test coverage -
   `tests/parrotvm_codegen_test.cpp` checks `ParrotVmCodegen::generate()`'s
   output structurally instead (no `tests/run_tests.sh --target=parrotvm`).
-- **vex** — Vex (`src/codegen/vex/VexCodegen.h`, `/Users/tom/projects/vex`), v1.3: an
-  8-register (`R0`-`R7`, 32-bit), byte-addressed register machine - no dedicated data
+- **vex** — Vex (`src/codegen/vex/VexCodegen.h`, `/Users/tom/projects/vex`), v1.4: a
+  9-register (`R0`-`R8`, 32-bit), byte-addressed register machine - no dedicated data
   stack, no stack-relative addressing mode at all; the one return stack holds return
   addresses (`CAL` pushes, `RET` pops), `PSH`/`POP` scratch values, and interrupt
   entry/`IRET`'s saved PC, all sharing the same region of ordinary memory, addressed
-  through RS - a register of its own (not one of `R0`-`R7`), readable/settable with
-  `GSP`/`SSP`. (An earlier v0.x was a uxn-style stack machine with zero general-purpose
-  registers; this backend was rewritten, not patched, for the switch to a register
-  machine.) This backend looks like every other small-register-file target here rather
-  than a stack-machine port: a register holds one live value at a time, and a
-  *separate*, backend-owned software stack - synthesized from `LD`/`ST` through a
-  register this backend maintains as its own stack pointer - is the real spill area for
-  anything beyond what its handful of named registers (see `VexCodegen.h`'s own class
-  comment for the exact convention) can hold live at once. `PSH`/`POP`/`IRET`/`SEI`/
-  `CLI`/`HLT`/`GSP`/`SSP` are real instructions (`VexAssembler.h`), available from an
-  `asm { }` block for a hand-written interrupt handler/scheduler, but ordinary C codegen
-  never emits them itself: C has no notion of an interrupt handler or scheduler, and
-  spilling expressions or call frames through the one return stack instead of this
-  backend's own unbounded one would risk the unbalanced-push hazard that stack's sharing
-  brings, for no benefit. Every function, recursive or not, gets a uniform
+  through `R8` - an ordinary register, read and redirected with `MOV`/`LD`/`ST`/
+  arithmetic exactly like `R0`-`R7`, with no separate `GSP`/`SSP` opcode. (An earlier
+  v0.x was a uxn-style stack machine with zero general-purpose registers; this backend
+  was rewritten, not patched, for the switch to a register machine.) This backend looks
+  like every other small-register-file target here rather than a stack-machine port: a
+  register holds one live value at a time, and a *separate*, backend-owned software
+  stack - synthesized from `LD`/`ST` through a register this backend maintains as its
+  own stack pointer - is the real spill area for anything beyond what its handful of
+  named registers (see `VexCodegen.h`'s own class comment for the exact convention) can
+  hold live at once. `PSH`/`POP`/`IRET`/`SEI`/`CLI`/`HLT` are real instructions
+  (`VexAssembler.h`), available from an `asm { }` block for a hand-written interrupt
+  handler/scheduler, but ordinary C codegen never emits them itself: C has no notion of
+  an interrupt handler or scheduler, and spilling expressions or call frames through the
+  one return stack instead of this backend's own unbounded one would risk the
+  unbalanced-push hazard that stack's sharing brings, for no benefit. Every function,
+  recursive or not, gets a uniform
   frame-pointer/stack-pointer-relative stack frame, reusing
   `IRBuilder`'s generic `Slot::frameOffset` the same way `M6809Codegen.cpp` does - unlike
   the old stack machine, a recursive function can have an array/struct Local or take `&`

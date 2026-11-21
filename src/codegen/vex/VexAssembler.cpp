@@ -31,7 +31,7 @@ const std::unordered_map<std::string, uint8_t> &opcodes() {
         {"deo", 0x06}, {"jmp", 0x07}, {"jcn", 0x08}, {"cal", 0x09}, {"add", 0x0A}, {"sub", 0x0B},
         {"mul", 0x0C}, {"div", 0x0D}, {"and", 0x0E}, {"ora", 0x0F}, {"xor", 0x10}, {"ceq", 0x11},
         {"clt", 0x12}, {"nop", 0x13}, {"psh", 0x14}, {"pop", 0x15}, {"iret", 0x16}, {"sei", 0x17},
-        {"cli", 0x18}, {"hlt", 0x19}, {"gsp", 0x1A}, {"ssp", 0x1B},
+        {"cli", 0x18}, {"hlt", 0x19},
     };
     return table;
 }
@@ -50,7 +50,7 @@ const std::unordered_map<std::string, OpShape> &opShapes() {
         {"mul", {3, false}}, {"div", {3, false}}, {"and", {3, false}}, {"ora", {3, false}},
         {"xor", {3, false}}, {"ceq", {3, false}}, {"clt", {3, false}}, {"nop", {0, false}},
         {"psh", {1, false}}, {"pop", {1, false}}, {"iret", {0, false}}, {"sei", {0, false}},
-        {"cli", {0, false}}, {"hlt", {0, false}}, {"gsp", {1, false}}, {"ssp", {1, false}},
+        {"cli", {0, false}}, {"hlt", {0, false}},
     };
     return table;
 }
@@ -103,20 +103,20 @@ std::vector<Syllable> operandExpr(RccAsmParser::OperandContext *ctx, const std::
     return exprToSyllables(ctx->expr());
 }
 
-// A register operand must spell exactly `r0`..`r7` (case-insensitive) as one bare, unsigned
+// A register operand must spell exactly `r0`..`r8` (case-insensitive) as one bare, unsigned
 // identifier syllable - never resolved against the label table the way LDI's immediate is, so
 // this is checked and converted right here at parse time, not deferred to the two-pass
 // label-resolution pass below.
 uint8_t parseRegisterOperand(RccAsmParser::OperandContext *ctx, const std::string &mnemonic) {
     std::vector<Syllable> syls = operandExpr(ctx, mnemonic);
     if (syls.size() != 1 || syls[0].sign != 0 || syls[0].kind != SylKind::Symbol) {
-        fail("'" + mnemonic + "': expected a plain register operand (r0-r7)");
+        fail("'" + mnemonic + "': expected a plain register operand (r0-r8)");
     }
     std::string text = toLower(syls[0].text);
-    if (text.size() == 2 && text[0] == 'r' && text[1] >= '0' && text[1] <= '7') {
+    if (text.size() == 2 && text[0] == 'r' && text[1] >= '0' && text[1] <= '8') {
         return static_cast<uint8_t>(text[1] - '0');
     }
-    fail("'" + mnemonic + "': '" + syls[0].text + "' isn't a valid register (expected r0-r7)");
+    fail("'" + mnemonic + "': '" + syls[0].text + "' isn't a valid register (expected r0-r8)");
 }
 
 Line buildLine(RccAsmParser::LineContext *ctx) {

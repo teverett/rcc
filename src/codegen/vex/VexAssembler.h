@@ -28,15 +28,16 @@ constexpr uint16_t kVexRelocAbs32 = 1;
 // A two-pass, in-process assembler for the dialect VexCodegen.cpp emits, parsed via the shared
 // grammar/rccasm/RccAsm.g4 (see M6809Assembler.h's own comment for the shared design this follows).
 //
-// Vex v1.3 is an 8-register (R0-R7), 32-bit register machine - no dedicated data stack, no
-// relative-addressing flag, no stack-relative access at all (see docs/SPEC.md). `PSH`/`POP`
-// share the one return stack with `CAL`/`RET` and interrupt entry/`IRET` rather than being a
-// separate stack - see docs/SPEC.md section 3's own "Stack" and "Interrupts" for the balance
-// risk that sharing brings, and VexCodegen.h's class comment for why this backend's own
-// codegen never emits `PSH`/`POP`/`GSP`/`SSP` itself (they're assembler/asm-block-only, for
-// hand-written interrupt handlers and the like). Every instruction is a one-byte opcode
-// followed by zero or more one-byte register operands (`r0`-`r7`, case-insensitive, like every
-// other identifier here), plus `LDI`'s own trailing 4-byte immediate:
+// Vex v1.4 is a 9-register (R0-R8), 32-bit register machine - no dedicated data stack, no
+// relative-addressing flag, no stack-relative access at all (see docs/SPEC.md). `R8` is the
+// stack pointer, addressable by every register-operand instruction exactly like `R0`-`R7` - there
+// is no separate `GSP`/`SSP` opcode for it. `PSH`/`POP` share the one return stack with `CAL`/
+// `RET` and interrupt entry/`IRET` rather than being a separate stack - see docs/SPEC.md section
+// 3's own "Stack" and "Interrupts" for the balance risk that sharing brings, and VexCodegen.h's
+// class comment for why this backend's own codegen never emits `PSH`/`POP` itself (they're
+// assembler/asm-block-only, for hand-written interrupt handlers and the like). Every instruction
+// is a one-byte opcode followed by zero or more one-byte register operands (`r0`-`r8`, case-
+// insensitive, like every other identifier here), plus `LDI`'s own trailing 4-byte immediate:
 //   RET                  (no operands)     NOP   (no operands)
 //   LDI  Rd, imm32        MOV  Rd, Ra
 //   LD   Rd, Ra           ST   Ra, Rb
@@ -45,9 +46,8 @@ constexpr uint16_t kVexRelocAbs32 = 1;
 //   ADD/SUB/MUL/DIV/AND/ORA/XOR/CEQ/CLT  Rd, Ra, Rb
 //   PSH  Ra               POP  Rd
 //   IRET (no operands)    SEI  (no operands)   CLI  (no operands)   HLT (no operands)
-//   GSP  Rd               SSP  Ra
 // Each mnemonic takes exactly the operand count docs/SPEC.md section 2's own length table
-// gives it - no more, no fewer. A register operand must spell exactly `r0`..`r7` (one bare
+// gives it - no more, no fewer. A register operand must spell exactly `r0`..`r8` (one bare
 // identifier syllable, no sign, no label arithmetic); anything else (an out-of-range number,
 // a label name, `(...)` grouping) is a parse-time error, since a register operand is never
 // resolved against the label table the way `LDI`'s immediate is.
