@@ -562,6 +562,17 @@ std::string compileOneFile(const std::string &srcPath, const std::map<std::strin
         // Optimizer - see AddressHoisting.h.
         rcc::AddressHoisting addrHoist;
         addrHoist.run(irProg, backend.typeWidths(), srcPath, verbose);
+        // After AddressHoisting (not before it): on a target where a
+        // repeated Local/Param read costs real instructions (see
+        // Codegen.h's own isLocalReadExpensive()), the hoisted base-
+        // address temp AddressHoisting just introduced is itself
+        // exactly the kind of candidate this closes - re-read 2+
+        // times by the same loop/statements that needed hoisting in
+        // the first place, and (since AddressHoisting.cpp's own
+        // makeAddrTemp() marks it `const`) always safe to cache. A
+        // no-op on every target that doesn't override that hook
+        // (false by default - see LocalCSE.h's own comment).
+        cse.runWithExpensiveVarCache(irProg, srcPath, verbose, backend);
         // After the above for the same canonicalization reason; narrow
         // enough (see InductionNonNegative.h) that ordering relative to
         // them doesn't actually matter beyond that.

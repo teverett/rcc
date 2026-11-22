@@ -151,6 +151,35 @@ bool Pdp7Codegen::usesStaticCell(const ir::Slot *slot) const {
            slot->arraySize == 0 && !slotIsWide(slot) && slot->type.base != BaseType::Struct;
 }
 
+bool Pdp7Codegen::isLocalReadExpensive(const ir::Slot *slot, const ir::Function *fn, const ir::Stmt *body) const {
+    if (slot->kind != ir::SlotKind::Local && slot->kind != ir::SlotKind::Param) return false;
+    // A re-derivation of computeIsLeaf()'s/usesStaticCell()'s own
+    // verdict for THIS (fn, body, slot), never this object's own
+    // currentFunctionIsLeaf_/currentFunctionCallsSafe_ - those answer
+    // for whichever function genFunction() happens to be generating
+    // right now, which this IR-optimizer-stage query has no relation
+    // to at all.
+    bool isLeaf = computeIsLeaf(fn, body);
+    if (isLeaf) return false;  // every Local/Param already gets a static cell
+    bool callsSafe = !stmtHasCall(body) || fn->isNonRecursive;
+    // Caching this read into a NEW temp only ever pays off if that new
+    // temp could itself land in a static cell - which, by
+    // usesStaticCell()'s own rule, needs `callsSafe` to be true
+    // regardless of this ORIGINAL slot's own isConst/isRegister tag
+    // (a fresh LocalCSE-introduced temp is marked const by
+    // construction - see LocalCSE.cpp's own makeTempSlot(); only
+    // `callsSafe` is ever in question for it). When `callsSafe` is
+    // false (e.g. swap() itself: not @nonrecursive and it calls other
+    // functions), EVERY Local/Param, cached or not, costs the same
+    // full frame reload - caching here would only add the new temp's
+    // own write, strictly worse, never better.
+    if (!callsSafe) return false;
+    bool shapeEligible = slot->arraySize == 0 && !slotIsWide(slot) && slot->type.base != BaseType::Struct;
+    if (!shapeEligible) return false;
+    bool alreadyStatic = slot->isRegister || slot->isConst;
+    return !alreadyStatic;  // already cheap on its own; nothing to gain from caching it again
+}
+
 bool Pdp7Codegen::isFastCallEligible(const ir::Function *fn) const {
     if (!fn || !fn->isNonRecursive) return false;
     // A wide-returning call always goes through genWideExpr()'s own

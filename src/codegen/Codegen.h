@@ -62,6 +62,27 @@ class Backend {
         (void)format;
         return std::nullopt;
     }
+
+    // Whether re-reading `slot` a second time inside `fn`/`body`, instead
+    // of keeping its first-read value in a temp, costs real instructions
+    // on this target - i.e. whether LocalCSE.cpp's own extended pass (see
+    // its "runWithExpensiveVarCache()") should treat a plain variable read
+    // as a CSE candidate here, the one case its ordinary isEligible() gate
+    // always treats as "already as cheap as a temp read" (see LocalCSE.h's
+    // own class comment). True on most targets, which keep a local in a
+    // real register or an equally cheap fixed cell - a bare read there IS
+    // already minimal, so re-deriving its address and caching it in ANOTHER
+    // cell would only add overhead, not remove it. Pdp7Codegen overrides
+    // this: a non-leaf function's own Local/Param lives in a stack frame,
+    // so every read recomputes `__fp + offset` and dereferences it (4
+    // words) even for a slot nothing has touched since the previous read -
+    // exactly the gap a repeated-read cache closes.
+    virtual bool isLocalReadExpensive(const ir::Slot *slot, const ir::Function *fn, const ir::Stmt *body) const {
+        (void)slot;
+        (void)fn;
+        (void)body;
+        return false;
+    }
 };
 
 // Shared text-emission scaffolding for a line-oriented assembly-text

@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <unordered_set>
 
+#include "codegen/Codegen.h"
+
 namespace rcc {
 
 namespace {
@@ -33,9 +35,13 @@ bool hasSideEffect(const ir::Expr *e) {
     return false;
 }
 
-bool isEligible(const ir::Expr *e) {
-    if (e->kind != ir::ExprKind::Binary && e->kind != ir::ExprKind::Index) return false;
-    return !hasSideEffect(e);
+// `backend`/`fn`/`body` are non-null exactly from
+// runWithExpensiveVarCache() - `run()` passes nullptr for all three,
+// which this leaves exactly as narrow as before (Var never eligible).
+bool isEligible(const ir::Expr *e, const Backend *backend, const ir::Function *fn, const ir::Stmt *body) {
+    if (e->kind == ir::ExprKind::Binary || e->kind == ir::ExprKind::Index) return !hasSideEffect(e);
+    if (e->kind == ir::ExprKind::Var && backend && backend->isLocalReadExpensive(e->slot, fn, body)) return true;
+    return false;
 }
 
 // Every Slot a subtree reads, for deciding which recorded candidates a
@@ -134,12 +140,23 @@ ir::ExprPtr makeAssignWrap(ir::ExprPtr original, ir::Slot *temp) {
 
 // `type` is the cached subexpression's resolved type: the temp must store
 // and reload at that width/signedness, not always plain int.
-ir::Slot *makeTempSlot(ir::Program &prog, int &tempCounter, Type type) {
+// `isConst`: true when the cached expression is itself a bare Var -
+// i.e. only from the runWithExpensiveVarCache() path (see isEligible()'s
+// own comment on why Var is only ever a candidate there). Every CSE temp,
+// regardless of kind, is assigned exactly once (by the makeAssignWrap()
+// below, right where it's created) and never reassigned afterward - the
+// same "never written after declaration" guarantee AddressHoisting.cpp's
+// own makeAddrTemp() relies on for the identical reason - but marking it
+// here is narrowed to the Var case: that's the one this fix targets, and
+// widening it to every Binary/Index CSE temp too is a separate, broader
+// change this doesn't make.
+ir::Slot *makeTempSlot(ir::Program &prog, int &tempCounter, Type type, bool isConst = false) {
     auto slot = std::make_unique<ir::Slot>();
     slot->id = static_cast<int>(prog.slots.size());  // every Slot id must be unique
     slot->sourceName = "__cse" + std::to_string(tempCounter++);
     slot->kind = ir::SlotKind::Local;
     slot->type = type;
+    slot->isConst = isConst;
     ir::Slot *raw = slot.get();
     prog.slots.push_back(std::move(slot));
     return raw;
@@ -188,8 +205,24 @@ void clearAll(AvailStack &stack) {
     for (AvailMap *avail : stack) avail->clear();
 }
 
-void cseExpr(ir::ExprPtr &e, AvailStack &stack, std::vector<ir::StmtPtr> &body,
-              size_t &i, ir::Program &prog, int &tempCounter, bool &changed, const std::string &sourceFile, bool verbose) {
+// Bundles everything every traversal function below threads through
+// unchanged, so adding the backend/fn/body a Var candidate needs (see
+// isEligible()'s own comment) only widened this struct once, not
+// every function's own parameter list. `backend`/`fn`/`rootBody` are
+// null/unused from run() (today's exact, unchanged behavior); set
+// from runWithExpensiveVarCache() instead.
+struct CseCtx {
+    ir::Program &prog;
+    int &tempCounter;
+    bool &changed;
+    const std::string &sourceFile;
+    bool verbose;
+    const Backend *backend;
+    const ir::Function *fn;
+    const ir::Stmt *rootBody;
+};
+
+void cseExpr(ir::ExprPtr &e, AvailStack &stack, std::vector<ir::StmtPtr> &body, size_t &i, CseCtx &ctx) {
     if (!e) return;
 
     // `&operand` needs operand's real lvalue location, not a cached value
@@ -198,16 +231,16 @@ void cseExpr(ir::ExprPtr &e, AvailStack &stack, std::vector<ir::StmtPtr> &body,
     // restriction and still gets the normal treatment below.
     if (e->kind == ir::ExprKind::Unary && e->op == "&") {
         if (e->rhs && e->rhs->kind == ir::ExprKind::Index) {
-            cseExpr(e->rhs->lhs, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
+            cseExpr(e->rhs->lhs, stack, body, i, ctx);
         }
         return;
     }
 
     // Bottom-up: a nested candidate is resolved before its enclosing
     // expression's key is computed (see LocalCSE.h's gap note).
-    cseExpr(e->lhs, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
-    cseExpr(e->rhs, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
-    for (auto &arg : e->args) cseExpr(arg, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
+    cseExpr(e->lhs, stack, body, i, ctx);
+    cseExpr(e->rhs, stack, body, i, ctx);
+    for (auto &arg : e->args) cseExpr(arg, stack, body, i, ctx);
 
     // Invalidation after children, which evaluate first. CompoundAssign/
     // CompoundDerefAssign need the same treatment as their non-compound
@@ -230,7 +263,7 @@ void cseExpr(ir::ExprPtr &e, AvailStack &stack, std::vector<ir::StmtPtr> &body,
             break;
     }
 
-    if (!isEligible(e.get())) return;
+    if (!isEligible(e.get(), ctx.backend, ctx.fn, ctx.rootBody)) return;
 
     AvailMap &avail = *stack.back();
     std::string key = exprKey(e.get());
@@ -243,62 +276,60 @@ void cseExpr(ir::ExprPtr &e, AvailStack &stack, std::vector<ir::StmtPtr> &body,
     }
     int line = e->line;
     if (it->second.tempSlot) {
-        if (verbose) {
-            std::cerr << sourceFile << ": local-cse: line " << line << ": reused `"
+        if (ctx.verbose) {
+            std::cerr << ctx.sourceFile << ": local-cse: line " << line << ": reused `"
                        << it->second.tempSlot->sourceName << "` instead of recomputing `" << describeExpr(e.get())
                        << "`\n";
         }
         e = makeVarRead(it->second.tempSlot, line);
-        changed = true;
+        ctx.changed = true;
         return;
     }
     // Second sighting: promote now, wrapping the first occurrence in place,
     // turning this one into a plain read, and reserving the temp's storage
     // at the front of this scope.
-    if (verbose) {
-        std::cerr << sourceFile << ": local-cse: line " << line << ": hoisted repeated subexpression `"
+    if (ctx.verbose) {
+        std::cerr << ctx.sourceFile << ": local-cse: line " << line << ": hoisted repeated subexpression `"
                    << describeExpr(e.get()) << "` into a temporary\n";
     }
-    ir::Slot *temp = makeTempSlot(prog, tempCounter, e->type);
+    ir::Slot *temp = makeTempSlot(ctx.prog, ctx.tempCounter, e->type, e->kind == ir::ExprKind::Var);
     *it->second.firstLoc = makeAssignWrap(std::move(*it->second.firstLoc), temp);
     e = makeVarRead(temp, line);
     body.insert(body.begin(), makeTempDecl(temp, line));
     ++i;  // every statement in this scope, including the one we're walking, shifted up by one
     it->second.tempSlot = temp;
-    changed = true;
+    ctx.changed = true;
 }
 
-void cseVisit(ir::Stmt *s, AvailStack &stack, ir::Program &prog, int &tempCounter, bool &changed,
-              const std::string &sourceFile, bool verbose);
+void cseVisit(ir::Stmt *s, AvailStack &stack, CseCtx &ctx);
 
 // The CSE engine, scoped to one Block's own statement list. A nested
 // If/While body gets its own entry pushed onto `stack` for candidate
 // matching, but a write anywhere in it still invalidates this scope (and
 // any further out) through that shared stack.
-void cseBlock(std::vector<ir::StmtPtr> &body, AvailStack &stack, ir::Program &prog, int &tempCounter, bool &changed,
-                const std::string &sourceFile, bool verbose) {
+void cseBlock(std::vector<ir::StmtPtr> &body, AvailStack &stack, CseCtx &ctx) {
     AvailMap avail;
     stack.push_back(&avail);
     for (size_t i = 0; i < body.size(); i++) {
         ir::Stmt *s = body[i].get();
         switch (s->kind) {
             case ir::StmtKind::Block:
-                cseBlock(s->body, stack, prog, tempCounter, changed, sourceFile, verbose);
+                cseBlock(s->body, stack, ctx);
                 break;
             case ir::StmtKind::If:
-                cseExpr(s->cond, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
-                cseVisit(s->thenStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
-                cseVisit(s->elseStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
+                cseExpr(s->cond, stack, body, i, ctx);
+                cseVisit(s->thenStmt.get(), stack, ctx);
+                cseVisit(s->elseStmt.get(), stack, ctx);
                 break;
             case ir::StmtKind::While:
-                cseExpr(s->cond, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
-                cseVisit(s->loopBody.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
-                cseVisit(s->postStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
+                cseExpr(s->cond, stack, body, i, ctx);
+                cseVisit(s->loopBody.get(), stack, ctx);
+                cseVisit(s->postStmt.get(), stack, ctx);
                 break;
             case ir::StmtKind::Return:
             case ir::StmtKind::LocalDecl:
             case ir::StmtKind::ExprStmt:
-                cseExpr(s->initOrReturnOrExpr, stack, body, i, prog, tempCounter, changed, sourceFile, verbose);
+                cseExpr(s->initOrReturnOrExpr, stack, body, i, ctx);
                 break;
             case ir::StmtKind::Break:
             case ir::StmtKind::Continue:
@@ -325,20 +356,19 @@ void cseBlock(std::vector<ir::StmtPtr> &body, AvailStack &stack, ir::Program &pr
 
 // Finds every Block reachable from `s`, each becoming its own cseBlock
 // scope; a brace-less single-statement If/While body is left untouched.
-void cseVisit(ir::Stmt *s, AvailStack &stack, ir::Program &prog, int &tempCounter, bool &changed,
-              const std::string &sourceFile, bool verbose) {
+void cseVisit(ir::Stmt *s, AvailStack &stack, CseCtx &ctx) {
     if (!s) return;
     switch (s->kind) {
         case ir::StmtKind::Block:
-            cseBlock(s->body, stack, prog, tempCounter, changed, sourceFile, verbose);
+            cseBlock(s->body, stack, ctx);
             return;
         case ir::StmtKind::If:
-            cseVisit(s->thenStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
-            cseVisit(s->elseStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
+            cseVisit(s->thenStmt.get(), stack, ctx);
+            cseVisit(s->elseStmt.get(), stack, ctx);
             return;
         case ir::StmtKind::While:
-            cseVisit(s->loopBody.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
-            cseVisit(s->postStmt.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
+            cseVisit(s->loopBody.get(), stack, ctx);
+            cseVisit(s->postStmt.get(), stack, ctx);
             return;
         default:
             return;
@@ -352,7 +382,20 @@ bool LocalCSE::run(ir::Program &prog, const std::string &sourceFile, bool verbos
     int tempCounter = 0;
     for (auto &fb : prog.functionBodies) {
         AvailStack stack;
-        cseVisit(fb.body.get(), stack, prog, tempCounter, changed, sourceFile, verbose);
+        CseCtx ctx{prog, tempCounter, changed, sourceFile, verbose, nullptr, nullptr, nullptr};
+        cseVisit(fb.body.get(), stack, ctx);
+    }
+    return changed;
+}
+
+bool LocalCSE::runWithExpensiveVarCache(ir::Program &prog, const std::string &sourceFile, bool verbose,
+                                         const Backend &backend) const {
+    bool changed = false;
+    int tempCounter = 0;
+    for (auto &fb : prog.functionBodies) {
+        AvailStack stack;
+        CseCtx ctx{prog, tempCounter, changed, sourceFile, verbose, &backend, fb.func, fb.body.get()};
+        cseVisit(fb.body.get(), stack, ctx);
     }
     return changed;
 }

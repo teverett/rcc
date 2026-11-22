@@ -48,6 +48,18 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // See Backend::isLocalReadExpensive()'s own comment for what this
+    // answers in general. On THIS target specifically: cheap (false)
+    // exactly when `slot` would get a static cell under either the
+    // leaf fast path or its own per-slot 'register'/'const' extension
+    // (see Pdp7Codegen.h's class comment on both) - a pure re-
+    // derivation of `computeIsLeaf()`'s/`usesStaticCell()`'s own
+    // verdict for the GIVEN `fn`/`body`/`slot`, not this object's own
+    // `currentFunctionIsLeaf_`/`currentFunctionCallsSafe_` (those only
+    // ever hold whichever function genFunction() happens to be
+    // generating right now, not `fn` - this runs from an IR
+    // optimizer pass, well before any function's own codegen starts).
+    bool isLocalReadExpensive(const ir::Slot *slot, const ir::Function *fn, const ir::Stmt *body) const override;
 
    private:
     // This dialect's own convention is 3 spaces, not TextCodegenBase's 4-space default.

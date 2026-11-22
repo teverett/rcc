@@ -4,6 +4,8 @@
 
 namespace rcc {
 
+class Backend;
+
 // Local common-subexpression/redundant-load elimination: purely syntactic
 // (not flow-sensitive) matching of identical Binary/Index subexpressions
 // within one Block's own statement list (an If/While's `cond` belongs to
@@ -34,6 +36,20 @@ class LocalCSE : public Optimizer {
    public:
     std::string name() const override { return "local-cse"; }
     bool run(ir::Program &prog, const std::string &sourceFile, bool verbose) const override;
+
+    // Same pass, with one more candidate kind: a plain Var read, but
+    // ONLY where `backend.isLocalReadExpensive(slot, fn, body)` says
+    // re-reading it costs real instructions on that target (see
+    // Codegen.h's own comment on that hook - false on most targets,
+    // where a local already lives in a register or an equally cheap
+    // fixed cell, so caching its read would only add overhead). Not a
+    // second, independent pass: it's the exact same traversal/
+    // invalidation machinery `run()` uses, just with this one
+    // additional per-slot check consulted too - calling both `run()`
+    // and this on the same Program would just redo the Binary/Index
+    // work for nothing, not find anything new.
+    bool runWithExpensiveVarCache(ir::Program &prog, const std::string &sourceFile, bool verbose,
+                                   const Backend &backend) const;
 };
 
 }  // namespace rcc
