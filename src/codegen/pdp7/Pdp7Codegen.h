@@ -164,12 +164,19 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
 
     // Branch fusion for an `If`/`While` condition: jumps to `Lfalse`
     // when `cond` is false, else falls through. For a plain comparison
-    // or an `&&` of such, skips genCompare()'s materialize-then-test
-    // step and branches directly; any other condition shape (`||`, a
-    // bare variable, a call, bitwise, ...) falls back to the generic
-    // path below. Avoids `spa`, using only `sma`/`sad` as elsewhere in
-    // this file.
+    // or an `&&`/`||` of such (recursively), skips genCompare()'s
+    // materialize-then-test step and branches directly; any other
+    // condition shape (a bare variable, a call, bitwise, ...) falls
+    // back to the generic path below. Avoids `spa`, using only
+    // `sma`/`sad` as elsewhere in this file.
     void genCondBranch(const ir::Expr &cond, const std::string &Lfalse);
+    // The mirror image of genCondBranch(): jumps to `Ltrue` when
+    // `cond` is true, else falls through. Needed to short-circuit
+    // `||` inside genCondBranch() itself (jump to the overall "true"
+    // destination as soon as either side is true, without
+    // materializing either side's own value first) and, symmetrically,
+    // to short-circuit a nested `&&` inside an `||`'s own left side.
+    void genCondBranchOnTrue(const ir::Expr &cond, const std::string &Ltrue);
     void genMul(const ir::Expr &lhs, const ir::Expr &rhs);
     void genDivMod(const ir::Expr &lhs, const ir::Expr &rhs, bool wantRemainder);
     // Emits the call to __divmod or, for unsigned operands, __udivmod;

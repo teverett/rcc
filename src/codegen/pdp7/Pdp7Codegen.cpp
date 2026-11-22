@@ -2265,11 +2265,31 @@ void Pdp7Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
 // anything else (`!`, a bare variable, a call, bitwise, ...) fall
 // through to the generic path: evaluate normally, test the 0/1 value.
 void Pdp7Codegen::genCondBranch(const ir::Expr &cond, const std::string &Lfalse) {
+    // `!A` as a false-branching condition is exactly "jump to Lfalse
+    // when A is true" - genCondBranchOnTrue()'s own job - instead of
+    // materializing A's negation to a 0/1 value first (genLogicalNot())
+    // and testing THAT.
+    if (cond.kind == ir::ExprKind::Unary && cond.op == "!") {
+        genCondBranchOnTrue(*cond.rhs, Lfalse);
+        return;
+    }
     if (cond.kind == ir::ExprKind::Binary) {
         const std::string &op = cond.op;
         if (op == "&&") {
             genCondBranch(*cond.lhs, Lfalse);
             genCondBranch(*cond.rhs, Lfalse);
+            return;
+        }
+        if (op == "||") {
+            // Short-circuits directly, the mirror image of `&&` above:
+            // as soon as the left side is true, jump straight past the
+            // right side entirely (genCondBranchOnTrue's own `Ldone`)
+            // instead of materializing a 0/1 value for it first, the
+            // way falling through to the generic path below would.
+            std::string Ldone = newLabel();
+            genCondBranchOnTrue(*cond.lhs, Ldone);
+            genCondBranch(*cond.rhs, Lfalse);
+            emitLabel(Ldone);
             return;
         }
         // A wide-operand comparison can't use the fused narrow
@@ -2317,6 +2337,69 @@ void Pdp7Codegen::genCondBranch(const ir::Expr &cond, const std::string &Lfalse)
     genExpr(cond);
     emit("sna");
     emit("jmp", Lfalse);
+}
+
+void Pdp7Codegen::genCondBranchOnTrue(const ir::Expr &cond, const std::string &Ltrue) {
+    if (cond.kind == ir::ExprKind::Unary && cond.op == "!") {
+        genCondBranch(*cond.rhs, Ltrue);
+        return;
+    }
+    if (cond.kind == ir::ExprKind::Binary) {
+        const std::string &op = cond.op;
+        if (op == "||") {
+            genCondBranchOnTrue(*cond.lhs, Ltrue);
+            genCondBranchOnTrue(*cond.rhs, Ltrue);
+            return;
+        }
+        if (op == "&&") {
+            // `A && B` can't jump to Ltrue off `A` alone (still need
+            // `B`) - skip straight past `B` (to `Lskip`, the overall
+            // "false" fallthrough) when `A` is false, the mirror image
+            // of `||`'s own shortcut in genCondBranch() above.
+            std::string Lskip = newLabel();
+            genCondBranch(*cond.lhs, Lskip);
+            genCondBranchOnTrue(*cond.rhs, Ltrue);
+            emitLabel(Lskip);
+            return;
+        }
+        bool wideCmp = (op == "<" || op == ">" || op == ">=" || op == "<=" || op == "==" || op == "!=") &&
+                       isWide(cond.lhs->type);
+        if (!wideCmp && (op == "<" || op == ">" || op == ">=" || op == "<=")) {
+            const ir::Expr *a = cond.lhs.get();
+            const ir::Expr *b = cond.rhs.get();
+            bool negate = (op == ">=" || op == "<=");
+            if (op == ">" || op == "<=") std::swap(a, b);
+            std::string A, B, negB;
+            int signA, signB;
+            bool bIsZero;
+            genCompareCells(*a, *b, a->type.isUnsigned, A, B, signA, signB, &negB, &bIsZero);
+            std::string Lfall = newLabel();
+            if (!negate) {
+                emitSignedLtCells(A, B, Ltrue, Lfall, signA, signB, negB, bIsZero);
+            } else {
+                emitSignedLtCells(A, B, Lfall, Ltrue, signA, signB, negB, bIsZero);
+            }
+            emitLabel(Lfall);
+            return;
+        }
+        if (!wideCmp && (op == "==" || op == "!=")) {
+            std::string rhsCell = genOperandPair(*cond.lhs, *cond.rhs, RhsXform::None);
+            if (op == "!=") {
+                std::string Lfall = newLabel();
+                emit("sad", rhsCell);
+                emit("jmp", Lfall);
+                emit("jmp", Ltrue);
+                emitLabel(Lfall);
+            } else {
+                emit("sad", rhsCell);
+                emit("jmp", Ltrue);
+            }
+            return;
+        }
+    }
+    genExpr(cond);
+    emit("sza");
+    emit("jmp", Ltrue);
 }
 
 void Pdp7Codegen::genLogicalAnd(const ir::Expr &lhs, const ir::Expr &rhs) {
