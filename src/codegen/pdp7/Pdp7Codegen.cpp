@@ -1016,6 +1016,24 @@ void Pdp7Codegen::genWideMulDivErr(int line, const std::string &opName) {
 // through narrowAC().
 void Pdp7Codegen::genConvert(const ir::Expr &e) {
     if (isWide(e.lhs->type)) {
+        // A wide LITERAL's own low word is already a compile-time
+        // constant - pushWideLiteral()'s own per-word slicing
+        // (`(value >> (18*i)) & 0777777`) computed at i=0, directly,
+        // with no runtime stack traffic at all. Common whenever a
+        // plain decimal constant past a narrow (signed) int's own
+        // positive range - which real C's own literal-typing rules
+        // make `long`, EVEN when the context is an unsigned narrow
+        // variable the value fits fine (e.g. `unsigned int x =
+        // 131072;` - exactly bit 17, a valid 18-bit unsigned value,
+        // but 131072 > a signed 18-bit int's own max 131071) - gets
+        // assigned to a narrow variable: the general path below would
+        // otherwise push/pop every word of a literal whose value was
+        // already fully known before any code ran.
+        if (e.lhs->kind == ir::ExprKind::IntLit) {
+            emit("lac", literalLabel(pdp7Word(e.lhs->intValue)));
+            narrowAC(e.type);
+            return;
+        }
         genWideExpr(*e.lhs);
         popAC();  // AC = the low word - this is the value being kept
         std::string Tlow = allocTemp();
@@ -1594,23 +1612,46 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
         }
         case ir::ExprKind::Call: {
             // See Pdp7Codegen.h's own fast-call eligibility comment.
-            // Every argument must itself be call-free: evaluating one
-            // argument can't be allowed to reenter this same callee
-            // and overwrite an EARLIER argument's cell before the
-            // call below ever runs (the real stack-based convention
-            // below doesn't have this hazard - each pending call gets
-            // its own stack region - which is exactly what this fast
-            // path trades away for skipping it). Narrow-only
-            // (!isWide) on top of isFastCallEligible()'s own
-            // parameter-shape check: a wide ARGUMENT can't fit through
-            // one scalar cell either, even passed to an otherwise-
-            // eligible callee.
+            // Narrow-only (!isWide) on top of isFastCallEligible()'s
+            // own parameter-shape check: a wide ARGUMENT can't fit
+            // through one scalar cell either, even passed to an
+            // otherwise-eligible callee.
             if (isFastCallEligible(e.func) &&
-                std::all_of(e.args.begin(), e.args.end(),
-                            [this](const ir::ExprPtr &a) { return isCallFree(*a) && !isWide(a->type); })) {
-                for (size_t i = 0; i < e.args.size(); i++) {
-                    genExpr(*e.args[i]);
-                    emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                std::all_of(e.args.begin(), e.args.end(), [this](const ir::ExprPtr &a) { return !isWide(a->type); })) {
+                // Every argument call-free: write each straight into
+                // its own Param cell as it's evaluated - cheapest,
+                // and safe, since nothing can reenter this callee and
+                // overwrite an earlier argument's cell before the
+                // call below runs (no call anywhere in the list at
+                // all).
+                if (std::all_of(e.args.begin(), e.args.end(), [this](const ir::ExprPtr &a) { return isCallFree(*a); })) {
+                    for (size_t i = 0; i < e.args.size(); i++) {
+                        genExpr(*e.args[i]);
+                        emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                    }
+                } else {
+                    // At least one argument itself makes a call, which
+                    // COULD reenter this same callee - evaluate every
+                    // argument into its own fresh temp first (each
+                    // already on its own call-boundary-safe cell by
+                    // the time a later one evaluates, the same
+                    // reasoning the stack-based path below relies on
+                    // for its own pushed words), then copy every temp
+                    // into the real Param cells in one call-free burst
+                    // immediately before the call - nothing can
+                    // clobber a Param cell between that copy and the
+                    // call reading it.
+                    std::vector<std::string> argTemps(e.args.size());
+                    for (size_t i = 0; i < e.args.size(); i++) {
+                        genExpr(*e.args[i]);
+                        argTemps[i] = allocTemp();
+                        declareTemp(argTemps[i]);
+                        emit("dac", argTemps[i]);
+                    }
+                    for (size_t i = 0; i < e.args.size(); i++) {
+                        emit("lac", argTemps[i]);
+                        emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                    }
                 }
                 emit("jms", cat(label(e.func), "_fast"));
                 return;

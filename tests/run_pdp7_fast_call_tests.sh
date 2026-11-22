@@ -18,11 +18,12 @@
 #   test_literal_arg_call_uses_fast_path - a same-file, literal-arg
 #       call to an `@nonrecursive` function uses `jms <callee>_fast`,
 #       no `__push`.
-#   test_call_containing_arg_falls_back_to_stack - the SAME callee,
+#   test_call_containing_arg_still_uses_fast_path - the SAME callee,
 #       called with an argument expression that itself makes a call,
-#       still uses the ordinary stack-based convention (the one
-#       exactly this fast path can't safely replace - see
-#       Pdp7Codegen.h's own comment on why).
+#       STILL uses the fast path (evaluating every argument into its
+#       own temp first, then copying all of them into the real Param
+#       cells in one call-free burst right before the call - see
+#       Pdp7Codegen.cpp's own Call case comment on why that's safe).
 #   test_non_nonrecursive_callee_uses_stack_path - calling a function
 #       with no `@nonrecursive` tag and a real call in its own body
 #       never uses the fast path at all, even with literal arguments.
@@ -35,9 +36,11 @@
 #       call, and one fast-eligible function calling another, both
 #       decided correctly on the real simulator.
 #   test_same_callee_both_conventions_coexist - the SAME function
-#       called once with a call-free argument (fast path) and once
-#       with a call-containing argument (stack path) in the same
-#       program - both entries work, neither corrupts the other.
+#       called once with a call-free argument (writes straight into
+#       its Param cell) and once with a call-containing one (goes
+#       through a temp first) in the same program - both argument-
+#       evaluation strategies land in the same cells correctly,
+#       neither corrupts the other.
 #
 # Usage: tests/run_pdp7_fast_call_tests.sh [path/to/rcc]
 
@@ -97,7 +100,7 @@ EOF
     return 0
 }
 
-test_call_containing_arg_falls_back_to_stack() {
+test_call_containing_arg_still_uses_fast_path() {
     local dir="$tmpdir/callarg"
     mkdir -p "$dir"
     cat >"$dir/t.c" <<'EOF'
@@ -110,24 +113,24 @@ int main() {
 }
 EOF
     if ! "$RCC" --target=pdp7 --format=asm --optimize --out="$dir/t.s" "$dir/t.c" >"$dir/log" 2>&1; then
-        echo "FAIL test_call_containing_arg_falls_back_to_stack: fixture failed to compile"
+        echo "FAIL test_call_containing_arg_still_uses_fast_path: fixture failed to compile"
         cat "$dir/log"
         return 1
     fi
-    if grep -q 'jms FN_doubleIt_fast' "$dir/t.s"; then
-        echo "FAIL test_call_containing_arg_falls_back_to_stack: expected the ordinary" \
-             "stack-based call (an argument expression makes its own call - unsafe for the" \
-             "fast path, see Pdp7Codegen.h), found 'jms FN_doubleIt_fast' anyway:"
+    if ! grep -q 'jms FN_doubleIt_fast' "$dir/t.s"; then
+        echo "FAIL test_call_containing_arg_still_uses_fast_path: expected" \
+             "'jms FN_doubleIt_fast' even though the argument makes a call, not found:"
         cat "$dir/t.s"
         return 1
     fi
-    if ! grep -q 'jms FN_doubleIt$' "$dir/t.s"; then
-        echo "FAIL test_call_containing_arg_falls_back_to_stack: expected 'jms FN_doubleIt'" \
-             "(the ordinary entry), not found:"
+    if grep -q '__push' "$dir/t.s"; then
+        echo "FAIL test_call_containing_arg_still_uses_fast_path: expected no '__push' at" \
+             "all (the temp-first evaluation order should need no real stack traffic for" \
+             "this callee's own arguments), found one:"
         cat "$dir/t.s"
         return 1
     fi
-    echo "PASS test_call_containing_arg_falls_back_to_stack (ordinary stack-based call used)"
+    echo "PASS test_call_containing_arg_still_uses_fast_path (jms FN_doubleIt_fast, no __push)"
     return 0
 }
 
@@ -239,6 +242,41 @@ EOF
     return 0
 }
 
+test_multiple_call_containing_args_at_every_position_correct() {
+    local dir="$tmpdir/multicall"
+    mkdir -p "$dir"
+    cat >"$dir/t.c" <<'EOF'
+int get5() { return 5; }
+int getN(int n) { return n; }
+int add3(int a, int b, int c) @nonrecursive {
+    return a + b + c;
+}
+int main() {
+    int r;
+    r = 0;
+    r = r + (add3(get5(), 1, 2) == 8);          // first arg calls
+    r = r + (add3(1, getN(2), 3) == 6);         // middle arg calls
+    r = r + (add3(1, 2, get5()) == 8);          // last arg calls
+    r = r + (add3(get5(), getN(10), 1) == 16);  // two args call
+    return r;
+}
+EOF
+    if ! "$RCC" --target=pdp7 --format=rim --optimize --out="$dir/t.rim" "$dir/t.c" >"$dir/log" 2>&1; then
+        echo "FAIL test_multiple_call_containing_args_at_every_position_correct: fixture failed to compile"
+        cat "$dir/log"
+        return 1
+    fi
+    local ac
+    ac="$(run_ac "$dir/t.rim")"
+    if [ "$((8#$ac))" != "4" ]; then
+        echo "FAIL test_multiple_call_containing_args_at_every_position_correct: expected" \
+             "AC=4 (all 4 combinations correct), got octal $ac"
+        return 1
+    fi
+    echo "PASS test_multiple_call_containing_args_at_every_position_correct (AC=4)"
+    return 0
+}
+
 test_same_callee_both_conventions_coexist() {
     local dir="$tmpdir/coexist"
     mkdir -p "$dir"
@@ -272,10 +310,11 @@ EOF
 }
 
 test_literal_arg_call_uses_fast_path || fail=1
-test_call_containing_arg_falls_back_to_stack || fail=1
+test_call_containing_arg_still_uses_fast_path || fail=1
 test_non_nonrecursive_callee_uses_stack_path || fail=1
 test_cross_file_extern_nonrecursive_runs_correctly || fail=1
 test_multi_arg_and_nested_fast_calls_correct || fail=1
+test_multiple_call_containing_args_at_every_position_correct || fail=1
 test_same_callee_both_conventions_coexist || fail=1
 
 exit $fail

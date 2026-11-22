@@ -141,6 +141,18 @@ ir::Slot *makeAddrTemp(ir::Program &prog, int &counter, Type ptrType) {
     slot->sourceName = "__addrhoist" + std::to_string(counter++);
     slot->kind = ir::SlotKind::Local;
     slot->type = ptrType;
+    // Assigned exactly once, by its own declaration just below (never
+    // reassigned afterward - this pass never emits a second write to
+    // it) - exactly `const`'s own "never written after declaration"
+    // contract, by construction rather than by any further analysis
+    // here. On a backend with a per-slot cheap-storage extension for
+    // `const`/`register` locals (see e.g. Pdp7Codegen.h's own
+    // "usesStaticCell()"), this lets a NON-leaf but still reentrancy-
+    // safe function (one `@nonrecursive`, with some OTHER wide/array/
+    // struct local disqualifying the full leaf path) read this hoisted
+    // base address through one cheap static cell too, instead of a
+    // full frame-relative reload at every one of its own uses.
+    slot->isConst = true;
     ir::Slot *raw = slot.get();
     prog.slots.push_back(std::move(slot));
     return raw;
