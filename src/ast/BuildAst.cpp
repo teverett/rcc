@@ -1048,13 +1048,20 @@ Program buildProgram(CParser::ProgramContext *ctx) {
         } else if (auto *fd = top->functionDecl()) {
             if (auto *ext = dynamic_cast<CParser::ExternFunctionDeclContext *>(fd)) {
                 FunctionDecl fn;
-                fn.name = ext->IDENT()->getText();
+                fn.name = ext->IDENT(0)->getText();
                 fn.line = ext->getStart()->getLine();
                 buildReturnType(ext->returnTypeSpec(), fn.returnType, fn.isVoid);
                 if (auto *pl = ext->paramList()) {
                     for (auto *p : pl->param()) {
                         fn.params.push_back(Param{p->IDENT()->getText(), buildType(p->typeSpec()), p->cst != nullptr, p->reg != nullptr});
                     }
+                }
+                if (ext->tag) {
+                    if (ext->tag->getText() != "nonrecursive") {
+                        err(ext, "unknown function attribute '@" + ext->tag->getText() +
+                                      "' - the only one recognized is '@nonrecursive'");
+                    }
+                    fn.isNonRecursive = true;
                 }
                 fn.isExternDecl = true;
                 prog.functions.push_back(std::move(fn));

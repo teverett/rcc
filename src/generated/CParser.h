@@ -350,13 +350,16 @@ public:
   public:
     ExternFunctionDeclContext(FunctionDeclContext *ctx);
 
+    antlr4::Token *tag = nullptr;
     antlr4::tree::TerminalNode *EXTERN_KW();
     ReturnTypeSpecContext *returnTypeSpec();
-    antlr4::tree::TerminalNode *IDENT();
+    std::vector<antlr4::tree::TerminalNode *> IDENT();
+    antlr4::tree::TerminalNode* IDENT(size_t i);
     antlr4::tree::TerminalNode *LPAREN();
     antlr4::tree::TerminalNode *RPAREN();
     antlr4::tree::TerminalNode *SEMI();
     ParamListContext *paramList();
+    antlr4::tree::TerminalNode *AT();
 
     virtual std::any accept(antlr4::tree::ParseTreeVisitor *visitor) override;
   };

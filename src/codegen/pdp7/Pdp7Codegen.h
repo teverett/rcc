@@ -378,7 +378,17 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // `sys/s6.c`'s own `iput()` and `sys/alloc.c`'s own `alloc()`
     // turned out to share a numerically-colliding "LF3"/"LF0" label
     // across their own separately-compiled objects).
-    std::string leafLabel(const ir::Slot *slot) const { return curFunctionLabel_ + "_LF" + std::to_string(slot->id); }
+    // A Param's own cell is named by POSITION (`paramIndex`), not `id`:
+    // the fast-call convention below needs a caller in a DIFFERENT
+    // translation unit - which never sees this function's own Slot
+    // objects at all, only its prototype's param list - to construct
+    // this exact label purely from the callee's name and that param's
+    // position. `id` (this file's own arbitrary allocation order)
+    // could never be reconstructed that way; `paramIndex` always can.
+    std::string leafLabel(const ir::Slot *slot) const {
+        if (slot->kind == ir::SlotKind::Param) return curFunctionLabel_ + "_P" + std::to_string(slot->paramIndex);
+        return curFunctionLabel_ + "_LF" + std::to_string(slot->id);
+    }
 
     // True iff `fn`/`body` qualify for the leaf fast path above.
     static bool computeIsLeaf(const ir::Function *fn, const ir::Stmt *body);
@@ -425,6 +435,64 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // real frame address regardless of this extension.
     bool currentFunctionCallsSafe_ = false;
     bool usesStaticCell(const ir::Slot *slot) const;
+
+    // --- Fast calling convention for a direct call to a leaf/`@nonrecursive`
+    // callee -----------------------------------------------------------
+    //
+    // An ordinary call pushes each argument onto the real stack, then
+    // (since the callee's own epilogue leaves `__sp` right where the
+    // arguments were pushed - caller-cleans-up) stashes the return
+    // value, walks `__sp` back past every pushed word, and reloads it -
+    // 2 words per argument to push plus ~5 more to clean up, even when
+    // the callee is eligible for the leaf fast path above and reads
+    // every Param through one cheap static cell anyway (see
+    // emitLeafParamBinding()) rather than ever dereferencing the stack
+    // through a frame pointer.
+    //
+    // `isFastCallEligible(fn)` is true for exactly the functions that
+    // get `currentFunctionIsLeaf_`/`computeIsLeaf()`'s own treatment -
+    // real-defined-here or `@nonrecursive`, every param narrow and not
+    // an array/struct - checked from a CALL SITE, which may be in a
+    // different translation unit from the definition (an `extern`
+    // declaration's own `@nonrecursive` tag and prototype param types
+    // carry the same information computeIsLeaf() would compute from a
+    // real body - see IR.h's own `Function::isNonRecursive`/
+    // `hasPrototype`/`prototypeParams`). Trusted cross-file exactly as
+    // `@nonrecursive`'s own reentrancy claim already is - see
+    // IRBuilder.cpp's own comment where it sets `isNonRecursive` on an
+    // extern placeholder.
+    //
+    // When eligible AND every argument expression is itself call-free
+    // (isCallFree() - never evaluating one argument can reenter the
+    // callee and overwrite an EARLIER argument's cell before the call
+    // this fast path skips the stack for even happens), genExpr()'s
+    // Call case writes each argument directly into the callee's own
+    // `leafLabel()` cell (now named by position - see leafLabel()'s own
+    // comment - so a caller with no Slot objects for the callee can
+    // still construct the exact same label) and calls a SEPARATE entry
+    // point, `<calleeLabel>_fast` (see genFunction()), that starts
+    // right after the callee's own emitLeafParamBinding() - skipping
+    // past it entirely, since the arguments are already exactly where
+    // that code would have copied them FROM THE STACK to anyway. A
+    // function whose real definition doesn't ALSO end up
+    // `currentFunctionIsLeaf_` (an extern declaration's claim that
+    // doesn't match reality) never gets this label emitted at all, so
+    // a caller trusting a wrong claim fails loud - an undefined
+    // `_fast` symbol at link time - not silently.
+    bool isFastCallEligible(const ir::Function *fn) const;
+    // Precomputed once, in generate(), before any function body is
+    // generated: `computeIsLeaf()`'s own real verdict for every
+    // function DEFINED in this file (never populated for an `extern`
+    // placeholder, which has no body to run it against) - what
+    // isFastCallEligible() trusts for a same-file callee, rather than
+    // re-deriving a hand-rolled approximation of its own that could
+    // silently drift out of sync with it (a Local's own wide/array/
+    // struct shape - invisible from a call site, which only ever
+    // sees a Function's `params`, not its body - once already did:
+    // computeIsLeaf() rules out a function with such a Local even
+    // when every Param is narrow, which an eligibility check that
+    // only inspects `fn->params` can never see for itself).
+    std::unordered_map<const ir::Function *, bool> leafEligibleByFunc_;
 
     // The frame-relative address of a Local/Param, ignoring any static
     // cell it might otherwise use - factored out of emitLoadSlotAddress()

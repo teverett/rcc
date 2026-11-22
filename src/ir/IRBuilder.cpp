@@ -580,6 +580,15 @@ class Builder {
             if (fn.isExternDecl) {
                 irFn->isExternal = true;
                 irFn->hasPrototype = true;
+                // Trusted, not verified: the real definition (in
+                // another file, by construction) might not actually
+                // be `@nonrecursive`, or might not actually match
+                // this prototype's own param list - see
+                // Pdp7Codegen.h's own fast-call eligibility check for
+                // what this claim unlocks and why a mismatch fails
+                // loud (an undefined `_fast` entry symbol at link
+                // time) rather than silently.
+                irFn->isNonRecursive = fn.isNonRecursive;
                 for (const auto &p : fn.params) {
                     Type pt = resolveStructType(p.type, fn.line);
                     rejectStructByValue(pt, fn.line, "a function parameter");

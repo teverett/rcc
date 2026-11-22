@@ -127,6 +127,19 @@ enumMember
 // (that address lives in whichever file really defines it), so not
 // offered on that alternative.
 //
+// An 'extern' declaration CAN carry its own '@nonrecursive' tag,
+// unlike '@' addr above: it's a claim about the callee's own
+// reentrancy, needed by the CALLER's own codegen (the fast calling
+// convention a nonrecursive callee's static parameter cells make
+// possible - see docs/language.md's "Non-recursion" section's own
+// cross-file contract) even when the real definition, and whatever
+// it's really tagged with, live in a file this compilation never
+// sees. BuildAst.cpp doesn't (can't) check this claim against the
+// real definition when they're in different files - same trust-based
+// contract '@nonrecursive' itself already is cross-file for
+// reentrancy; getting it wrong here is this same contract's
+// consequence, not a new kind of risk.
+//
 // 'static' gives this function internal linkage: it's still a normal
 // function in this file, but never becomes an extern placeholder another
 // file's 'extern' declaration can resolve against - see docs/language.md's
@@ -139,7 +152,7 @@ enumMember
 // keyword, so 'nonrecursive' stays usable as an ordinary identifier
 // everywhere else).
 functionDecl
-    : 'extern' returnTypeSpec IDENT '(' paramList? ')' ';'                                   # externFunctionDecl
+    : 'extern' returnTypeSpec IDENT '(' paramList? ')' ('@' tag=IDENT)? ';'                   # externFunctionDecl
     | stat='static'? returnTypeSpec IDENT '(' paramList? ')' ('@' tag=IDENT)? ('@' addr=NUMBER)? (block | ';') # localFunctionDecl
     ;
 

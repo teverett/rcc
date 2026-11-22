@@ -151,6 +151,25 @@ bool Pdp7Codegen::usesStaticCell(const ir::Slot *slot) const {
            slot->arraySize == 0 && !slotIsWide(slot) && slot->type.base != BaseType::Struct;
 }
 
+bool Pdp7Codegen::isFastCallEligible(const ir::Function *fn) const {
+    if (!fn || !fn->isNonRecursive) return false;
+    // A wide-returning call always goes through genWideExpr()'s own
+    // Call case, never genExpr()'s - which is the only one this fast
+    // path's caller side is wired into - so a fast entry here could
+    // never actually be reached from any call site. Excluding it here
+    // too just avoids emitting that dead entry point's own 4 words.
+    if (!fn->isVoid && isWide(fn->returnType)) return false;
+    if (fn->isExternal) {
+        if (!fn->hasPrototype) return false;
+        for (const Type &t : fn->prototypeParams) {
+            if (isWide(t)) return false;
+        }
+        return true;
+    }
+    auto it = leafEligibleByFunc_.find(fn);
+    return it != leafEligibleByFunc_.end() && it->second;
+}
+
 std::string Pdp7Codegen::allocTemp() { return "T" + std::to_string(tempCounter_++); }
 
 void Pdp7Codegen::declareTemp(const std::string &label) { trailer_.push_back(label + ": 0"); }
@@ -256,6 +275,18 @@ std::string Pdp7Codegen::generate(const ir::Program &prog, bool objectMode) {
         emit("jms", cat(label(mainFn), "  ; call main"));
         emit("hlt");
         codeRanges.push_back({mainFn->sourceFile, rangeStart, static_cast<size_t>(code_.tellp())});
+    }
+
+    // Computed up front, over every function's own real body, before
+    // any of them are generated: isFastCallEligible()'s own same-file
+    // case trusts this exact verdict for a callee, rather than
+    // re-deriving its own approximation from just `fn->params` (see
+    // Pdp7Codegen.h's own comment on `leafEligibleByFunc_`) - and a
+    // function defined LATER in this file than one of its own callers
+    // still needs an answer available when that EARLIER caller's own
+    // code is generated.
+    for (const auto &fb : prog.functionBodies) {
+        leafEligibleByFunc_[fb.func] = computeIsLeaf(fb.func, fb.body.get());
     }
 
     for (const auto &fb : prog.functionBodies) {
@@ -371,6 +402,41 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
         currentFunctionIsLeaf_ || !stmtHasCall(fn.body.get()) || fn.func->isNonRecursive;
     if (currentFunctionIsLeaf_) {
         emitLeafParamBinding(fn.func);
+        // See Pdp7Codegen.h's own fast-call eligibility comment: a
+        // second entry point, right where the stack-based entry's own
+        // param-binding code (just above) already finishes - a fast
+        // caller has already written every argument directly into the
+        // exact cells that code would otherwise have copied them INTO
+        // from the stack, so jumping in here skips it entirely. Only
+        // emitted when a fast caller could actually exist for this
+        // function (isFastCallEligible() - same check a call site
+        // itself applies), never as dead weight otherwise.
+        //
+        // The stack-based entry's own fall-through can never be
+        // allowed to just run into this new label's own reserved
+        // word next (`jms` to it would need a real instruction
+        // there, same as any other callee label, and 0 happens to
+        // decode as a CAL trap on this target) - true even when
+        // emitLeafParamBinding() above emitted no instructions at
+        // all (an eligible function with no params): an explicit
+        // `jmp` over it is required unconditionally, not just when
+        // it happens to fall through into something harmless.
+        if (isFastCallEligible(fn.func)) {
+            std::string bodyStart = newLabel();
+            emit("jmp", bodyStart);
+            emitRaw(cat(label(fn.func), "_fast: 0"));
+            // `jms <fast label>` wrote ITS caller's return address
+            // into the fast label's own cell, not the primary entry's
+            // - but the body's own eventual `jmp i <primary label>`
+            // (emitLeafReturn()) only ever reads the PRIMARY cell,
+            // regardless of which entry got used. Copying it over
+            // here, once, lets that one shared return instruction
+            // work correctly no matter which entry was actually
+            // called through.
+            emit("lac", cat(label(fn.func), "_fast"));
+            emit("dac", label(fn.func));
+            emitLabel(bodyStart);
+        }
         genStmt(*fn.body);
         // Default return if the body doesn't return on every path;
         // skipped as dead code when stmtAlwaysReturns() can already
@@ -1527,6 +1593,28 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Call: {
+            // See Pdp7Codegen.h's own fast-call eligibility comment.
+            // Every argument must itself be call-free: evaluating one
+            // argument can't be allowed to reenter this same callee
+            // and overwrite an EARLIER argument's cell before the
+            // call below ever runs (the real stack-based convention
+            // below doesn't have this hazard - each pending call gets
+            // its own stack region - which is exactly what this fast
+            // path trades away for skipping it). Narrow-only
+            // (!isWide) on top of isFastCallEligible()'s own
+            // parameter-shape check: a wide ARGUMENT can't fit through
+            // one scalar cell either, even passed to an otherwise-
+            // eligible callee.
+            if (isFastCallEligible(e.func) &&
+                std::all_of(e.args.begin(), e.args.end(),
+                            [this](const ir::ExprPtr &a) { return isCallFree(*a) && !isWide(a->type); })) {
+                for (size_t i = 0; i < e.args.size(); i++) {
+                    genExpr(*e.args[i]);
+                    emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                }
+                emit("jms", cat(label(e.func), "_fast"));
+                return;
+            }
             // Arguments are pushed in reverse order so param 0 ends up
             // closest to the callee's `__fp`; the callee reads every
             // Param off this stack, never a fixed per-function cell,
