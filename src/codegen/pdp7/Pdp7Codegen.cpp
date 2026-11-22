@@ -1,5 +1,6 @@
 #include "Pdp7Codegen.h"
 
+#include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
 #include <utility>
@@ -1784,7 +1785,7 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
                 // overwrite an earlier argument's cell before the
                 // call below runs (no call anywhere in the list at
                 // all).
-                if (std::all_of(e.args.begin(), e.args.end(), [this](const ir::ExprPtr &a) { return isCallFree(*a); })) {
+                if (std::all_of(e.args.begin(), e.args.end(), [](const ir::ExprPtr &a) { return isCallFree(*a); })) {
                     // The LAST argument's own cell is never written
                     // here - see genFunction()'s own comment on the
                     // matching "_fast" prologue `dac`, which reads it
