@@ -1057,11 +1057,13 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                     }
                 }
                 if (ext->tag) {
-                    if (ext->tag->getText() != "nonrecursive") {
-                        err(ext, "unknown function attribute '@" + ext->tag->getText() +
-                                      "' - the only one recognized is '@nonrecursive'");
+                    std::string tagText = ext->tag->getText();
+                    if (tagText != "nonrecursive" && tagText != "inline_args") {
+                        err(ext, "unknown function attribute '@" + tagText +
+                                      "' - the ones recognized are '@nonrecursive' and '@inline_args'");
                     }
                     fn.isNonRecursive = true;
+                    if (tagText == "inline_args") fn.isInlineArgsEligible = true;
                 }
                 fn.isExternDecl = true;
                 prog.functions.push_back(std::move(fn));
@@ -1081,11 +1083,13 @@ Program buildProgram(CParser::ProgramContext *ctx) {
                 }
             }
             if (local->tag) {
-                if (local->tag->getText() != "nonrecursive") {
-                    err(local, "unknown function attribute '@" + local->tag->getText() +
-                                    "' - the only one recognized is '@nonrecursive'");
+                std::string tagText = local->tag->getText();
+                if (tagText != "nonrecursive" && tagText != "inline_args") {
+                    err(local, "unknown function attribute '@" + tagText +
+                                    "' - the ones recognized are '@nonrecursive' and '@inline_args'");
                 }
                 fn.isNonRecursive = true;
+                if (tagText == "inline_args") fn.isInlineArgsEligible = true;
             }
             if (local->addr) {
                 fn.hasAddress = true;

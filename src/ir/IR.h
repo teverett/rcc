@@ -177,6 +177,11 @@ struct Function {
     // otherwise be disqualified only by containing a call.
     bool isNonRecursive = false;
 
+    // '@inline_args': see AST.h's own comment - implies isNonRecursive.
+    // Pdp7Codegen.cpp's own genExpr() Call case and genFunction() are the
+    // only readers.
+    bool isInlineArgsEligible = false;
+
     // Local-variable frame size in bytes: highest Local frameOffset plus that
     // local's size, minus the reserved-int offset frameOffset is counted
     // from; 0 if no locals. Excludes params, which live in the caller's

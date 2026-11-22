@@ -771,6 +771,27 @@ different, already-triaged issue) - this one slipped through untracked until now
 building down from the test's two back-to-back `(int)c + 1` conversions to the single-conversion
 case and checking `PowerPCCodegen::genConvert`'s char-to-int sign-extension path under qemu.
 
+## `tests/run_tests.sh --target=r10000` intermittently fails `local_cse_convert.c` and `string_literal_unaligned_store.c`, unrelated to any real code change
+
+Discovered 2026-11-22 while verifying a pdp7-only change (the `@inline_args` calling-convention
+work) didn't regress other backends: a full `ctests --target=r10000 --optimize` run showed these
+two tests FAIL (`local_cse_convert.c: expected 1, got 0 (t0 hex: 00000000)`,
+`string_literal_unaligned_store.c: qemu execution failed (monitor exit 1)`), while every other
+backend (pdp7/riscv32/z80/i386/6502) stayed clean.
+
+Confirmed NOT a real regression: `rcc`'s own `--dump-ir` output for `local_cse_convert.c` is
+byte-identical before and after the change under investigation, and the COMPILED BINARY
+(`--format=raw`) is byte-identical too (`cmp` confirms). Running that same, unchanged binary
+through an isolated `qemu-system-mips` invocation (bypassing `run_tests.sh` entirely) reproduces
+`t0=0` reliably, on EVERY run, with no code difference at all - this is purely a `qemu-system-mips`/
+test-harness timing issue (likely `tests/qemu_wait.py`'s own polling racing the emulator's own
+boot/execution timing under this specific small program's shape), not a compiler bug.
+
+Not yet root-caused further. `run_tests.sh --target=r10000` should probably retry a failed test
+once before reporting FAIL, or `qemu_wait.py` needs its own timing fix - whichever turns out to be
+the real fix, this is tracked here so a future `ctests` run isn't mistaken for a real regression on
+these two specific tests.
+
 ## `parrotvm` local array initialization emits garbled/invalid PIR for a literal or symbol element
 
 Discovered 2026-11-20 while converting `ParrotVmCodegen.cpp`'s instruction emission to the

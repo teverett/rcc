@@ -199,6 +199,59 @@ bool Pdp7Codegen::isFastCallEligible(const ir::Function *fn) const {
     return it != leafEligibleByFunc_.end() && it->second;
 }
 
+bool Pdp7Codegen::isInlineArgsCallEligible(const ir::Function *fn) const {
+    // An `extern` declaration never populates `params` (only
+    // `prototypeParams` - see IRBuilder.cpp's own extern-case
+    // comment) - this needs the arity either way has, so it checks
+    // whichever one is actually populated.
+    size_t arity = fn->isExternal ? fn->prototypeParams.size() : fn->params.size();
+    return isFastCallEligible(fn) && fn->isInlineArgsEligible && arity >= 2;
+}
+
+std::optional<std::string> Pdp7Codegen::inlineWordText(const ir::Expr &exprIn) {
+    // `&arr[k]` passed where the parameter's own declared type is a
+    // plain scalar (e.g. `copy(int src, int dest, int count)`, not
+    // `int *dest`) arrives wrapped in a Convert node - a pure type-
+    // system formality here, never a real bit-level change, since a
+    // pointer and a plain (non-wide) int share the same one-word
+    // width on this target. Safe to see straight through, same as
+    // narrowAC() itself being a no-op whenever the width doesn't
+    // actually change.
+    const ir::Expr *e = &exprIn;
+    while (e->kind == ir::ExprKind::Convert && e->lhs && !isWide(e->lhs->type) && !isWide(e->type)) {
+        e = e->lhs.get();
+    }
+    if (e->kind == ir::ExprKind::IntLit) return std::to_string(pdp7Word(e->intValue));
+    if (e->kind == ir::ExprKind::Unary && e->op == "&" && e->rhs && e->rhs->kind == ir::ExprKind::Index &&
+        e->rhs->slot && e->rhs->slot->kind == ir::SlotKind::Global && e->rhs->lhs &&
+        e->rhs->lhs->kind == ir::ExprKind::IntLit) {
+        // Deliberately NOT directElementOperand()'s own "+label+offset"
+        // text: that's built to follow a real mnemonic as an
+        // INSTRUCTION's operand ("dac +G_x+3"), but this word stands
+        // completely alone on its own line, with no mnemonic ahead of
+        // it - RccAsm.g4's own `statement` rule requires the FIRST
+        // token to be a bare IDENT/NUMBER (never a leading sign), so
+        // the symbol itself has to be that first token, with the
+        // offset (if any) a separate, explicitly-signed operand
+        // syllable right after it - "G_x +3", not "+G_x+3". Same real-
+        // addition reasoning as directElementOperand()'s own comment
+        // for why the offset's sign must be explicit.
+        ir::Slot *slot = e->rhs->slot;
+        long offset = e->rhs->lhs->intValue * widthOfType(slot->type);
+        if (offset == 0) return label(slot);
+        return label(slot) + " +" + std::to_string(offset);
+    }
+    return std::nullopt;
+}
+
+bool Pdp7Codegen::allInlinable(const std::vector<ir::ExprPtr> &args) {
+    if (args.size() < 2) return false;
+    for (size_t i = 1; i < args.size(); i++) {
+        if (!inlineWordText(*args[i]).has_value()) return false;
+    }
+    return true;
+}
+
 std::string Pdp7Codegen::allocTemp() { return "T" + std::to_string(tempCounter_++); }
 
 void Pdp7Codegen::declareTemp(const std::string &label) { trailer_.push_back(label + ": 0"); }
@@ -454,6 +507,22 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
             std::string bodyStart = newLabel();
             emit("jmp", bodyStart);
             emitRaw(cat(label(fn.func), "_fast: 0"));
+            // The LAST parameter (if any) arrives in AC, not its own
+            // Param cell - `jms` never touches AC, so whatever the
+            // caller last evaluated (that argument's own value) is
+            // still sitting there - the same reasoning
+            // `isInlineArgsCallEligible()`'s own argument-0 case
+            // already relies on, just applied to the opposite end of
+            // the list: a direct call site (genExpr()'s own Call
+            // case) stores every OTHER argument into its own cell as
+            // usual, but never the last one, so this one `dac` here -
+            // paid ONCE, in the callee's own prologue - replaces what
+            // would otherwise be a separate `dac` at EVERY call site.
+            // Must run before the very next line clobbers AC with the
+            // fast label's own return address.
+            if (!fn.func->params.empty()) {
+                emit("dac", cat(label(fn.func), "_P", std::to_string(fn.func->params.size() - 1)));
+            }
             // `jms <fast label>` wrote ITS caller's return address
             // into the fast label's own cell, not the primary entry's
             // - but the body's own eventual `jmp i <primary label>`
@@ -464,6 +533,50 @@ void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
             // called through.
             emit("lac", cat(label(fn.func), "_fast"));
             emit("dac", label(fn.func));
+            // The '@inline_args' entry (see Pdp7Codegen.h's own
+            // isInlineArgsCallEligible()/inlineWordText() comments):
+            // right where "_fast"'s own prologue (just above) falls
+            // through, same "jmp over the next entry's reserved cell"
+            // requirement as "_fast"'s own cell has relative to the
+            // stack-based entry above it. Only emitted for a function
+            // a "_lit" call site could actually reach - the same
+            // isInlineArgsCallEligible() check a call site applies.
+            if (isInlineArgsCallEligible(fn.func)) {
+                emit("jmp", bodyStart);
+                emitRaw(cat(label(fn.func), "_lit: 0"));
+                // `jms <lit label>` wrote the address of the FIRST
+                // inline literal word (right after the call site's
+                // own `jms`) into the lit label's own cell - stage it
+                // in kParamCursorReg one word early (same pre-
+                // decrement-then-autoincrement convention
+                // emitLeafParamBinding() already uses) so each
+                // indirect read both fetches one trailing argument's
+                // own inline word AND advances the register to the
+                // next one, in ascending param-index order (P1, P2,
+                // ...; P0 was already written directly by the call
+                // site, before its own `jms` ran).
+                emit("lac", cat(label(fn.func), "_lit"));
+                emit("tad", "__mone");
+                emit("dac", kParamCursorReg);
+                for (size_t i = 1; i < fn.func->params.size(); i++) {
+                    emit("lac", std::string(kParamCursorReg) + " i");
+                    emit("dac", cat(label(fn.func), "_P", std::to_string(i)));
+                }
+                // kParamCursorReg now holds the address of the LAST
+                // inline word (not past it - the loop above's own
+                // final read only advanced it TO that word, the same
+                // off-by-one emitLeafParamBinding() avoids by staging
+                // one word early in the first place; there's no
+                // matching "one word early" trick available at the
+                // END of a fixed-length run, so this one extra `tad`
+                // corrects it directly) - one past that is the real
+                // resume address, staged into the primary return cell
+                // for the same shared `jmp i <primary label>` epilogue
+                // every entry point relies on.
+                emit("lac", kParamCursorReg);
+                emit("tad", "__one");
+                emit("dac", label(fn.func));
+            }
             emitLabel(bodyStart);
         }
         genStmt(*fn.body);
@@ -1640,6 +1753,24 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
             return;
         }
         case ir::ExprKind::Call: {
+            // See Pdp7Codegen.h's own isInlineArgsCallEligible()/
+            // inlineWordText() comments. Checked ahead of the plain
+            // fast-call branch below: every argument after the first
+            // is itself a single relocatable/literal word, so each
+            // one costs one inline word in the instruction stream
+            // instead of a "lac arg; dac P<n>" pair - argument 0 is
+            // unaffected either way (still "lac arg0; dac P0"; it's
+            // whatever value evaluating that argument naturally
+            // leaves in AC, nothing to inline there).
+            if (isInlineArgsCallEligible(e.func) && !isWide(e.args[0]->type) && allInlinable(e.args)) {
+                genExpr(*e.args[0]);
+                emit("dac", cat(label(e.func), "_P0"));
+                emit("jms", cat(label(e.func), "_lit"));
+                for (size_t i = 1; i < e.args.size(); i++) {
+                    emitRaw(*inlineWordText(*e.args[i]));
+                }
+                return;
+            }
             // See Pdp7Codegen.h's own fast-call eligibility comment.
             // Narrow-only (!isWide) on top of isFastCallEligible()'s
             // own parameter-shape check: a wide ARGUMENT can't fit
@@ -1654,9 +1785,15 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
                 // call below runs (no call anywhere in the list at
                 // all).
                 if (std::all_of(e.args.begin(), e.args.end(), [this](const ir::ExprPtr &a) { return isCallFree(*a); })) {
+                    // The LAST argument's own cell is never written
+                    // here - see genFunction()'s own comment on the
+                    // matching "_fast" prologue `dac`, which reads it
+                    // straight from AC instead (nothing clobbers AC
+                    // between this last `genExpr()` and the `jms`
+                    // below).
                     for (size_t i = 0; i < e.args.size(); i++) {
                         genExpr(*e.args[i]);
-                        emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                        if (i + 1 < e.args.size()) emit("dac", cat(label(e.func), "_P", std::to_string(i)));
                     }
                 } else {
                     // At least one argument itself makes a call, which
@@ -1677,9 +1814,15 @@ void Pdp7Codegen::genExpr(const ir::Expr &e) {
                         declareTemp(argTemps[i]);
                         emit("dac", argTemps[i]);
                     }
+                    // Same "last argument's own cell is never
+                    // written here" reasoning as the call-free branch
+                    // above - the final `lac` below leaves it in AC
+                    // for the callee's own "_fast" prologue to store,
+                    // with nothing after it to clobber AC before the
+                    // `jms`.
                     for (size_t i = 0; i < e.args.size(); i++) {
                         emit("lac", argTemps[i]);
-                        emit("dac", cat(label(e.func), "_P", std::to_string(i)));
+                        if (i + 1 < e.args.size()) emit("dac", cat(label(e.func), "_P", std::to_string(i)));
                     }
                 }
                 emit("jms", cat(label(e.func), "_fast"));

@@ -492,6 +492,44 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     // a caller trusting a wrong claim fails loud - an undefined
     // `_fast` symbol at link time - not silently.
     bool isFastCallEligible(const ir::Function *fn) const;
+
+    // The '@inline_args' variant of the fast-call convention (see
+    // AST.h's own comment on the attribute): a second, narrower entry
+    // point ("_lit") a call site can jump to instead of "_fast" when
+    // every argument after the first is itself encodable as a single
+    // relocatable/literal word (inlineWordText() returns a value for
+    // it) - trading the normal "lac arg; dac P<n>" pair per trailing
+    // argument for one inline word in the caller's own instruction
+    // stream, read back by the callee's own "_lit" prologue via
+    // kParamCursorReg (the same autoindex register/convention
+    // emitLeafParamBinding() already uses - see its own comment; this
+    // mechanism always finishes using it, and leaves nothing live in
+    // it, before genStmt() runs, so the two never conflict).
+    //
+    // Only ever true for a function this same translation unit also
+    // emits a real "_lit" entry point for - exactly isFastCallEligible()'s
+    // own same-file-vs-extern split, plus the extra
+    // isInlineArgsEligible/arity-2 gate genFunction() itself applies
+    // before emitting that entry point.
+    bool isInlineArgsCallEligible(const ir::Function *fn) const;
+
+    // The text for a single relocatable/literal word standing in for
+    // `e` with zero runtime computation - an IntLit's own two's-
+    // complement text (pdp7Word()), or (reusing directElementOperand()'s
+    // own "+label+offset" text, the same shape a direct Global-array
+    // element reference already uses) a compile-time-constant Global
+    // array address like `&arr[k]`. nullopt for anything else -
+    // exactly what allInlinable() below requires of every argument
+    // after the first.
+    std::optional<std::string> inlineWordText(const ir::Expr &e);
+
+    // True iff `args.size() >= 2` and inlineWordText() has a value for
+    // every argument from index 1 on - the trailing suffix a "_lit"
+    // call site inlines (argument 0 is never inlined; it's always
+    // already being evaluated into AC right before the call under
+    // every convention, fast-call included, so there's nothing to
+    // save there - see Pdp7Codegen.cpp's own Call-case comment).
+    bool allInlinable(const std::vector<ir::ExprPtr> &args);
     // Precomputed once, in generate(), before any function body is
     // generated: `computeIsLeaf()`'s own real verdict for every
     // function DEFINED in this file (never populated for an `extern`

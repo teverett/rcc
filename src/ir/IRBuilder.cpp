@@ -589,6 +589,7 @@ class Builder {
                 // loud (an undefined `_fast` entry symbol at link
                 // time) rather than silently.
                 irFn->isNonRecursive = fn.isNonRecursive;
+                irFn->isInlineArgsEligible = fn.isInlineArgsEligible;
                 for (const auto &p : fn.params) {
                     Type pt = resolveStructType(p.type, fn.line);
                     rejectStructByValue(pt, fn.line, "a function parameter");
@@ -602,6 +603,7 @@ class Builder {
             irFn->address = fn.address;
             irFn->isStatic = fn.isStatic;
             irFn->isNonRecursive = fn.isNonRecursive;
+            irFn->isInlineArgsEligible = fn.isInlineArgsEligible;
             if (fn.isStatic) irFn->sourceName = mangleStaticName(fn.sourceFile, fn.name);
             // Params start past a two-native-int reservation for the saved
             // frame pointer/return address. Each param occupies at least one

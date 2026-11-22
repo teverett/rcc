@@ -186,6 +186,19 @@ struct FunctionDecl {
     // "Non-recursion" section and IRBuilder.cpp's own same-file call-graph
     // check of it.
     bool isNonRecursive = false;
+
+    // '@inline_args': like '@nonrecursive' (and implies it - the grammar
+    // only allows one '@' tag, so this one subsumes the other rather than
+    // requiring both spelled out), but ALSO asserts the pdp7 backend may
+    // give this function a second, narrower calling convention for a
+    // call site whose own trailing arguments (everything after the
+    // first) are all compile-time constants: those arguments are then
+    // passed as literal words inline in the caller's own instruction
+    // stream, right after the call, instead of through named Param
+    // cells - see Pdp7Codegen.cpp's own "_lit" entry point comment. Not
+    // meaningful, and not usable, on a function with fewer than 2
+    // params (nothing to pass this way).
+    bool isInlineArgsEligible = false;
 };
 
 struct GlobalVar {
