@@ -39,6 +39,9 @@ directory with a `Makefile` and a `README.md` of its own:
 - `8080-altair` — MITS Altair 8800 "hello world" for `8080`, linked as
   `--platform=8080-raw` against `src/rt/altair/`'s port-mapped 88-2SIO
   serial runtime library
+- `8080-imsai` — IMSAI 8080 "hello world" for `8080`, linked as
+  `--platform=8080-raw` against `src/rt/imsai/`'s port-mapped SIO-2
+  serial runtime library
 - `6809-coco` — TRS-80 Color Computer "hello world" for `6809`, linked as
   `--platform=6809-raw` against `src/rt/coco/`'s video-RAM runtime
   library

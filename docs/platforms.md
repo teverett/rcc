@@ -446,6 +446,19 @@ pair - see `docs/using.md`.
   bootstrap convention of its own to emulate. Tested the same way as
   plain `8080` above, with `read_port`/`write_port` callbacks standing in
   for the 2SIO (`examples/8080-altair/test.py`).
+- **IMSAI 8080** — `--target=8080` plus `src/rt/imsai/`'s SIO-2 serial
+  runtime library (`imsai.h`/`imsai.c`): console I/O through the SIO-2
+  board's data port (`$02`) and status port (`$03`) via `IN`/`OUT`, the
+  convention Lifeboat CP/M's own BIOS and the IMSAI SIO-2 emulators
+  (IMSAI8080esp, z80pack's imsaisim) assume at the board's default jumper
+  address. The SIO-2's 8251 USART numbers its ready bits the other way
+  round from the Altair 2SIO's 6850 ACIA above (bit 0 is transmit-ready,
+  bit 1 is receive-ready), so this is a distinct status-bit convention,
+  not just a different port pair. Same "one board, no single fixed
+  address for the rest of the bus" caveat as Altair 8800 above, and no
+  native file/disk format either, for the same reason. Tested the same
+  way as plain `8080` above, with `read_port`/`write_port` callbacks
+  standing in for the SIO-2 (`examples/8080-imsai/test.py`).
 - **z80** — real Z80 assembly/machine code (`Z80Assembler.h`), its own
   independent backend (unlike the `8086`/`8088` alias) since it uses
   Z80-only instructions: real 16-bit `ADD HL,rr`/`SBC HL,rr`, direct
