@@ -1,6 +1,7 @@
 #include "Pdp1Codegen.h"
 
 #include <stdexcept>
+#include <unordered_set>
 #include <utility>
 
 #include "Pdp1Assembler.h"
@@ -1030,6 +1031,44 @@ void Pdp1Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
     auto flip = [&]() {
         if (unsignedCmp) emitRaw("   xor __signbit");
     };
+    // Whether `e`'s sign is knowable with no runtime `sma` test at all: a
+    // compile-time literal, a boolean-valued expression (a comparison/
+    // logical operator, or `!`, which always evaluates to 0 or 1
+    // regardless of its own operands' values) - or, via the other
+    // operand's own `knownNonNegative` check below, "the sibling operand
+    // has already been proven non-negative". Only ever consulted as the
+    // *other* operand in signAKnown/signBKnown below, never to make `e`
+    // itself skip its own test: an IntLit/boolean-valued `e` still runs
+    // through genExpr()+toTemp() like any other operand on this target (no
+    // direct-literal-cell path the way Pdp7Codegen.cpp's own simpleCell()
+    // has), so its *own* sign never needs skipping - only a sibling Var's
+    // `knownNonNegative` check is ever actually skipped as a result.
+    // Mirrors Pdp7Codegen.cpp's own genCompareCells()'s `hasStaticSign()`:
+    // same two optimizer passes (InductionNonNegative/GuardNonNegative,
+    // see IR.h's own `knownNonNegative`), same underlying reasoning on a
+    // different one's-complement target that also has no condition-code
+    // register and so also needs a runtime sign dispatch for every signed
+    // `<`.
+    static const std::unordered_set<std::string> kBoolOps = {"==", "!=", "<", "<=", ">", ">=", "&&", "||"};
+    auto hasStaticSign = [&](const ir::Expr &e) {
+        if (e.kind == ir::ExprKind::IntLit) return true;
+        if (e.kind == ir::ExprKind::Var && e.slot && e.slot->knownNonNegative) return true;
+        if (e.kind == ir::ExprKind::Unary && e.op == "!") return true;
+        if (e.kind == ir::ExprKind::Binary && kBoolOps.count(e.op)) return true;
+        return false;
+    };
+    // Only ever claims a *non-negative* sign (never a known-negative one -
+    // `knownNonNegative` only ever proves the former), and only when the
+    // other operand also has a statically known sign: with just one side
+    // known, the dispatch below would still need a live test on the other
+    // side in every arm anyway, so skipping just one side's own test saves
+    // nothing. Never applied under `unsignedCmp`, since `knownNonNegative`
+    // proves a fact about the original signed value, not about the
+    // sign-bit-flipped representation this comparison actually runs on.
+    bool signAKnown = !unsignedCmp && lhs.kind == ir::ExprKind::Var && lhs.slot && lhs.slot->knownNonNegative &&
+                       hasStaticSign(rhs);
+    bool signBKnown = !unsignedCmp && rhs.kind == ir::ExprKind::Var && rhs.slot && rhs.slot->knownNonNegative &&
+                       hasStaticSign(lhs);
     std::string A, B;
     auto toTemp = [&]() {
         std::string T = allocTemp();
@@ -1061,29 +1100,49 @@ void Pdp1Codegen::emitLt(const ir::Expr &lhs, const ir::Expr &rhs, bool negate) 
             A = toTemp();
         }
     }
-    std::string LaNeg = newLabel(), LaPos = newLabel();
     std::string Ltrue = newLabel(), Lfalse = newLabel(), Ldone = newLabel(), Lsub = newLabel();
     // `sma` skips the immediately following instruction when AC<0: with
     // "sma\n jmp X\n jmp Y", X runs when AC>=0 and Y runs when AC<0 (the
     // skip jumps over X, landing on Y) - every branch below is ordered to
     // that rule, not to the "jmp true-case then jmp false-case" shape
     // used elsewhere in this file for an `sza`/`sad` test.
-    emitRaw(cat("   lac ", A));
-    emitRaw("   sma");
-    emitRaw(cat("   jmp ", LaPos));
-    emitRaw(cat("   jmp ", LaNeg));
-    // A<0: B>=0 decides A<B directly (true); B<0 (same sign) needs Lsub.
-    emitLabel(LaNeg);
-    emitRaw(cat("   lac ", B));
-    emitRaw("   sma");
-    emitRaw(cat("   jmp ", Ltrue));
-    emitRaw(cat("   jmp ", Lsub));
-    // A>=0: B>=0 (same sign) needs Lsub; B<0 decides A<B directly (false).
-    emitLabel(LaPos);
-    emitRaw(cat("   lac ", B));
-    emitRaw("   sma");
-    emitRaw(cat("   jmp ", Lsub));
-    emitRaw(cat("   jmp ", Lfalse));
+    if (signAKnown && signBKnown) {
+        // Both operands provably non-negative: same sign is guaranteed, so
+        // neither side needs a runtime test at all - fall straight through
+        // into the subtract below.
+    } else if (signAKnown) {
+        // A>=0 known: B>=0 (same sign) needs Lsub; B<0 decides A<B false -
+        // skips A's own dispatch entirely, testing only B.
+        emitRaw(cat("   lac ", B));
+        emitRaw("   sma");
+        emitRaw(cat("   jmp ", Lsub));
+        emitRaw(cat("   jmp ", Lfalse));
+    } else if (signBKnown) {
+        // B>=0 known: A<0<=B decides true directly; A>=0 (same sign) needs
+        // Lsub - skips B's own dispatch entirely, testing only A.
+        emitRaw(cat("   lac ", A));
+        emitRaw("   sma");
+        emitRaw(cat("   jmp ", Lsub));
+        emitRaw(cat("   jmp ", Ltrue));
+    } else {
+        std::string LaNeg = newLabel(), LaPos = newLabel();
+        emitRaw(cat("   lac ", A));
+        emitRaw("   sma");
+        emitRaw(cat("   jmp ", LaPos));
+        emitRaw(cat("   jmp ", LaNeg));
+        // A<0: B>=0 decides A<B directly (true); B<0 (same sign) needs Lsub.
+        emitLabel(LaNeg);
+        emitRaw(cat("   lac ", B));
+        emitRaw("   sma");
+        emitRaw(cat("   jmp ", Ltrue));
+        emitRaw(cat("   jmp ", Lsub));
+        // A>=0: B>=0 (same sign) needs Lsub; B<0 decides A<B directly (false).
+        emitLabel(LaPos);
+        emitRaw(cat("   lac ", B));
+        emitRaw("   sma");
+        emitRaw(cat("   jmp ", Lsub));
+        emitRaw(cat("   jmp ", Lfalse));
+    }
     emitLabel(Lsub);
     emitRaw(cat("   lac ", A));
     emitRaw(cat("   sub ", B));

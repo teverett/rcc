@@ -147,7 +147,12 @@ exception (see below).
   (`ir/IR.h`), which a backend's signed-comparison lowering may treat the
   same as a non-negative literal operand — `Pdp7Codegen.cpp`'s
   `genCompareCells()` does, letting `emitSignedLtCells()` skip that
-  operand's own dynamic sign dispatch. Deliberately narrow rather than a
+  operand's own dynamic sign dispatch; `Pdp1Codegen.cpp`'s `emitLt()` does
+  the equivalent skip on its own one's-complement, no-condition-code
+  comparison lowering (neither `pdp10` nor `pdp11` need this: `pdp10`'s
+  comparisons are a single native signed-jump instruction with no
+  per-operand sign dispatch to skip, and `pdp11`'s condition codes make a
+  comparison free regardless of sign). Deliberately narrow rather than a
   general value-range-analysis pass (see `docs/known-bugs.md`'s own
   PDP-7 entry for the general case this doesn't cover); conservative
   enough that two sequential loops in one function reusing the same

@@ -165,10 +165,10 @@ platform whose own hardware also reaches high memory could move the
 stack somewhere genuinely clear of it, or some other way to reserve a
 provably-safe margin instead of an empirically-chosen one.
 
-## PDP-7 codegen still pays the full sign-dispatch cost inline for a variable comparison operand outside the idioms it can prove non-negative
+## PDP-7/PDP-1 codegen still pay the full sign-dispatch cost inline for a variable comparison operand outside the idioms the optimizer can prove non-negative
 
 Affects `src/codegen/pdp7/Pdp7Codegen.cpp`'s `emitSignedLtCells()`/
-`genCompareCells()`.
+`genCompareCells()` and `src/codegen/pdp1/Pdp1Codegen.cpp`'s `emitLt()`.
 
 `src/optimizers/induction_nonneg/InductionNonNegative.cpp` proves
 non-negativity for two narrow, common idioms - a Local slot initialized to
@@ -177,29 +177,36 @@ inside the one loop that owns it (the `for(i=0; i<N; i=i+1)` desugaring),
 or decremented by a positive literal step whose owning loop's guard
 (`i>C`/`i>=C`) already proves `i` stays high enough to absorb that step
 without crossing zero (the `for(i=N; i>0; i=i-1)` desugaring) - with no
-other write or `&slot` anywhere in the function - letting
-`genCompareCells()`'s `ready()` treat such a slot's `Var` read the same
-as a literal operand. Separately, `genCompareCells()`'s own
-`hasStaticSign()` also recognizes a boolean-valued *other* operand (a
-comparison/logical operator, or `!`, which always evaluates to 0 or 1) as
-good enough to justify applying an already-known non-negative sign to its
-sibling, without needing `simpleCell()` to turn the boolean expression
-itself into a ready cell.
+other write or `&slot` anywhere in the function.
+`src/optimizers/guard_nonneg/GuardNonNegative.cpp` separately covers the
+one other idiom either backend recognizes: a value proven non-negative
+across a dominating `if (slot >= 0) { ...uses of slot... }` guard (or
+`> 0`/`0 <= slot`/`0 < slot`). Both passes mark the same slot-level
+`knownNonNegative` flag (`ir/IR.h`), which each backend's own comparison
+lowering treats the same as a literal operand with a known sign -
+`genCompareCells()`'s `ready()`/`hasStaticSign()` for pdp7, `emitLt()`'s
+own `hasStaticSign()` for pdp1. Both also recognize a boolean-valued
+*other* operand (a comparison/logical operator, or `!`, which always
+evaluates to 0 or 1) as good enough to justify applying an already-known
+non-negative sign to its sibling.
 
-Still open: a sign proven across an `if` guard rather than a loop's own
-increment/decrement (e.g. `if (x >= 0) { ... use x ... }`), and any value
-range narrower than "always non-negative from zero" that isn't one of the
-two loop shapes or a boolean-valued expression above, still pay the full
-dynamic sign dispatch via the shared `__cmp_lt` subroutine. Closing that
-remaining general case would need a real value-range-analysis pass, which
-still doesn't exist anywhere in this codebase (no `ValueRange`/range-
-tracking code in `src/ir` or `src/codegen`, and no control-flow-sensitive
-fact tracking either - only the slot-level `knownNonNegative` flag the two
-loop idioms above set) - a substantial undertaking on its own, not
-attempted here. Still PDP-7-specific: the PDP-7 has no condition-code/
-flags register, so every signed `<` needs sign-based machinery at all,
-unlike i386/6502 which get a correct comparison for free from one native
-compare instruction regardless of either operand's sign.
+Still open: any value range narrower than "always non-negative from zero"
+that isn't one of the two loop shapes, the one guard shape, or a
+boolean-valued expression above still pays the full dynamic sign dispatch
+(pdp7's shared `__cmp_lt` subroutine, or pdp1's inline `sma` dispatch).
+Closing that remaining general case would need a real value-range-
+analysis pass, which still doesn't exist anywhere in this codebase (no
+`ValueRange`/range-tracking code in `src/ir` or `src/codegen`, and no
+control-flow-sensitive fact tracking either - only the slot-level
+`knownNonNegative` flag the two idioms above set) - a substantial
+undertaking on its own, not attempted here. Still specific to these two
+targets: pdp7 and pdp1 both have no condition-code/flags register, so
+every signed `<` needs sign-based dispatch machinery at all, unlike
+i386/6502 (one native compare instruction, correct for either operand's
+sign, for free) or pdp10/pdp11 (native signed-comparison/branch
+instructions with no per-operand sign dispatch of their own to skip, and,
+for pdp11, real condition codes besides) - there's nothing for this
+optimization to port to on either of those two.
 
 ## `r10000`/`r4000`'s `long long` support has two distinct, now-root-caused bugs: the divide/modulo loop and a wide call argument's word order
 
