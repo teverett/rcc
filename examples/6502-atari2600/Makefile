@@ -11,13 +11,13 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=atari2600-a26 --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=atari2600-a26 --dump-ir --dump-asm --out="$@" "$<"
 
 # --base=$F000: a 4K cartridge image (see ../../src/fileformat/
 # atari2600/Atari2600RomFormat.h) - $F000/$F800 are the only two bases
 # --format=a26 accepts.
 $(BUILD_DIR)/main.a26: $(BUILD_DIR)/main.o
-	$(RCC) --link --platform=atari2600-a26 --base='$$F000' --out="$@" "$(BUILD_DIR)/main.o"
+	$(RCC) --debug-map --link --platform=atari2600-a26 --base='$$F000' --out="$@" "$(BUILD_DIR)/main.o"
 
 # Same link, written out as `raw` instead of `a26` - identical program
 # bytes minus the cartridge padding/vector table - so CI can load and run

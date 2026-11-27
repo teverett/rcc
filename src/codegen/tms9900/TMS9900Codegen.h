@@ -57,6 +57,17 @@ class TMS9900Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // Only the whole-program-final format(s) this target lists in
+    // assembledFormats() (not a real relocatable object - see
+    // Backend::debugMap()'s own comment) get a debug map; main.cpp's own
+    // isObjectFormat() gate already keeps this from ever being called for
+    // an object format, so no format check is needed here.
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
@@ -194,6 +205,13 @@ class TMS9900Codegen : public Backend, protected TextCodegenBase {
     const ir::Function *curFunction_ = nullptr;
     std::vector<std::pair<std::string, std::string>> loopLabels_;  // {continue label, break label}
     std::map<int, std::string> irLabels_;
+
+    // Debug-map-only - see Pdp7Codegen.h's own comment on the identical
+    // members there, which this mirrors exactly.
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
 };
 
 }  // namespace rcc

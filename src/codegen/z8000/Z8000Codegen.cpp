@@ -1,6 +1,7 @@
 #include "Z8000Codegen.h"
 
 #include <cstdint>
+#include <tuple>
 #include <stdexcept>
 
 #include "Z8000Assembler.h"
@@ -68,12 +69,25 @@ std::string Z8000Codegen::generate(const ir::Program &prog, bool objectMode) {
         emitRaw("");
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    // --dump-asm wants one file per input, not one combined dump - see
+    // Pdp7Codegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, index ranges into trailer_,
+    // sliced into perFileAsm_ at the end).
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> trailerRanges;
+
+    for (const auto &fb : prog.functionBodies) {
+        size_t fCodeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     size_t globalByteOffset = 0;
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t gTrailerStart = trailer_.size();
         const std::string lbl = label(slot.get());
         int elemW = widthOfType(slot->type);
         size_t totalBytes =
@@ -107,6 +121,14 @@ std::string Z8000Codegen::generate(const ir::Program &prog, bool objectMode) {
                 trailer_.push_back(line.str());
             }
         }
+        trailerRanges.push_back({slot->sourceFile, gTrailerStart, trailer_.size()});
+    }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : trailerRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += trailer_[i] + "\n";
     }
 
     std::ostringstream out;
@@ -122,6 +144,8 @@ std::map<std::string, std::string> Z8000Codegen::perFileAsm() const { return per
 // pushed arguments above that - see addr()), then `sub` reserves Locals below `r13`. Epilogue
 // (here and every `Return`) undoes it.
 void Z8000Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("push", "r13");
     emit("ld", "r13,r15");
@@ -134,6 +158,7 @@ void Z8000Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void Z8000Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1127,6 +1152,27 @@ std::optional<std::string> Z8000Codegen::assembleInProcess(const std::string &as
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> Z8000Codegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleZ8000DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> Z8000Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleZ8000DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void Z8000Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

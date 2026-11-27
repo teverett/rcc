@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <tuple>
 
 #include "PIC16Assembler.h"
 #include "fileformat/FileFormat.h"
@@ -278,6 +279,17 @@ std::string PIC16Codegen::generate(const ir::Program &prog, bool objectMode) {
     // exhausted" check rather than silently corrupting memory.
     declareRam("SSTACK", kPIC16SStackSize);
 
+    // --dump-asm wants one file per input, not one combined dump - see
+    // AlphaCodegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges, sliced into perFileAsm_ at the end).
+    // `globalInit`'s own content is tracked against itself (not
+    // wherever it's later spliced to - `header` or `code_`, depending
+    // on `objectMode`), so the function loop below must skip over the
+    // `emitVerbatim(globalInit.str())` span rather than re-counting it.
+    std::vector<std::tuple<std::string, size_t, size_t>> initRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> ramRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+
     // Globals need real startup code, not a loaded data image: data
     // memory has no power-on value.
     std::ostringstream globalInit;
@@ -286,6 +298,9 @@ std::string PIC16Codegen::generate(const ir::Program &prog, bool objectMode) {
         // An external global isn't defined in this file; it's only ever
         // referenced by name, deferred to a data-space relocation.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t ramStart = ramDecls_.size();
+        size_t initStart = static_cast<size_t>(globalInit.tellp());
         const std::string lbl = label(slot.get());
         int elemWidth = widthOfType(slot->type);
         if (slot->arraySize > 0) {
@@ -302,6 +317,8 @@ std::string PIC16Codegen::generate(const ir::Program &prog, bool objectMode) {
                 emitInitByte(globalInit, i == 0 ? lbl : lbl + "+" + std::to_string(i), b);
             }
         }
+        ramRanges.push_back({slot->sourceFile, ramStart, ramDecls_.size()});
+        initRanges.push_back({slot->sourceFile, initStart, static_cast<size_t>(globalInit.tellp())});
     }
 
     for (const auto &fb : prog.functionBodies) {
@@ -309,17 +326,34 @@ std::string PIC16Codegen::generate(const ir::Program &prog, bool objectMode) {
             // globalInit has nowhere else to run in object mode, so it
             // runs in fn_main's own prologue instead, which still needs
             // its own frame (no params, but may have Locals).
+            lastDebugLine_ = 0;
+            if (debugMapEnabled_) debugSymbols_.push_back({label(fb.func), /*isFunc=*/true});
             curNumParams_ = 0;
+            size_t codeStart = static_cast<size_t>(code_.tellp());
             emitLabel(label(fb.func));
             emitPrologue(/*numParams=*/0, fb.func->frameSize);
+            codeRanges.push_back({fb.func->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
             emitVerbatim(globalInit.str());
+            codeStart = static_cast<size_t>(code_.tellp());
             genStmt(*fb.body);
             emitEpilogue(/*numParams=*/0);
             emit("return");
             emitRaw("");
+            codeRanges.push_back({fb.func->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
         } else {
+            size_t codeStart = static_cast<size_t>(code_.tellp());
             genFunction(fb);
+            codeRanges.push_back({fb.func->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
         }
+    }
+
+    std::string codeStr = code_.str();
+    std::string initStr = globalInit.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : initRanges) perFileAsm_[file] += initStr.substr(s, e - s);
+    for (const auto &[file, s, e] : ramRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += ramDecls_[i] + "\n";
     }
 
     std::ostringstream header;
@@ -349,6 +383,27 @@ std::string PIC16Codegen::generate(const ir::Program &prog, bool objectMode) {
 }
 
 std::map<std::string, std::string> PIC16Codegen::perFileAsm() const { return perFileAsm_; }
+
+std::optional<std::string> PIC16Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                    const std::string &sourcePath) const {
+    if (format != "hex") return std::nullopt;
+    return assemblePIC16DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> PIC16Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assemblePIC16DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void PIC16Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
+}
 
 void PIC16Codegen::loadFrameBaseW(const ir::Slot *slot) {
     emit("movlw", frameSlotOffset(slot));
@@ -396,6 +451,8 @@ void PIC16Codegen::emitEpilogue(int numParams) {
 }
 
 void PIC16Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     curNumParams_ = static_cast<int>(fn.func->params.size());
     emitLabel(label(fn.func));
     emitPrologue(curNumParams_, fn.func->frameSize);
@@ -406,6 +463,7 @@ void PIC16Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void PIC16Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);

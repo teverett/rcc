@@ -113,6 +113,12 @@ class PIC16Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
@@ -275,6 +281,11 @@ class PIC16Codegen : public Backend, protected TextCodegenBase {
     // shared by every line-oriented-assembly backend, not just this one.
     std::vector<std::string> ramDecls_;
     std::map<std::string, std::string> perFileAsm_;
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
 
     // Set once, at the top of generate().
     bool objectMode_ = false;

@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --target=z80 --format=coff --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --target=z80 --format=coff --dump-ir --dump-asm --out="$@" "$<"
 
 # zx81.lib is src/rt/zx81/'s own build product (see that directory's own
 # Makefile) - built here via a sub-make rather than recompiling zx81.c a
@@ -25,7 +25,7 @@ $(ZX81_LIB):
 # --format=raw only - see ../../src/rt/zx81/zx81.h's own header comment for why no ZX81-native
 # container format is offered here.
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(ZX81_LIB)
-	$(RCC) --link --target=z80 --format=raw --out="$@" "$(BUILD_DIR)/main.o" "$(ZX81_LIB)"
+	$(RCC) --debug-map --link --target=z80 --format=raw --out="$@" "$(BUILD_DIR)/main.o" "$(ZX81_LIB)"
 
 # Runs main.raw on a real Z80 core (test.py) - see that script's own
 # header comment.

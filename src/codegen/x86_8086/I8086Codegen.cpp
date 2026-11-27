@@ -111,6 +111,7 @@ std::string I8086Codegen::generate(const ir::Program &prog, bool objectMode) {
         size_t gCodeStart = static_cast<size_t>(code_.tellp());
         size_t gTrailerStart = trailer_.size();
         if (slot->hasAddress) emitPlacement(slot->address);
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         const std::string lbl = label(slot.get());
         int w = widthOfType(slot->type);
         if (slot->arraySize > 0) {
@@ -176,6 +177,8 @@ std::map<std::string, std::string> I8086Codegen::perFileAsm() const { return per
 // instructions regardless of local count, giving each activation its own frame.
 void I8086Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({curFunctionLabel_, /*isFunc=*/true});
     emitLabel(curFunctionLabel_);
     // The body is generated first so the prologue can reserve one word below the Locals
     // for each nesting level of wideScope().
@@ -243,6 +246,7 @@ void I8086Codegen::genTruthValue(const ir::Expr &e, bool atStatement) {
 }
 
 void I8086Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1351,6 +1355,27 @@ std::optional<std::string> I8086Codegen::assembleInProcess(const std::string &as
     // a hard error.
     if (format == "elf") return assembleI8086(asmText, I8086OutputFormat::Elf, /*allowExternal=*/false, machineType);
     return std::nullopt;
+}
+
+std::optional<std::string> I8086Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                    const std::string &sourcePath) const {
+    if (format == "coff") return std::nullopt;
+    return assembleI8086DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> I8086Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleI8086DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void I8086Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

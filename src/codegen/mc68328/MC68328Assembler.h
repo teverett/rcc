@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -34,5 +36,10 @@ std::string assembleMC68328(const std::string &asmText);
 // ".." (the object's eventual linked base), since labels resolve relative to `org 0` until that
 // base is added.
 ObjectFile assembleMC68328Object(const std::string &asmText);
+
+
+std::string assembleMC68328DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

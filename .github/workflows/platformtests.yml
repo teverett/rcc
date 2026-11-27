@@ -121,9 +121,17 @@ jobs:
         if: matrix.name == 'linux'
         run: sudo apt-get install -y --no-install-recommends moarvm
 
+      # DOSBox-X stands in for real PC/XT hardware's own BIOS+DOS: it needs no boot
+      # sector (headless `-c`/`-silent`/`-exit` just run a `.com` directly off a mounted
+      # directory - see examples/8086-pcxt/test.py's own header comment), so this is
+      # consistent with rcc never building one itself.
+      - name: Install dosbox-x (8086-pcxt BIOS emulator)
+        if: matrix.name == 'linux'
+        run: sudo apt-get install -y --no-install-recommends dosbox-x
+
       # Each example's own `test` target builds it, then verifies it in
       # whichever simulator (py65, z80-python, qemu-system-m68k,
-      # open-simh's pdp7) that target has one wired up for - see each
+      # open-simh's pdp7, dosbox-x) that target has one wired up for - see each
       # example's own Makefile/README for which. m30626fjpfp-freestanding/
       # 8086-msdos/6809-coco/6809-vectrex/tms9900-ti994a have no emulator
       # wired into this project at all, so their `test` targets only
@@ -133,6 +141,8 @@ jobs:
         run: |
           make -C examples/m30626fjpfp-freestanding test
           make -C examples/8086-msdos test
+          make -C examples/8086-pcxt test
+          ./tests/run_pcbios_tests.sh build/bin/rcc
           make -C examples/6809-coco test
           make -C examples/6809-vectrex test
           make -C examples/6502-freestanding test

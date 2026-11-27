@@ -60,6 +60,12 @@ class STM32Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
@@ -197,6 +203,11 @@ class STM32Codegen : public Backend, protected TextCodegenBase {
     std::ostringstream initCode_;   // flash: global-init copies, spliced into _start before `bl main`
     std::vector<std::string> ramTrailer_;  // RAM: "label: ds N" reservation lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
 
     int tempCounter_ = 0;
     int labelCounter_ = 0;

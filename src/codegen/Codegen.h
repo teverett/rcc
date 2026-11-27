@@ -63,6 +63,49 @@ class Backend {
         return std::nullopt;
     }
 
+    // Opt-in (default nullopt): a lightweight symbol/line debug map for `asmText` once
+    // assembled under `format` - plain-text FILE/SYM/LINE records (address<->source line,
+    // address<->symbol), for a target's own emulator/debugger rather than real DWARF (see
+    // docs/known-bugs.md and this project's own memory on why DWARF is a poor fit here).
+    // `sourcePath` becomes the one FILE record, matching compileOneFile()'s own one-file-
+    // at-a-time compilation model (main.cpp). Only meaningful for a whole-program (non-
+    // linked) format - a backend should return nullopt for `isObjectFormat(format)`, since
+    // addresses in a relocatable object aren't final until a separate `--link` step runs.
+    virtual std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                                 const std::string &sourcePath) const {
+        (void)asmText;
+        (void)format;
+        (void)sourcePath;
+        return std::nullopt;
+    }
+
+    // Opt-in (default nullopt): the same FILE/SYM/LINE text debugMap() produces, but for a
+    // real separate-compilation object (--format=coff or equivalent) instead of a whole-
+    // program compile - addresses are relative to this object's own org-0 .text start, not
+    // final. main.cpp writes this to a sidecar file (`<out>.dbgpre`) next to the `.o` when
+    // `--debug-map` is given for an object-format compile; a later `--link` step reads it
+    // back and shifts every address by that object's own final placement offset (the same
+    // one GenericLinker::merge() already computes for relocation patching) to produce the
+    // real `build/<out>.dbgmap`. A backend that implements debugMap() implements this by
+    // calling the exact same free function debugMap() does, just without debugMap()'s own
+    // "only a whole-program format" gate - the underlying address table is already relative
+    // to this object's own start in object mode, so no new per-target logic is needed.
+    virtual std::optional<std::string> debugMapPreLink(const std::string &asmText,
+                                                         const std::string &sourcePath) const {
+        (void)asmText;
+        (void)sourcePath;
+        return std::nullopt;
+    }
+
+    // Called before generate(), only when the user asked for a debug map
+    // (--debug-map): lets a backend that implements debugMap() emit
+    // whatever source-line markers its own generated text needs to carry
+    // that information into assembly (see Pdp7Codegen.cpp's own
+    // emitSourceLine()), instead of unconditionally cluttering every
+    // --dump-asm listing with them. No-op default for a backend that
+    // doesn't implement debugMap() at all.
+    virtual void setDebugMapEnabled(bool enabled) { (void)enabled; }
+
     // Whether re-reading `slot` a second time inside `fn`/`body`, instead
     // of keeping its first-read value in a temp, costs real instructions
     // on this target - i.e. whether LocalCSE.cpp's own extended pass (see

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace rcc {
 
@@ -44,5 +46,8 @@ namespace rcc {
 // `db`/`dh`/`dw` emit 1/2/4-byte little-endian data, same as every other target's dialect here.
 // Throws std::runtime_error on any assembly error.
 std::string assembleTms320C6713(const std::string &asmText);
+
+std::string assembleTms320C6713DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                         const std::vector<std::pair<std::string, bool>> &symbols);
 
 }  // namespace rcc

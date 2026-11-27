@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -50,5 +52,10 @@ std::string assembleZ8000(const std::string &asmText);
 // Separate-compilation entry point: assembles with `org 0`, defers undefined symbols as
 // relocations. Returns a format-neutral ObjectFile; never writes real object bytes.
 ObjectFile assembleZ8000Object(const std::string &asmText);
+
+
+std::string assembleZ8000DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

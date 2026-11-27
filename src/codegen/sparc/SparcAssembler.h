@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -51,5 +53,10 @@ std::string assembleSparc(const std::string &asmText);
 // `call` to a label in this file needs no such relocation. Returns the format-neutral
 // ObjectFile a codegen backend builds once per compile.
 ObjectFile assembleSparcObject(const std::string &asmText);
+
+
+std::string assembleSparcDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

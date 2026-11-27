@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <vector>
@@ -39,10 +40,11 @@ struct Operand {
 
 struct Line {
     std::vector<std::string> labels;
-    enum Kind { None, Org, Db, Dw, Instr } kind = None;
+    enum Kind { None, Org, Db, Dw, Instr, DebugLine } kind = None;
     std::vector<std::vector<Syllable>> exprList;  // Org (1) / Db (N) / Dw (N)
     std::string mnemonic;                          // Instr
     std::vector<Operand> operands;                 // Instr
+    int debugLine = 0;                             // DebugLine
 };
 
 std::string toLower(std::string s) {
@@ -132,6 +134,23 @@ Line buildLine(RccAsmParser::LineContext *ctx) {
         return line;
     }
 
+    // "__line N" is a debug-map-only pseudo-op - not a real instruction, so
+    // it's intercepted here the same way "org"/"db"/"dw" are. Emits no byte
+    // and doesn't advance `offset_`; Assembler::processLine() just records
+    // (current address, N) into debugLines_ when it sees one.
+    if (mnemonic == "__line") {
+        if (instr->operand().empty() || instr->operand(0)->LBRACKET()) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        std::vector<Syllable> syls = exprToSyllables(instr->operand(0)->expr());
+        if (syls.size() != 1 || syls[0].kind != SylKind::Number || syls[0].sign != 0) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        line.kind = Line::DebugLine;
+        line.debugLine = std::stoi(syls[0].text);
+        return line;
+    }
+
     line.kind = Line::Instr;
     line.mnemonic = mnemonic;
     for (auto *op : instr->operand()) line.operands.push_back(buildOperand(op));
@@ -203,11 +222,16 @@ class Assembler {
     uint32_t orgBase() const { return orgBase_; }
     const std::unordered_map<std::string, uint32_t> &labels() const { return labels_; }
     const std::vector<Relocation> &relocations() const { return relocations_; }
+    // (address, source line) pairs recorded from every "__line N"
+    // pseudo-op (see Line::DebugLine), in program order - which is also
+    // address order.
+    const std::vector<std::pair<uint32_t, int>> &debugLines() const { return debugLines_; }
 
    private:
     void pass(const std::vector<Line> &lines) {
         bytes_.clear();
         relocations_.clear();
+        debugLines_.clear();
         offset_ = 0;
         orgBase_ = 0;
         for (const auto &line : lines) processLine(line);
@@ -229,6 +253,12 @@ class Assembler {
                 return;
             case Line::Instr:
                 encodeInstr(line.mnemonic, line.operands);
+                return;
+            case Line::DebugLine:
+                // No byte emitted, `offset_` untouched - this marker just
+                // attributes whatever address the NEXT real instruction
+                // lands at to a source line, same as a label would.
+                if (stage_ == 2) debugLines_.push_back({orgBase_ + offset_, line.debugLine});
                 return;
         }
     }
@@ -623,6 +653,7 @@ class Assembler {
     std::vector<uint8_t> bytes_;
     std::unordered_map<std::string, uint32_t> labels_;
     std::vector<Relocation> relocations_;
+    std::vector<std::pair<uint32_t, int>> debugLines_;
     uint32_t offset_ = 0;
     uint32_t orgBase_ = 0;
     int stage_ = 1;
@@ -655,6 +686,27 @@ ObjectFile buildObjectFile(const Assembler &a) {
     return obj;
 }
 
+// Plain-text FILE/SYM/LINE debug map (see Pdp10Assembler.cpp's own
+// writeDebugMap(), which this mirrors). `symbols` is the exact
+// (label, isFunc) list the codegen's own debugSymbols_ collects, not a
+// prefix guess over every label this assembler ever sees.
+std::string writeDebugMap(const Assembler &a, const std::string &sourcePath,
+                           const std::vector<std::pair<std::string, bool>> &symbols) {
+    std::ostringstream out;
+    out << "FILE 1 " << sourcePath << "\n";
+    std::vector<std::pair<std::string, bool>> sorted = symbols;
+    std::sort(sorted.begin(), sorted.end());
+    for (const auto &[name, isFunc] : sorted) {
+        uint32_t addr = a.labels().at(name);
+        std::string bare = name.substr(isFunc ? 3 : 2);  // strip "fn_"/"g_" - see label()
+        out << "SYM " << addr << " " << bare << " " << (isFunc ? "FUNC" : "DATA") << "\n";
+    }
+    for (const auto &[addr, line] : a.debugLines()) {
+        out << "LINE " << addr << " 1 " << line << "\n";
+    }
+    return out.str();
+}
+
 }  // namespace
 
 std::string assembleM6809(const std::string &asmText) {
@@ -663,6 +715,15 @@ std::string assembleM6809(const std::string &asmText) {
     assembler.run(lines);
     const auto &bytes = assembler.bytes();
     return std::string(bytes.begin(), bytes.end());
+}
+
+std::string assembleM6809DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/allowExternal);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
 }
 
 ObjectFile assembleM6809Object(const std::string &asmText) {

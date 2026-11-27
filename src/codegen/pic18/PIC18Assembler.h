@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -76,5 +78,12 @@ std::string assemblePIC18(const std::string &asmText);
 // into `.textBytes` (word offset times two) and every DATA label's value
 // a byte offset into this object's `dataSize` reservation.
 ObjectFile assemblePIC18Object(const std::string &asmText);
+
+// Like assemblePIC18(), but returns a plain-text FILE/SYM/LINE debug map
+// instead of the Intel HEX bytes - see docs/debug-map.md. `symbols` is the
+// exact (label, isFunc) list PIC18Codegen's own debugSymbols_ collects.
+std::string assemblePIC18DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

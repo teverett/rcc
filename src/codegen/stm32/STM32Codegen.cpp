@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <stdexcept>
+#include <tuple>
 
 #include "STM32Assembler.h"
 #include "fileformat/FileFormat.h"
@@ -136,12 +137,25 @@ std::string STM32Codegen::generate(const ir::Program &prog, bool objectMode) {
     // Running byte offset within RAM, used to pad ahead of a global wider than 1 byte (an
     // unaligned ldr/str/ldrh/strh is UNPREDICTABLE on this core). kRamBase is word-aligned, so
     // tracking this from 0 is exact.
+    // --dump-asm wants one file per input, not one combined dump - see
+    // AlphaCodegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges, sliced into perFileAsm_ at the end).
+    // `initRanges` are captured against `code_` before the swap below
+    // (`initCode = code_.str(); code_.str("")`), so they stay valid
+    // offsets into `initCode` afterward - the same bytes, just renamed.
+    std::vector<std::tuple<std::string, size_t, size_t>> initRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> ramRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+
     size_t ramOffset = 0;
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         // An external global is defined and reserves its RAM storage in another file; this
         // file only references it by name, deferred to a relocation.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t ramStart = ramTrailer_.size();
+        size_t initStart = static_cast<size_t>(code_.tellp());
         int align = std::min(widthOfType(slot->type), 4);
         size_t padding = (align - (ramOffset % align)) % align;
         if (padding > 0) {
@@ -165,6 +179,8 @@ std::string STM32Codegen::generate(const ir::Program &prog, bool objectMode) {
             ramOffset += static_cast<size_t>(widthOfType(slot->type));
             if (!objectMode) genGlobalInit(lbl, slot->type, slot->hasInit ? slot->initValue : 0);
         }
+        ramRanges.push_back({slot->sourceFile, ramStart, ramTrailer_.size()});
+        initRanges.push_back({slot->sourceFile, initStart, static_cast<size_t>(code_.tellp())});
     }
     std::string initCode = code_.str();
     code_.str("");
@@ -182,18 +198,53 @@ std::string STM32Codegen::generate(const ir::Program &prog, bool objectMode) {
         emitRaw("");
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    for (const auto &fb : prog.functionBodies) {
+        size_t codeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     emitRaw("");
     emitRaw(cat("ramorg ", kRamBase));
     for (const auto &line : ramTrailer_) emitVerbatim(line);
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : initRanges) perFileAsm_[file] += initCode.substr(s, e - s);
+    for (const auto &[file, s, e] : ramRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += ramTrailer_[i] + "\n";
+    }
 
     return code_.str();
 }
 
 std::map<std::string, std::string> STM32Codegen::perFileAsm() const { return perFileAsm_; }
 
+std::optional<std::string> STM32Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                    const std::string &sourcePath) const {
+    if (format != "raw") return std::nullopt;
+    return assembleSTM32DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> STM32Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleSTM32DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void STM32Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
+}
+
 void STM32Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("pushlr");
     emit("push", "r7");
@@ -216,6 +267,7 @@ void STM32Codegen::emitEpilogue() {
 }
 
 void STM32Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);

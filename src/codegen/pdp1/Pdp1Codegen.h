@@ -4,6 +4,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "codegen/Codegen.h"
@@ -82,6 +83,16 @@ class Pdp1Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // This target has no object/relocatable format at all (see this
+    // class's own comment) - every format here is a complete, final,
+    // whole-program compile, so unlike Pdp7Codegen::debugMap() there's no
+    // format to exclude.
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
@@ -216,6 +227,12 @@ class Pdp1Codegen : public Backend, protected TextCodegenBase {
     int litCounter_ = 0;
     int labelCounter_ = 0;
     std::string curFunctionLabel_;
+    // Debug-map-only - see Pdp7Codegen.h's own comment on the identical
+    // members there, which this mirrors exactly.
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
     bool needDivMod_ = false;
     bool needUDivMod_ = false;
     bool needMul_ = false;

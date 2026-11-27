@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=8086-dos-raw --out="$@" "$<"
+	$(RCC) --debug-map --platform=8086-dos-raw --out="$@" "$<"
 
 # msdos.lib is src/rt/msdos/'s own build product (see that directory's
 # Makefile) - built here via a sub-make rather than recompiling msdos.c
@@ -23,7 +23,7 @@ $(MSDOS_LIB):
 	$(MAKE) -C $(MSDOS_DIR)
 
 $(BUILD_DIR)/main.com: $(BUILD_DIR)/main.o $(MSDOS_LIB)
-	$(RCC) --link --platform=8086-dos-raw --out="$(BUILD_DIR)/main.com" "$(BUILD_DIR)/main.o" "$(MSDOS_LIB)"
+	$(RCC) --debug-map --link --platform=8086-dos-raw --out="$(BUILD_DIR)/main.com" "$(BUILD_DIR)/main.o" "$(MSDOS_LIB)"
 
 # No DOS/8086 emulator is wired into this project for that - see this
 # example's own README - so this only confirms main.com exists.

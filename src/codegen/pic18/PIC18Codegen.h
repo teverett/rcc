@@ -124,6 +124,12 @@ class PIC18Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     // `extraPrologue` (raw asm text, emitted right after the frame
@@ -270,6 +276,11 @@ class PIC18Codegen : public Backend, protected TextCodegenBase {
     std::vector<std::string> ramDecls_;
     std::vector<std::pair<std::string, int>> zeroAtStart_;
     std::map<std::string, std::string> perFileAsm_;
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
 
     // The function currently being generated's frame shape. Set once, at
     // the top of every genFunction() call, from fn.func->params.size()

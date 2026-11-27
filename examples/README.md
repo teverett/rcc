@@ -30,6 +30,10 @@ directory with a `Makefile` and a `README.md` of its own:
 - `8086-msdos` — MS-DOS "hello world" for `8086-dos`, linked as
   `--platform=8086-dos-raw` (a directly-runnable `.com`) against
   `src/rt/msdos/`'s `INT 21h` runtime library
+- `8086-pcxt` — IBM 5160 (PC/XT)-class "hello world" for `8086-dos`, also linked as
+  `--platform=8086-dos-raw` but against `src/rt/pcbios/`'s `INT 10h`/`INT 13h`/`INT 16h`
+  BIOS-call runtime library instead (plus one `src/rt/msdos/` call to leave a completion
+  marker `test.py` checks for)
 - `z80-trs80` — TRS-80 "hello world" for `z80`, linked as
   `--platform=z80-cmd` against `src/rt/trs80/`'s video-RAM runtime
   library

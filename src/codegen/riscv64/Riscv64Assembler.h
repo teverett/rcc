@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -67,5 +69,10 @@ std::string assembleRiscv64(const std::string &asmText);
 // absolute-address reference against the reserved pseudo-symbol ".." (see
 // GenericLinker.h) since the object has no fixed base address yet.
 ObjectFile assembleRiscv64Object(const std::string &asmText);
+
+
+std::string assembleRiscv64DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

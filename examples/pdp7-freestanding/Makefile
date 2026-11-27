@@ -11,10 +11,10 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=pdp7-rim --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=pdp7-rim --dump-ir --dump-asm --out="$@" "$<"
 
 $(BUILD_DIR)/main.rim: $(BUILD_DIR)/main.o
-	$(RCC) --link --platform=pdp7-rim --out="$@" "$<"
+	$(RCC) --debug-map --link --platform=pdp7-rim --out="$@" "$<"
 
 # Runs main.rim under a real PDP-7 simulator (test.py) - see that script's
 # own header comment. Needs open-simh's `pdp7` on PATH.

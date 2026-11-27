@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -57,5 +59,10 @@ std::string assemblePowerPC(const std::string &asmText);
 // relative offset until linked. A `b`/`bl` branch to a same-file label needs
 // no such relocation; only a genuinely external `bl` target does.
 ObjectFile assemblePowerPCObject(const std::string &asmText);
+
+
+std::string assemblePowerPCDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

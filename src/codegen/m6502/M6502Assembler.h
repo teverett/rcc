@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -75,5 +77,14 @@ std::string assembleM6502(const std::string &asmText);
 // kM6502Atari2600CoffMachine's own comment for why atari2600 passes a
 // different one than the default).
 ObjectFile assembleM6502Object(const std::string &asmText, uint16_t machineType = kM6502CoffMachine);
+
+// Assembles `asmText` (a whole-program `--format=raw` compile, not a real
+// separate-compilation object - see Backend::debugMap()'s own comment on
+// why) and returns a plain-text FILE/SYM/LINE debug map - see
+// Pdp7Assembler.h's own comment on assemblePdp7DebugMap() for the shared
+// format and the exact-symbol-list `symbols` parameter.
+std::string assembleM6502DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

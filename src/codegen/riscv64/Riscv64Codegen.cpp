@@ -1,6 +1,7 @@
 #include "Riscv64Codegen.h"
 
 #include <cstdint>
+#include <tuple>
 #include <stdexcept>
 
 #include "Riscv64Assembler.h"
@@ -126,7 +127,18 @@ std::string Riscv64Codegen::generate(const ir::Program &prog, bool objectMode) {
         emitRaw("");
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    // --dump-asm wants one file per input, not one combined dump - see
+    // Pdp7Codegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, index ranges into trailer_,
+    // sliced into perFileAsm_ at the end).
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> trailerRanges;
+
+    for (const auto &fb : prog.functionBodies) {
+        size_t fCodeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     // A misaligned `ld`/`sd`/`lw`/`sw`/`lh`/`sh` faults on some
     // implementations, so each global needs padding bytes first to reach
@@ -136,6 +148,8 @@ std::string Riscv64Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t gTrailerStart = trailer_.size();
         const std::string lbl = label(slot.get());
         int elemW = widthOfType(slot->type);
         size_t totalBytes = slot->arraySize > 0 ? static_cast<size_t>(slot->arraySize) * elemW
@@ -155,6 +169,14 @@ std::string Riscv64Codegen::generate(const ir::Program &prog, bool objectMode) {
             const char *directive = elemW == 1 ? "db" : elemW == 2 ? "dh" : elemW == 4 ? "dw" : "dq";
             trailer_.push_back(lbl + ": " + directive + " " + std::to_string(v) + "  ; " + slot->sourceName);
         }
+        trailerRanges.push_back({slot->sourceFile, gTrailerStart, trailer_.size()});
+    }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : trailerRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += trailer_[i] + "\n";
     }
 
     std::ostringstream out;
@@ -179,6 +201,8 @@ std::map<std::string, std::string> Riscv64Codegen::perFileAsm() const { return p
 // and Arm64Codegen.h's `currentParamBase_`/`kParamExtra` for what that
 // adjustment looks like when it can't be avoided this way).
 void Riscv64Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("addi", "sp,sp,-4");
     emit("sw", "ra,sp,0");
@@ -204,6 +228,7 @@ void Riscv64Codegen::genEpilogue() {
 }
 
 void Riscv64Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -791,6 +816,27 @@ std::optional<std::string> Riscv64Codegen::assembleInProcess(const std::string &
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> Riscv64Codegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleRiscv64DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> Riscv64Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleRiscv64DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void Riscv64Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

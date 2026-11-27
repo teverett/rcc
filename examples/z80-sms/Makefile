@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --target=z80 --format=coff --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --target=z80 --format=coff --dump-ir --dump-asm --out="$@" "$<"
 
 # sms.lib is src/rt/sms/'s own build product (see that directory's own Makefile) - built here
 # via a sub-make rather than recompiling sms.c a second time.
@@ -21,7 +21,7 @@ $(SMS_LIB):
 	$(MAKE) -C $(SMS_DIR)
 
 $(BUILD_DIR)/main.sms: $(BUILD_DIR)/main.o $(SMS_LIB)
-	$(RCC) --link --target=z80 --base=0 --format=sms --out="$@" "$(BUILD_DIR)/main.o" "$(SMS_LIB)"
+	$(RCC) --debug-map --link --target=z80 --base=0 --format=sms --out="$@" "$(BUILD_DIR)/main.o" "$(SMS_LIB)"
 
 # Same link, written out as `raw` instead of `sms` - identical bytes minus the TMR SEGA header/
 # padding (see ../../src/fileformat/smsrom/SmsRomFormat.h) - so CI can load and run it directly

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -75,5 +77,12 @@ std::string assembleM6809(const std::string &asmText);
 // object's eventual linked base), since labels here resolve relative to
 // `org 0` until a linker adds that base in.
 ObjectFile assembleM6809Object(const std::string &asmText);
+
+// Like assembleM6809(), but returns a plain-text FILE/SYM/LINE debug map
+// instead of the assembled bytes - see docs/debug-map.md. `symbols` is the
+// exact (label, isFunc) list M6809Codegen's own debugSymbols_ collects.
+std::string assembleM6809DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

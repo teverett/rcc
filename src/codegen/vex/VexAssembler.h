@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -75,5 +77,12 @@ std::string assembleVex(const std::string &asmText);
 // relative to offset 0 until GenericLinker adds that base in - same convention as
 // M6809Assembler.h's own assembleM6809Object().
 ObjectFile assembleVexObject(const std::string &asmText);
+
+// Assembles like assembleVex(), then formats a plain-text FILE/SYM/LINE debug map against the
+// result (see Backend::debugMap()'s own comment in src/codegen/Codegen.h) - `symbols` is the
+// exact (label, isFunc) list VexCodegen's own debugSymbols_ collects.
+std::string assembleVexDebugMap(const std::string &asmText, const std::string &sourcePath,
+                                 const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

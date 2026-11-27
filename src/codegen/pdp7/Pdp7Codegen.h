@@ -4,6 +4,7 @@
 #include <optional>
 #include <sstream>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "codegen/Codegen.h"
@@ -48,6 +49,16 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // "coff" means real separate compilation - addresses aren't final
+    // until a `--link` step runs, so there's nothing to resolve a debug
+    // map against yet (see Backend::debugMap()'s own comment); every
+    // other format here is a complete, final, whole-program compile.
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
     // See Backend::isLocalReadExpensive()'s own comment for what this
     // answers in general. On THIS target specifically: cheap (false)
     // exactly when `slot` would get a static cell under either the
@@ -613,6 +624,24 @@ class Pdp7Codegen : public Backend, protected TextCodegenBase {
     int litCounter_ = 0;
     int labelCounter_ = 0;
     std::string curFunctionLabel_;
+    // Debug-map-only (see debugMap()/Pdp7Assembler.h's own
+    // assemblePdp7DebugMap() comment): the last source line a "__line N"
+    // pseudo-op was emitted for, so emitSourceLine() only emits one when
+    // it actually changes - reset per function (genFunction()) so the
+    // first statement of a new function never silently skips its own
+    // marker just because it happens to share a line number with the
+    // previous function's last statement.
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    // (label name, isFunc) for every real Function/Global defined in this
+    // file, populated as generate() emits each one (genFunction() for a
+    // Function, the globals loop in generate() itself for a Global) - the
+    // exact set debugMap() hands to assemblePdp7DebugMap() for its SYM
+    // records, never derived from a prefix guess (see
+    // Pdp7Assembler.h's own comment on why). Only populated when
+    // `debugMapEnabled_`.
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
     bool needDivMod_ = false;
     bool needUDivMod_ = false;
     bool needPushPop_ = false;

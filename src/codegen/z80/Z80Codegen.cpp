@@ -1,6 +1,7 @@
 #include "Z80Codegen.h"
 
 #include <cstdint>
+#include <tuple>
 #include <stdexcept>
 
 #include "Z80Assembler.h"
@@ -594,7 +595,18 @@ std::string Z80Codegen::generate(const ir::Program &prog, bool objectMode) {
         declareTemp("wacc");
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    // --dump-asm wants one file per input, not one combined dump - see
+    // Pdp7Codegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, index ranges into trailer_,
+    // sliced into perFileAsm_ at the end).
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> trailerRanges;
+
+    for (const auto &fb : prog.functionBodies) {
+        size_t fCodeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
@@ -602,7 +614,9 @@ std::string Z80Codegen::generate(const ir::Program &prog, bool objectMode) {
         // local storage here, only be referenced by name so the assembler
         // defers it as a relocation.
         if (slot->isExternal) continue;
+        size_t gTrailerStart = trailer_.size();
         const std::string lbl = label(slot.get());
+        if (debugMapEnabled_) debugSymbols_.push_back({lbl, /*isFunc=*/false});
         if (slot->arraySize > 0) {
             declareArray(lbl, slot->arrayInit, slot->type);
         } else if (slot->type.base == BaseType::Struct) {
@@ -633,6 +647,14 @@ std::string Z80Codegen::generate(const ir::Program &prog, bool objectMode) {
                 trailer_.push_back(line.str());
             }
         }
+        trailerRanges.push_back({slot->sourceFile, gTrailerStart, trailer_.size()});
+    }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : trailerRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += trailer_[i] + "\n";
     }
 
     std::ostringstream out;
@@ -656,6 +678,8 @@ std::map<std::string, std::string> Z80Codegen::perFileAsm() const { return perFi
 // value into SP directly). Every Return undoes this with matching `inc
 // sp`s before restoring `ix` and returning.
 void Z80Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("push", "ix");
     emit("ld", "ix, 0");
@@ -677,6 +701,7 @@ void Z80Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void Z80Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1704,6 +1729,27 @@ std::optional<std::string> Z80Codegen::assembleInProcess(const std::string &asmT
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> Z80Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                  const std::string &sourcePath) const {
+    if (format != "raw") return std::nullopt;
+    return assembleZ80DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> Z80Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleZ80DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void Z80Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

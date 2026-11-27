@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-atari --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-atari --dump-ir --dump-asm --out="$@" "$<"
 
 # atari400.lib is src/rt/atari400/'s own build product (see that
 # directory's Makefile) - built here via a sub-make rather than
@@ -28,7 +28,7 @@ $(ATARI400_LIB):
 # least 16K of RAM (unverified against every real memory configuration -
 # see src/rt/atari400/atari400.h's own header comment).
 $(BUILD_DIR)/main.atari: $(BUILD_DIR)/main.o $(ATARI400_LIB)
-	$(RCC) --link --platform=6502-atari --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(ATARI400_LIB)"
+	$(RCC) --debug-map --link --platform=6502-atari --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(ATARI400_LIB)"
 
 # Same link, written out as `raw` instead of `atari` - identical program
 # bytes minus the segment headers and RUNAD-poke segment (see ../../src/

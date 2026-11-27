@@ -61,3 +61,5 @@ floats.
 - The shared assembly format every backend's own in-process
   assembler parses (`--format=asm`'s output, `--dump-asm`'s files):
   see [`docs/asm.md`](docs/asm.md).
+- `--debug-map`'s lightweight symbol/line debug format (`pdp7` only
+  today): see [`docs/debug-map.md`](docs/debug-map.md).

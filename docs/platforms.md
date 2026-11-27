@@ -80,6 +80,38 @@ pair - see `docs/using.md`.
   (no `0x` hex, unlike the asm-text grammar inline `asm { }` blocks use),
   so `dos_exit()`'s `INT 21h`/`4Ch` is built from `19456 + code`, not
   `0x4C00 + code` - see `docs/language.md`'s own `NUMBER` note.
+
+  `src/rt/pcbios/` is a second, independent runtime library for this same `8086-dos`
+  target/ABI, for an IBM 5160 (PC/XT)-class machine calling the BIOS directly instead of
+  going through DOS: video via `INT 10h` (`pcbios_set_mode`/`pcbios_putchar`/`pcbios_puts`/
+  `pcbios_set_cursor`/`pcbios_cursor_row`/`pcbios_cursor_col`/`pcbios_write_attr`/
+  `pcbios_clear_screen`/`pcbios_peek_char`/`pcbios_peek_attr`), keyboard via `INT 16h`
+  (`pcbios_getchar`/`pcbios_haskey`), and one 512-byte disk sector at a time via `INT 13h`
+  (`pcbios_disk_reset`/`pcbios_disk_read`/`pcbios_disk_write`/`pcbios_buf_get`/
+  `pcbios_buf_set`), plus its own `pcbios_exit` (the one DOS call this library still makes -
+  a `.com` process needs `INT 21h`/`4Ch` to hand control back to DOS regardless of which
+  runtime library it otherwise uses). Still `8086-dos`, not a separate target: rcc never
+  builds a boot sector (see this entry's own `8086`/`8088` note and
+  `docs/known-bugs.md`), so a BIOS-calling program still needs DOS (or an emulator standing
+  in for it, such as DOSBox-X) to get the CPU into real mode with the BIOS resident and the
+  program loaded at all - it just never calls back into DOS for video/keyboard/disk I/O
+  once running. Its own staging globals are named with a `pcbios_` prefix (`pcbios_rt_w`/
+  `pcbios_rt_w2`/`pcbios_rt_w3`/`pcbios_rt_disk_buf`, unlike `msdos.c`'s own bare `rt_w`/
+  `rt_w2`/`rt_w3`), so a program can link both libraries together - `examples/8086-pcxt/`
+  does exactly that, for one `dos_create()` call - without two conflicting definitions of
+  the same global. `pcbios_disk_read()`/`pcbios_disk_write()` point `INT 13h` at
+  `pcbios_rt_disk_buf` via a bare `mov bx, g_pcbios_rt_disk_buf` with no segment override -
+  this only works because a `.com` program's `ES` still equals `DS` exactly as DOS set it
+  at load, and this library never changes `ES` - and assume the disk's cylinder count fits
+  in one byte (any floppy geometry; not a 256-or-more-cylinder hard disk). `INT 13h` can
+  return status 6 ("disk changed") on the very next operation after a write or media
+  insert on real/emulated floppy hardware; the documented recovery
+  (`pcbios_disk_reset()`, then retry once) is in `pcbios.h`'s own header comment, not
+  `docs/known-bugs.md` - it's real `INT 13h` behavior, not a defect in this wrapper.
+  `tests/run_pcbios_tests.sh` runs every function in this library for real under DOSBox-X
+  (`brew install dosbox-x`/`apt-get install dosbox-x`) - video/keyboard against a mounted
+  host directory, disk I/O against an `imgmake`-created blank floppy image mounted via
+  `imgmount` (not a boot sector or anything bootable).
 - **6502** — 6502 assembly (own dialect; `src/codegen/m6502/M6502Assembler.h`),
   a bare flat binary loaded/entered at `$0600`, no OS/I/O conventions, on
   a CPU with three 8-bit registers, no hardware multiply/divide, and

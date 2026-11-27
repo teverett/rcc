@@ -902,6 +902,7 @@ void AVRCodegen::genExpr(const ir::Expr &e) {
 }
 
 void AVRCodegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1008,6 +1009,8 @@ void AVRCodegen::genEpilogue() {
 }
 
 void AVRCodegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     genPrologue(fn.func);
     genStmt(*fn.body);
@@ -1029,6 +1032,7 @@ std::string AVRCodegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         if (slot->arraySize > 0) {
             declareGlobalArray(slot.get());
         } else {
@@ -1109,6 +1113,27 @@ std::optional<std::string> AVRCodegen::assembleInProcess(const std::string &asmT
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> AVRCodegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleAVRDebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> AVRCodegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleAVRDebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void AVRCodegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

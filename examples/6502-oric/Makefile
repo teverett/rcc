@@ -13,10 +13,10 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
 
 $(BUILD_DIR)/api_test.o: api_test.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
 
 # oric.lib is src/rt/oric/'s own build product (see that directory's own Makefile) - built here
 # via a sub-make rather than recompiling oric.c a second time, the same pattern
@@ -25,7 +25,7 @@ $(ORIC_LIB):
 	$(MAKE) -C $(ORIC_DIR)
 
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(ORIC_LIB)
-	$(RCC) --link --platform=6502-raw --out="$@" "$(BUILD_DIR)/main.o" "$(ORIC_LIB)"
+	$(RCC) --debug-map --link --platform=6502-raw --out="$@" "$(BUILD_DIR)/main.o" "$(ORIC_LIB)"
 
 # Second build/link/run check, exercising every oric.h function rather than just main.c's
 # hello-world subset - see api_test.c's own header comment.

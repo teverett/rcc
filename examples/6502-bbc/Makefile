@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-ssd --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-ssd --dump-ir --dump-asm --out="$@" "$<"
 
 # bbc.lib is src/rt/bbc/'s own build product (see that directory's own
 # Makefile) - built here via a sub-make rather than recompiling bbc.c a
@@ -30,7 +30,7 @@ $(BBC_LIB):
 # M6502Codegen.h's own `kFrameStackBase` reserves ($0200-$05FF), not this
 # machine's program area at all.
 $(BUILD_DIR)/main.ssd: $(BUILD_DIR)/main.o $(BBC_LIB)
-	$(RCC) --link --platform=6502-ssd --base='$$1900' --out="$@" "$(BUILD_DIR)/main.o" "$(BBC_LIB)"
+	$(RCC) --debug-map --link --platform=6502-ssd --base='$$1900' --out="$@" "$(BUILD_DIR)/main.o" "$(BBC_LIB)"
 
 # Same link, written out as `raw` instead of `ssd` - identical program
 # bytes minus the disc image's own catalogue sectors (see ../../src/

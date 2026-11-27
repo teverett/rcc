@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-prg --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-prg --dump-ir --dump-asm --out="$@" "$<"
 
 # vic20.lib is src/rt/vic20/'s own build product (see that directory's
 # Makefile) - built here via a sub-make rather than recompiling vic20.c
@@ -28,7 +28,7 @@ $(VIC20_LIB):
 # default $0600 base instead sits inside the VIC-20's own zero-page/
 # low-memory KERNAL work area, not this machine's program area at all.
 $(BUILD_DIR)/main.prg: $(BUILD_DIR)/main.o $(VIC20_LIB)
-	$(RCC) --link --platform=6502-prg --base='$$1001' --out="$@" "$(BUILD_DIR)/main.o" "$(VIC20_LIB)"
+	$(RCC) --debug-map --link --platform=6502-prg --base='$$1001' --out="$@" "$(BUILD_DIR)/main.o" "$(VIC20_LIB)"
 
 # Same link, written out as `raw` instead of `prg` - identical bytes minus
 # the 2-byte load-address header (see ../../src/fileformat/prg/

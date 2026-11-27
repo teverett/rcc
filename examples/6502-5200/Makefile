@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --target=5200 --format=coff --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --target=5200 --format=coff --dump-ir --dump-asm --out="$@" "$<"
 
 # atari5200.lib is src/rt/atari5200/'s own build product (see that directory's Makefile) -
 # built here via a sub-make rather than recompiling atari5200.c a second time, so this example
@@ -24,7 +24,7 @@ $(ATARI5200_LIB):
 # --base=$8000: a 16K cartridge image (see ../../src/fileformat/a5200/Atari5200RomFormat.h) -
 # $B000/$A000/$8000/$4000 are the only four bases --format=a5200 accepts.
 $(BUILD_DIR)/main.a5200: $(BUILD_DIR)/main.o $(ATARI5200_LIB)
-	$(RCC) --link --target=5200 --format=a5200 --base='$$8000' --out="$@" "$(BUILD_DIR)/main.o" "$(ATARI5200_LIB)"
+	$(RCC) --debug-map --link --target=5200 --format=a5200 --base='$$8000' --out="$@" "$(BUILD_DIR)/main.o" "$(ATARI5200_LIB)"
 
 # Same link, written out as `raw` instead of `a5200` - identical program bytes minus the
 # cartridge header - so CI can load and run it directly in py65 without having to parse the

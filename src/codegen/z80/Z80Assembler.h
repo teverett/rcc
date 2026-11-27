@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -46,5 +48,14 @@ std::string assembleZ80(const std::string &asmText);
 // object's eventual linked base), since labels here resolve relative to
 // `org 0` until a linker adds that base in.
 ObjectFile assembleZ80Object(const std::string &asmText);
+
+// Assembles `asmText` (a whole-program `--format=raw` compile, not a real
+// separate-compilation object - see Backend::debugMap()'s own comment on
+// why) and returns a plain-text FILE/SYM/LINE debug map - see
+// Pdp7Assembler.h's own comment on assemblePdp7DebugMap() for the shared
+// format and the exact-symbol-list `symbols` parameter.
+std::string assembleZ80DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                 const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

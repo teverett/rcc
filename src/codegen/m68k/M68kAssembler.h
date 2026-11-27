@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -36,5 +38,10 @@ std::string assembleM68k(const std::string &asmText);
 // against the reserved pseudo-symbol ".." since labels resolve to an offset from
 // org 0 until the link-time base is added.
 ObjectFile assembleM68kObject(const std::string &asmText);
+
+
+std::string assembleM68kDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

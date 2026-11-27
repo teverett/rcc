@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -45,5 +47,10 @@ std::string assemblePdp11(const std::string &asmText);
 // assemblePdp11(), except an undefined symbol is deferred as a relocation instead of a hard
 // error. Returns the format-neutral ObjectFile; never touches a real object-format byte layout.
 ObjectFile assemblePdp11Object(const std::string &asmText);
+
+
+std::string assemblePdp11DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

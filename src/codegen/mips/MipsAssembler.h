@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -42,5 +44,10 @@ std::string assembleMips(const std::string &asmText);
 // local address reference against the reserved pseudo-symbol ".."
 // (see GenericLinker.h) since the object has no fixed base address yet.
 ObjectFile assembleMipsObject(const std::string &asmText);
+
+
+std::string assembleMipsDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

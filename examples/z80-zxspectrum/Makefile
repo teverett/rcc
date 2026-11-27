@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=z80-sna --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=z80-sna --dump-ir --dump-asm --out="$@" "$<"
 
 # zxspectrum.lib is src/rt/zxspectrum/'s own build product (see that
 # directory's own Makefile) - built here via a sub-make rather than
@@ -23,7 +23,7 @@ $(ZXSPECTRUM_LIB):
 	$(MAKE) -C $(ZXSPECTRUM_DIR)
 
 $(BUILD_DIR)/main.sna: $(BUILD_DIR)/main.o $(ZXSPECTRUM_LIB)
-	$(RCC) --link --platform=z80-sna --out="$@" "$(BUILD_DIR)/main.o" "$(ZXSPECTRUM_LIB)"
+	$(RCC) --debug-map --link --platform=z80-sna --out="$@" "$(BUILD_DIR)/main.o" "$(ZXSPECTRUM_LIB)"
 
 # Same link, written out as `raw` instead of `sna` - identical program
 # bytes minus the snapshot's own 27-byte register header and the

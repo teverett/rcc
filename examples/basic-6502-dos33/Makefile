@@ -14,7 +14,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.bas | $(BUILD_DIR)
-	$(RCC) --platform=6502-prodos --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-prodos --dump-ir --dump-asm --out="$@" "$<"
 
 # apple2.lib/basic_apple2.lib are src/rt/apple2/'s own build products
 # (see that directory's own Makefile) - built here via a sub-make rather
@@ -28,7 +28,7 @@ $(APPLE2_LIB) $(BASIC_APPLE2_LIB):
 # this program's COUT/CROUT calls (via a2_cout()/a2_crout(), themselves
 # called from basic_apple2.c's __basic_print_*) write through.
 $(BUILD_DIR)/main.prodos: $(BUILD_DIR)/main.o $(APPLE2_LIB) $(BASIC_APPLE2_LIB)
-	$(RCC) --link --platform=6502-prodos --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(APPLE2_LIB)" "$(BASIC_APPLE2_LIB)"
+	$(RCC) --debug-map --link --platform=6502-prodos --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(APPLE2_LIB)" "$(BASIC_APPLE2_LIB)"
 
 # Same link, written out as `raw` instead of `prodos` - identical bytes
 # minus the trailing file_type/aux_type footer - so CI can load and run

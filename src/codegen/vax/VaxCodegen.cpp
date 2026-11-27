@@ -177,6 +177,7 @@ std::string VaxCodegen::generate(const ir::Program &prog, bool objectMode) {
         // here, only be referenced by name, letting the assembler defer it to a
         // relocation.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         const size_t before = trailer_.size();
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
@@ -219,6 +220,8 @@ std::map<std::string, std::string> VaxCodegen::perFileAsm() const { return perFi
 // hardware stack, direct and mutual recursion each get independent storage per call,
 // limited only by the stack (kInitialSP).
 void VaxCodegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("dh", "0");
     if (fn.func->frameSize > 0) emit("subl2", cat("imm ", fn.func->frameSize, ",sp"));
@@ -228,6 +231,7 @@ void VaxCodegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void VaxCodegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1067,6 +1071,27 @@ std::optional<std::string> VaxCodegen::assembleInProcess(const std::string &asmT
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> VaxCodegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleVaxDebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> VaxCodegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleVaxDebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void VaxCodegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -63,5 +65,12 @@ std::string assembleSTM32(const std::string &asmText);
 //
 // Returns the format-neutral ObjectFile a codegen backend builds once per compile.
 ObjectFile assembleSTM32Object(const std::string &asmText);
+
+// Like assembleSTM32(), but returns a plain-text FILE/SYM/LINE debug map
+// instead of the flash image bytes - see docs/debug-map.md. `symbols` is
+// the exact (label, isFunc) list STM32Codegen's own debugSymbols_ collects.
+std::string assembleSTM32DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

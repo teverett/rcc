@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -73,5 +75,22 @@ std::string assemblePdp7(const std::string &asmText, Pdp7OutputFormat format, bo
 // `makePdp7Linker()` for both real user objects and its synthesized
 // entry object, avoiding a serialize/deserialize round trip.
 ObjectFile assemblePdp7Object(const std::string &asmText);
+
+// Assembles `asmText` (a whole-program compile, not `--format=coff` - see
+// Backend::debugMap()'s own comment on why a relocatable object isn't
+// supported here) and returns a plain-text FILE/SYM/LINE debug map:
+// `sourcePath` becomes the one FILE record; every `__line N` pseudo-op
+// Pdp7Codegen.cpp emits (see its own emitSourceLine()) becomes a LINE
+// record at the address it was assembled at. `symbols` is the exact set of
+// (label name, isFunc) pairs to resolve into SYM records (FUNC/DATA) -
+// Pdp7Codegen.cpp's own `debugSymbols_` (populated as it emits each real
+// Function/Global's label), not a prefix guess over every label this
+// assembler ever sees: Pdp7Codegen.h's label() helpers prefix plenty of
+// purely internal per-function cells (`_P0`, `_LF2`, `_fast`, ...) with
+// that same function's own "FN_<name>" label, so filtering on the prefix
+// alone would wrongly surface those as if they were real symbols too.
+std::string assemblePdp7DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

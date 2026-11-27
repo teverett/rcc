@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -67,5 +69,10 @@ std::string assembleR32c(const std::string &asmText);
 // relocation against the reserved pseudo-symbol ".." (this object's own
 // eventual linked base, resolved only by a linker).
 ObjectFile assembleR32cObject(const std::string &asmText);
+
+
+std::string assembleR32cDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

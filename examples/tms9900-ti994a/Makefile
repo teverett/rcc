@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --target=tms9900 --format=coff --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --target=tms9900 --format=coff --dump-ir --dump-asm --out="$@" "$<"
 
 # ti994a.lib is src/rt/ti994a/'s own build product (see that directory's own Makefile) - built
 # here via a sub-make rather than recompiling ti994a.c a second time, so this example links the
@@ -24,7 +24,7 @@ $(TI994A_LIB):
 # --format=raw only - no native TI-99/4A cartridge/disk container format is implemented for
 # this target (out of scope for this pass - see docs/platforms.md's own `tms9900` entry).
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(TI994A_LIB)
-	$(RCC) --link --target=tms9900 --format=raw --out="$@" "$(BUILD_DIR)/main.o" "$(TI994A_LIB)"
+	$(RCC) --debug-map --link --target=tms9900 --format=raw --out="$@" "$(BUILD_DIR)/main.o" "$(TI994A_LIB)"
 
 # No TMS9900 emulator is available to this project (see docs/known-bugs.md) - `test` only
 # confirms the build output exists, same convention m30626fjpfp-freestanding/8086-msdos/

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ANTLRInputStream.h"
@@ -71,9 +72,10 @@ struct Syllable {
 
 struct Segment {
     std::vector<std::string> labels;
-    enum Kind { None, Assign, Expr } kind = None;
+    enum Kind { None, Assign, Expr, DebugLine } kind = None;
     std::string lhs;
     std::vector<Syllable> syllables;
+    int debugLine = 0;  // valid when kind == DebugLine
 };
 
 struct Line {
@@ -124,6 +126,23 @@ Segment buildSegment(RccAsmParser::LineContext *ctx) {
     }
     auto *instr = dynamic_cast<RccAsmParser::InstrStmtContext *>(stmt);
     if (!instr) fail("internal: unhandled statement alternative");
+
+    // "__line N" is a debug-map-only pseudo-op (see Pdp1Codegen.cpp's own
+    // emitSourceLine(), and Pdp7Assembler.cpp's identical "__line"
+    // interception, which this mirrors) - not a real pdp1 instruction.
+    // Stores no word and doesn't advance the program counter;
+    // Assembler::processLine() just records (current address, N) into
+    // debugLines_ when it sees one.
+    if (instr->mnemonic->getType() == RccAsmParser::IDENT && instr->mnemonic->getText() == "__line") {
+        std::vector<Syllable> syls;
+        for (auto *op : instr->operand()) appendOperandSyllables(op, syls);
+        if (syls.size() != 1 || syls[0].kind != SylKind::Number || syls[0].sign != 0) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        seg.kind = Segment::DebugLine;
+        seg.debugLine = std::stoi(syls[0].text);
+        return seg;
+    }
 
     seg.kind = Segment::Expr;
     SylKind mnemonicKind = (instr->mnemonic->getType() == RccAsmParser::NUMBER) ? SylKind::Number : SylKind::Symbol;
@@ -188,6 +207,10 @@ class Assembler {
     const std::vector<std::string> &mline() const { return mline_; }
     const std::unordered_map<std::string, uint32_t> &labels() const { return labels_; }
     uint32_t base() const { return kPdp1BaseAddress; }
+    // (address, source line) pairs recorded from every "__line N"
+    // pseudo-op (see Segment::DebugLine), in program order - which is
+    // also address order, same as Pdp7Assembler.cpp's own debugLines().
+    const std::vector<std::pair<uint32_t, int>> &debugLines() const { return debugLines_; }
 
    private:
     void processLine(const Line &line) {
@@ -196,6 +219,13 @@ class Assembler {
             for (const auto &lbl : seg.labels) setLabel(lbl, symbols_["."]);
             if (seg.kind == Segment::Assign) {
                 symbols_[seg.lhs] = evalExpr(seg.syllables);
+            } else if (seg.kind == Segment::DebugLine) {
+                // No word stored, PC not advanced - unlike pdp7's own
+                // resolveLocation(), pdp1 has no RELATIVE-flag/object-mode
+                // base shift to undo (see Pdp1Assembler.h's own comment on
+                // why this target has no object/--link support at all), so
+                // the plain running "." is already the real address.
+                if (stage_ == 2) debugLines_.push_back({symbols_.at("."), seg.debugLine});
             } else if (seg.kind == Segment::Expr) {
                 uint32_t word = evalExpr(seg.syllables);
                 if (stage_ == 2) storeWord(line.sourceText, lineConsumed, word);
@@ -283,6 +313,7 @@ class Assembler {
     std::unordered_map<std::string, uint32_t> labels_;
     std::vector<std::optional<uint32_t>> mem_;
     std::vector<std::string> mline_;
+    std::vector<std::pair<uint32_t, int>> debugLines_;
     int stage_ = 1;
 };
 
@@ -303,6 +334,30 @@ std::string writeList(const Assembler &a) {
     for (const auto &name : names) {
         std::snprintf(buf, sizeof(buf), "%-8.8s %#06o", name.c_str(), a.labels().at(name));
         out << buf << "\n";
+    }
+    return out.str();
+}
+
+// Plain-text FILE/SYM/LINE debug map (see Pdp1Assembler.h's own comment on
+// assemblePdp1DebugMap(), and Pdp7Assembler.cpp's own writeDebugMap(),
+// which this mirrors - minus the RELATIVE-flag/base-shift handling pdp7
+// needs and pdp1 doesn't). `symbols` is the exact (label, isFunc) list
+// Pdp1Codegen.cpp's own debugSymbols_ collects, not a prefix guess over
+// every label this assembler ever sees - see Pdp1Assembler.h's own comment
+// for why.
+std::string writeDebugMap(const Assembler &a, const std::string &sourcePath,
+                           const std::vector<std::pair<std::string, bool>> &symbols) {
+    std::ostringstream out;
+    out << "FILE 1 " << sourcePath << "\n";
+    std::vector<std::pair<std::string, bool>> sorted = symbols;
+    std::sort(sorted.begin(), sorted.end());
+    for (const auto &[name, isFunc] : sorted) {
+        uint32_t addr = a.labels().at(name);
+        std::string bare = name.substr(isFunc ? 3 : 2);  // strip "FN_"/"G_" - see label()
+        out << "SYM " << addr << " " << bare << " " << (isFunc ? "FUNC" : "DATA") << "\n";
+    }
+    for (const auto &[addr, line] : a.debugLines()) {
+        out << "LINE " << addr << " 1 " << line << "\n";
     }
     return out.str();
 }
@@ -350,6 +405,14 @@ std::string assemblePdp1(const std::string &asmText, Pdp1OutputFormat format) {
             return writeRim(assembler);
     }
     fail("unknown output format");
+}
+
+std::string assemblePdp1DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler;
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
 }
 
 }  // namespace rcc

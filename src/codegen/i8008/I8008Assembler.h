@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -32,5 +34,10 @@ std::string assembleI8008(const std::string &asmText);
 // relocated against the reserved pseudo-symbol ".."). The `name = expr` equates are compile-time constants in every
 // object, so they never need a `..` relocation.
 ObjectFile assembleI8008Object(const std::string &asmText);
+
+
+std::string assembleI8008DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

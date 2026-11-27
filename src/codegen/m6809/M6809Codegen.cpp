@@ -523,6 +523,7 @@ std::string M6809Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
             declareArray(lbl, slot->arrayInit, slot->type);
@@ -568,6 +569,8 @@ std::string M6809Codegen::generate(const ir::Program &prog, bool objectMode) {
 // loop needed, unlike Z80. Every Return undoes this with a matching
 // `leas n,s` before restoring `u` and returning.
 void M6809Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("pshs", "u");
     emit("tfr", "s,u");
@@ -586,6 +589,7 @@ void M6809Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void M6809Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1575,6 +1579,27 @@ std::optional<std::string> M6809Codegen::assembleInProcess(const std::string &as
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> M6809Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                    const std::string &sourcePath) const {
+    if (format != "raw") return std::nullopt;
+    return assembleM6809DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> M6809Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleM6809DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void M6809Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

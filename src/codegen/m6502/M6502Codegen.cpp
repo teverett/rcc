@@ -1,6 +1,7 @@
 #include "M6502Codegen.h"
 
 #include <algorithm>
+#include <tuple>
 #include <cstdint>
 #include <stdexcept>
 
@@ -400,15 +401,28 @@ std::string M6502Codegen::generate(const ir::Program &prog, bool objectMode) {
         emitRaw("");
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    // --dump-asm wants one file per input, not one combined dump - see
+    // Pdp7Codegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, index ranges into trailer_,
+    // sliced into perFileAsm_ at the end).
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> trailerRanges;
+
+    for (const auto &fb : prog.functionBodies) {
+        size_t fCodeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         // An external global isn't defined in this file; it's only
         // referenced by name, letting the assembler defer it to a relocation.
         if (slot->isExternal) continue;
+        size_t gTrailerStart = trailer_.size();
         if (slot->hasAddress) trailer_.push_back(placementLine(slot->address));
         const std::string lbl = label(slot.get());
+        if (debugMapEnabled_) debugSymbols_.push_back({lbl, /*isFunc=*/false});
         if (slot->arraySize > 0) {
             declareArray(lbl, slot->arrayInit, slot->type);
         } else {
@@ -418,6 +432,14 @@ std::string M6502Codegen::generate(const ir::Program &prog, bool objectMode) {
             trailer_.push_back(lbl + ": db " + std::to_string(uv & 0xFF) + "  ; " + slot->sourceName);
             for (int i = 1; i < w; i++) trailer_.push_back("db " + std::to_string((uv >> (8 * i)) & 0xFF));
         }
+        trailerRanges.push_back({slot->sourceFile, gTrailerStart, trailer_.size()});
+    }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : trailerRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += trailer_[i] + "\n";
     }
 
     std::ostringstream out;
@@ -436,6 +458,8 @@ std::map<std::string, std::string> M6502Codegen::perFileAsm() const { return per
 // two's-complement, exact under mod-65536 wraparound.
 void M6502Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunction_ = fn.func;
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     if (fn.func->hasAddress) emitRaw(placementLine(fn.func->address));
     emitLabel(label(fn.func));
     // Every param reserves at least a native int's width (2 bytes); a wider
@@ -623,6 +647,7 @@ void M6502Codegen::genLocalArrayInit(const ir::Slot *slot) {
 }
 
 void M6502Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -2069,6 +2094,27 @@ std::optional<std::string> M6502Codegen::assembleInProcess(const std::string &as
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> M6502Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                    const std::string &sourcePath) const {
+    if (format != "raw") return std::nullopt;
+    return assembleM6502DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> M6502Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleM6502DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void M6502Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

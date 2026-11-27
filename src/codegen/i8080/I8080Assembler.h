@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -47,5 +49,10 @@ std::string assembleI8080(const std::string &asmText);
 // a linker). Returns the format-neutral ObjectFile a codegen backend builds once per compile;
 // this function never touches a real COFF/ELF/Mach-O/a.out byte layout itself.
 ObjectFile assembleI8080Object(const std::string &asmText);
+
+
+std::string assembleI8080DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

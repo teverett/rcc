@@ -185,6 +185,7 @@ std::string Pdp1Codegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         size_t gTrailerStart = trailer_.size();
         if (slot->hasAddress) {
             trailer_.push_back("__saveloc = .");
@@ -241,6 +242,8 @@ std::map<std::string, std::string> Pdp1Codegen::perFileAsm() const { return perF
 
 void Pdp1Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({curFunctionLabel_, /*isFunc=*/true});
     emitRaw(cat(curFunctionLabel_, ":  ; fn ", fn.func->sourceName));
     // `jsp` just set AC to the return address and jumped here - it must be
     // tucked away before anything else touches AC (see the class comment).
@@ -424,6 +427,7 @@ std::string Pdp1Codegen::popAddressIntoScratch() {
 }
 
 void Pdp1Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1348,6 +1352,27 @@ std::optional<std::string> Pdp1Codegen::assembleInProcess(const std::string &asm
     if (format == "list") return assemblePdp1(asmText, Pdp1OutputFormat::List);
     if (format == "rim") return assemblePdp1(asmText, Pdp1OutputFormat::Rim);
     return std::nullopt;
+}
+
+std::optional<std::string> Pdp1Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                  const std::string &sourcePath) const {
+    (void)format;  // every format here is whole-program-final - see this method's own header comment
+    return assemblePdp1DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> Pdp1Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assemblePdp1DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void Pdp1Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 std::string pdp1RuntimeAsm(bool divMod, bool uDivMod, bool mul) {

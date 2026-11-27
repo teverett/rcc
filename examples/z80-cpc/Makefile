@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=z80-amsdos --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=z80-amsdos --dump-ir --dump-asm --out="$@" "$<"
 
 # cpc.lib is src/rt/cpc/'s own build product (see that directory's own
 # Makefile) - built here via a sub-make rather than recompiling cpc.c a
@@ -23,7 +23,7 @@ $(CPC_LIB):
 	$(MAKE) -C $(CPC_DIR)
 
 $(BUILD_DIR)/main.bin: $(BUILD_DIR)/main.o $(CPC_LIB)
-	$(RCC) --link --platform=z80-amsdos --out="$@" "$(BUILD_DIR)/main.o" "$(CPC_LIB)"
+	$(RCC) --debug-map --link --platform=z80-amsdos --out="$@" "$(BUILD_DIR)/main.o" "$(CPC_LIB)"
 
 # Same link, written out as `raw` instead of `amsdos` - identical
 # program bytes minus the 128-byte AMSDOS header (see ../../src/

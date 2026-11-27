@@ -1,9 +1,12 @@
 #include "SaturnAssembler.h"
 
+#include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "ANTLRInputStream.h"
@@ -126,7 +129,8 @@ class ThrowingErrorListener : public antlr4::BaseErrorListener {
 
 struct Line {
     std::vector<std::string> labels;
-    enum Kind { None, Equate, Org, Dw, Dh, Db, Instr } kind = None;
+    enum Kind { None, Equate, Org, Dw, Dh, Db, Instr, DebugLine } kind = None;
+    int debugLine = 0;  // DebugLine
     std::string equateName;
     std::vector<std::vector<Syllable>> exprList;  // Equate (1)/Org (1)/Dw (N)
     std::string mnemonic;                           // Instr
@@ -165,6 +169,23 @@ Line buildLine(RccAsmParser::LineContext *ctx) {
             if (op->LBRACKET()) fail("'" + mnemonic + "' operand can't be bracketed");
             line.exprList.push_back(exprToSyllables(op->expr()));
         }
+        return line;
+    }
+
+    // "__line N" is a debug-map-only pseudo-op - not a real instruction, so it's intercepted
+    // here the same way "org" is. Emits no byte and doesn't advance `offset_`;
+    // Assembler::processLine() just records (current address, N) into debugLines_ when it sees
+    // one.
+    if (mnemonic == "__line") {
+        if (instr->operand().empty() || instr->operand(0)->LBRACKET()) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        std::vector<Syllable> syls = exprToSyllables(instr->operand(0)->expr());
+        if (syls.size() != 1 || syls[0].kind != SylKind::Number || syls[0].sign != 0) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        line.kind = Line::DebugLine;
+        line.debugLine = std::stoi(syls[0].text);
         return line;
     }
 
@@ -276,11 +297,15 @@ class Assembler {
     uint32_t orgBase() const { return orgBase_; }
     const std::unordered_map<std::string, uint32_t> &labels() const { return labels_; }
     const std::vector<Relocation> &relocations() const { return relocations_; }
+    // (address, source line) pairs recorded from every "__line N" pseudo-op (see
+    // Line::DebugLine), in program order - which is also address order.
+    const std::vector<std::pair<uint32_t, int>> &debugLines() const { return debugLines_; }
 
    private:
     void pass(const std::vector<Line> &lines) {
         bytes_.clear();
         relocations_.clear();
+        debugLines_.clear();
         offset_ = 0;
         orgBase_ = 0;
         for (const auto &line : lines) processLine(line);
@@ -309,6 +334,12 @@ class Assembler {
                 return;
             case Line::Instr:
                 encodeInstr(line.mnemonic, line.operands);
+                return;
+            case Line::DebugLine:
+                // No byte emitted, `offset_` untouched - this marker just attributes whatever
+                // address the NEXT real instruction lands at to a source line, same as a label
+                // would.
+                if (stage_ == 2) debugLines_.push_back({orgBase_ + offset_, line.debugLine});
                 return;
         }
     }
@@ -491,6 +522,7 @@ class Assembler {
     std::vector<uint8_t> bytes_;
     std::unordered_map<std::string, uint32_t> labels_;
     std::vector<Relocation> relocations_;
+    std::vector<std::pair<uint32_t, int>> debugLines_;
     uint32_t offset_ = 0;
     uint32_t orgBase_ = 0;
     int stage_ = 1;
@@ -523,6 +555,28 @@ ObjectFile buildObjectFile(const Assembler &a) {
 
 std::string writeCoff(const Assembler &a) { return CoffFormatWriter().write(buildObjectFile(a)); }
 
+// Plain-text FILE/SYM/LINE debug map (see Pdp7Assembler.cpp's own writeDebugMap(), which this
+// mirrors - minus any RELATIVE-flag/base-shift handling, since labels() already holds plain
+// final addresses for a whole-program org kSaturnBaseAddress compile). `symbols` is the exact
+// (label, isFunc) list the codegen's own debugSymbols_ collects, not a prefix guess over every
+// label this assembler ever sees.
+std::string writeDebugMap(const Assembler &a, const std::string &sourcePath,
+                           const std::vector<std::pair<std::string, bool>> &symbols) {
+    std::ostringstream out;
+    out << "FILE 1 " << sourcePath << "\n";
+    std::vector<std::pair<std::string, bool>> sorted = symbols;
+    std::sort(sorted.begin(), sorted.end());
+    for (const auto &[name, isFunc] : sorted) {
+        uint32_t addr = a.labels().at(name);
+        std::string bare = name.substr(isFunc ? 3 : 2);  // strip "FN_"/"G_" - see label()
+        out << "SYM " << addr << " " << bare << " " << (isFunc ? "FUNC" : "DATA") << "\n";
+    }
+    for (const auto &[addr, line] : a.debugLines()) {
+        out << "LINE " << addr << " 1 " << line << "\n";
+    }
+    return out.str();
+}
+
 }  // namespace
 
 std::string assembleSaturn(const std::string &asmText, bool allowExternal) {
@@ -541,6 +595,15 @@ ObjectFile assembleSaturnObject(const std::string &asmText) {
     Assembler assembler(/*allowExternal=*/true);
     assembler.run(lines);
     return buildObjectFile(assembler);
+}
+
+std::string assembleSaturnDebugMap(const std::string &asmText, const std::string &sourcePath,
+                                    const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/allowExternal);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
 }
 
 }  // namespace rcc

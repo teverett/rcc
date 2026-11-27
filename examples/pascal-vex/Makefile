@@ -17,7 +17,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.pas | $(BUILD_DIR)
-	$(RCC) --target=vex --format=coff --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --target=vex --format=coff --dump-ir --dump-asm --out="$@" "$<"
 
 # vex.lib/pascal_vex.lib are src/rt/vex/'s own build products (see that
 # directory's own Makefile) - built here via a sub-make rather than
@@ -27,7 +27,7 @@ $(VEX_LIB) $(PASCAL_VEX_LIB):
 	$(MAKE) -C $(VEX_RT_DIR)
 
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(VEX_LIB) $(PASCAL_VEX_LIB)
-	$(RCC) --link --platform=vex-raw --out="$@" "$(BUILD_DIR)/main.o" "$(VEX_LIB)" "$(PASCAL_VEX_LIB)"
+	$(RCC) --debug-map --link --platform=vex-raw --out="$@" "$(BUILD_DIR)/main.o" "$(VEX_LIB)" "$(PASCAL_VEX_LIB)"
 
 # The reference interpreter (vendored at tests/sim/vex/vex.c - see that file's own header
 # comment) that runs main.raw for real.

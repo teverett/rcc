@@ -395,6 +395,7 @@ std::string Pdp7Codegen::generate(const ir::Program &prog, bool objectMode) {
         // never get a storage word here, only be referenced by name,
         // letting the assembler defer it to a relocation.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         size_t gTrailerStart = trailer_.size();
         if (slot->hasAddress) {
             trailer_.push_back("__saveloc = .");
@@ -471,6 +472,8 @@ std::map<std::string, std::string> Pdp7Codegen::perFileAsm() const { return perF
 
 void Pdp7Codegen::genFunction(const ir::FunctionBody &fn) {
     curFunctionLabel_ = label(fn.func);
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({curFunctionLabel_, /*isFunc=*/true});
     emitRaw(cat(curFunctionLabel_, ": 0  ; fn ", fn.func->sourceName));
 
     // See Pdp7Codegen.h's "Leaf fast path" comment - every other
@@ -1473,6 +1476,7 @@ void Pdp7Codegen::genWideExpr(const ir::Expr &e) {
 }
 
 void Pdp7Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -2898,6 +2902,29 @@ std::optional<std::string> Pdp7Codegen::assembleInProcess(const std::string &asm
     // symbol is deferred as a relocation for a future `--link` step.
     if (format == "coff") return assemblePdp7(asmText, Pdp7OutputFormat::Coff, /*allowExternal=*/true);
     return std::nullopt;
+}
+
+std::optional<std::string> Pdp7Codegen::debugMap(const std::string &asmText, const std::string &format,
+                                                  const std::string &sourcePath) const {
+    if (format == "coff") return std::nullopt;
+    return assemblePdp7DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> Pdp7Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assemblePdp7DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.h's own comment on `lastDebugLine_` for why a
+// change, not every statement, is what matters here. `line == 0` is a
+// synthetic/internal node (e.g. a Block wrapping other statements) with no
+// real source position of its own - never worth a marker.
+void Pdp7Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 std::string pdp7RuntimeAsm(bool pushPop, bool divMod, bool uDivMod, bool genericLt) {

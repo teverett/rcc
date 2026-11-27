@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-prodos --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-prodos --dump-ir --dump-asm --out="$@" "$<"
 
 # apple2.lib is src/rt/apple2/'s own build product (see that directory's
 # Makefile) - built here via a sub-make rather than recompiling apple2.c
@@ -29,7 +29,7 @@ $(APPLE2_LIB):
 # regardless of its directory entry's `aux_type` - see
 # src/linker/factory/M6502LinkerFactory.h's own comment.
 $(BUILD_DIR)/main.prodos: $(BUILD_DIR)/main.o $(APPLE2_LIB)
-	$(RCC) --link --platform=6502-prodos --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(APPLE2_LIB)"
+	$(RCC) --debug-map --link --platform=6502-prodos --base='$$2000' --out="$@" "$(BUILD_DIR)/main.o" "$(APPLE2_LIB)"
 
 # Same link, written out as `raw` instead of `prodos` - identical bytes
 # minus the trailing file_type/aux_type footer (see

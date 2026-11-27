@@ -44,6 +44,16 @@ class I8086Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // `coff` is the one real relocatable object here (see
+    // isObjectFormat()'s own default in Codegen.h); `raw`/`elf` are both
+    // complete, final-address programs (assembleInProcess()'s own
+    // comment), so this is a denylist rather than an allowlist.
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     bool dosAbi_;
@@ -203,6 +213,11 @@ class I8086Codegen : public Backend, protected TextCodegenBase {
     // {continue label, break label} per currently-open loop, innermost last.
     std::vector<std::pair<std::string, std::string>> loopLabels_;
     std::map<int, std::string> irLabels_;  // see irLabel()
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
+    void emitSourceLine(int line);
 };
 
 }  // namespace rcc

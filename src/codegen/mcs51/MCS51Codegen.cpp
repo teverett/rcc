@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <stdexcept>
+#include <tuple>
 
 #include "MCS51Assembler.h"
 #include "fileformat/FileFormat.h"
@@ -283,6 +284,15 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
     // mainFn is only null in object mode, for a file that doesn't
     // define `main` itself.
 
+    // --dump-asm wants one file per input, not one combined dump - see
+    // AlphaCodegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, sliced into perFileAsm_ at
+    // the end). initCode_'s own content is never substr'd directly -
+    // it's spliced into code_ exactly once below (either at `_start`
+    // or inside `fn_main`), so whichever codeRanges entry covers that
+    // splice point already attributes it correctly.
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+
     // Pre-pass: every global's XDATA address is assigned up front,
     // before any code is generated, so a Var read has it regardless
     // of textual order. Locals/Params need no pre-pass: their storage
@@ -293,6 +303,8 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
         // An external global isn't defined in this file; skipping it
         // keeps this file's XDATA layout from wasting space on it.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t codeStart = static_cast<size_t>(code_.tellp());
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
             declareGlobalArray(lbl, slot->arraySize, widthOfType(slot->type), slot->arrayInit);
@@ -301,6 +313,7 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
         } else {
             declareGlobalTemp(lbl, slot->hasInit ? slot->initValue : 0);
         }
+        codeRanges.push_back({slot->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
     }
     allocXdata(kFrameStackLabel, kFrameStackBytes);
 
@@ -327,6 +340,7 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
     // MCS51LinkerFactory.cpp synthesizes one once every object is
     // merged and `main`'s linked address is resolvable.
     if (!objectMode) {
+        size_t codeStart = static_cast<size_t>(code_.tellp());
         emitLabel("_start");
         // `ssp` must be valid before `main`'s genPrologue() reads it.
         loadXdataAddress("ssp", kFrameStackLabel);
@@ -338,9 +352,11 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
         emitLabel("halt");
         emit("ljmp", "halt");
         emitRaw("");
+        codeRanges.push_back({mainFn->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
     }
 
     for (const auto &fb : prog.functionBodies) {
+        size_t codeStart = static_cast<size_t>(code_.tellp());
         if (objectMode && fb.func == mainFn) {
             // This file's globals' init code has nowhere else to run
             // in object mode: the synthesized `_start` is built before
@@ -358,7 +374,12 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
         } else {
             genFunction(fb);
         }
+        codeRanges.push_back({fb.func->sourceFile, codeStart, static_cast<size_t>(code_.tellp())});
     }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
 
     return code_.str();
 }
@@ -366,6 +387,8 @@ std::string MCS51Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> MCS51Codegen::perFileAsm() const { return perFileAsm_; }
 
 void MCS51Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     genPrologue(fn.func);
     genStmt(*fn.body);
@@ -375,6 +398,7 @@ void MCS51Codegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void MCS51Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1469,6 +1493,27 @@ std::optional<std::string> MCS51Codegen::assembleInProcess(const std::string &as
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> MCS51Codegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleMCS51DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> MCS51Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleMCS51DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void MCS51Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

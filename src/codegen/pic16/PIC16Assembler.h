@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -79,6 +81,13 @@ constexpr uint16_t kPIC16RelocCodeHi = 4;
 //
 // Throws std::runtime_error on any assembly error.
 std::string assemblePIC16(const std::string &asmText);
+
+// Like assemblePIC16(), but returns a plain-text FILE/SYM/LINE debug map
+// instead of the Intel HEX bytes - see docs/debug-map.md. `symbols` is the
+// exact (label, isFunc) list PIC16Codegen's own debugSymbols_ collects.
+std::string assemblePIC16DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 // Separate-compilation entry point (`--format=coff`/`elf`/`aout`/`objraw`):
 // assembles `asmText` like assemblePIC16() does, except an undefined

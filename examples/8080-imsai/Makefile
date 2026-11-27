@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=8080-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=8080-raw --dump-ir --dump-asm --out="$@" "$<"
 
 # imsai.lib is src/rt/imsai/'s own build product (see that directory's own
 # Makefile) - built here via a sub-make rather than recompiling imsai.c a
@@ -23,7 +23,7 @@ $(IMSAI_LIB):
 	$(MAKE) -C $(IMSAI_DIR)
 
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(IMSAI_LIB)
-	$(RCC) --link --platform=8080-raw --out="$@" "$(BUILD_DIR)/main.o" "$(IMSAI_LIB)"
+	$(RCC) --debug-map --link --platform=8080-raw --out="$@" "$(BUILD_DIR)/main.o" "$(IMSAI_LIB)"
 
 # Runs main.raw on a real, independent 8080-compatible core (test.py) - see
 # that script's own header comment.

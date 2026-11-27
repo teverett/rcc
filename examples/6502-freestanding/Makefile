@@ -11,10 +11,10 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6502-raw --dump-ir --dump-asm --out="$@" "$<"
 
 $(BUILD_DIR)/main.bin: $(BUILD_DIR)/main.o
-	$(RCC) --link --platform=6502-raw --out="$@" "$<"
+	$(RCC) --debug-map --link --platform=6502-raw --out="$@" "$<"
 
 # Runs main.bin in py65's 6502 MPU core (test.py) - see that script's own
 # header comment.

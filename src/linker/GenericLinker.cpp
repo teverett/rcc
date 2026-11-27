@@ -329,7 +329,33 @@ ObjectFile GenericLinker::merge(const std::vector<ObjectFile> &userObjects, bool
         }
     }
 
+    // --debug-map: combine any user object's own pre-link debug info (its `.dbgpre` sidecar -
+    // see main.cpp's own --link handling) into the merged ObjectFile, shifting every address by
+    // that object's own final section placement exactly like a relocation site or symbol above.
+    // An object with none (the common case: a runtime library compiled without --debug-map)
+    // simply contributes nothing. `i` starts at 1: `objects[0]` is the synthesized entry
+    // sequence, never a user object with debug info of its own.
+    std::vector<std::string> debugFiles;
+    std::vector<ObjDebugLine> debugLines;
+    std::vector<std::pair<std::string, bool>> debugSymbolNames;
+    for (size_t i = 1; i < objects.size(); i++) {
+        if (objects[i].debugSourceFile.empty()) continue;
+        uint32_t fileId = static_cast<uint32_t>(debugFiles.size()) + 1;
+        debugFiles.push_back(objects[i].debugSourceFile);
+        for (const ObjDebugLine &dl : objects[i].debugLines) {
+            size_t s = sectionContaining(sections[i], dl.offset);
+            if (s >= sections[i].size() || !included[i][s]) continue;  // its own section was dropped
+            uint32_t finalAddr = (sectionNewBase[i][s] + (dl.offset - sections[i][s].start) - config_.baseAddress) /
+                                  config_.addressUnitBytes;
+            debugLines.push_back({finalAddr, dl.line, fileId});
+        }
+        for (const auto &nameIsFunc : objects[i].debugSymbolNames) debugSymbolNames.push_back(nameIsFunc);
+    }
+
     ObjectFile linked;
+    linked.debugFiles = std::move(debugFiles);
+    linked.debugLines = std::move(debugLines);
+    linked.debugSymbolNames = std::move(debugSymbolNames);
     linked.unitBits = config_.outputUnitBits;
     linked.base = config_.baseAddress / config_.addressUnitBytes;
     linked.machineType = config_.machineType;

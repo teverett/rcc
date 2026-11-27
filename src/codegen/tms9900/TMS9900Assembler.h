@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -54,5 +56,10 @@ std::string assembleTMS9900(const std::string &asmText);
 // reference (resolved once linked). Returns a format-neutral ObjectFile; this function never
 // writes real object bytes.
 ObjectFile assembleTMS9900Object(const std::string &asmText);
+
+
+std::string assembleTMS9900DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

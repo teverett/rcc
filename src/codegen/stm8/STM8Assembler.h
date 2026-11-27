@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -40,5 +42,10 @@ std::string assembleSTM8(const std::string &asmText);
 // pseudo-symbol ".." (this object's own eventual linked base, added only
 // by the linker).
 ObjectFile assembleSTM8Object(const std::string &asmText);
+
+
+std::string assembleSTM8DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

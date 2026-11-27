@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace rcc {
 
@@ -34,5 +36,13 @@ constexpr uint32_t kPdp1StackReserve = 256;
 constexpr uint32_t kPdp1StackSafeLimit = kPdp1AddressFieldLimit - kPdp1StackReserve;
 
 std::string assemblePdp1(const std::string &asmText, Pdp1OutputFormat format);
+
+// Assembles `asmText` and returns a plain-text FILE/SYM/LINE debug map -
+// see Pdp7Assembler.h's own comment on assemblePdp7DebugMap() for the
+// shared format and the exact-symbol-list `symbols` parameter (this
+// target has no object/relocatable format at all - see this header's own
+// class comment - so unlike pdp7's there's no format to exclude here).
+std::string assemblePdp1DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols);
 
 }  // namespace rcc

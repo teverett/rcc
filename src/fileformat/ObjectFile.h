@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace rcc {
@@ -35,6 +36,21 @@ struct ObjRelocation {
     uint16_t type = 0;
 };
 
+// One `--debug-map` line record, pre-link: `offset` is relative to this object's own `.text`
+// start (org 0), the same basis `ObjSymbol::value` uses pre-link. Never produced except when
+// `--debug-map` was given for an object-format compile (see Backend::debugMapPreLink()).
+// `fileId` is meaningless pre-link (every pre-link object has exactly one source file, the
+// FILE/LINE format's own implicit id 1) - TargetLinker::merge() assigns each input object's
+// `debugSourceFile` its own slot in the merged `ObjectFile::debugFiles` and rewrites every one
+// of that object's own `ObjDebugLine::fileId` to match, since several linked objects can each
+// carry their own debug info (though the common case - a runtime library with none at all -
+// never does).
+struct ObjDebugLine {
+    uint32_t offset = 0;
+    uint32_t line = 0;
+    uint32_t fileId = 1;
+};
+
 // One compiled translation unit, or, once linked, one whole program: the neutral model every
 // FileFormatWriter/FileFormatReader (FileFormat.h) and every TargetLinker (Linker.h) operates on
 // instead of touching a real COFF/ELF/Mach-O/etc. layout directly. Linked is distinguished by
@@ -59,6 +75,20 @@ struct ObjectFile {
     uint32_t unitBits = 8;
     uint32_t base = 0;
     uint32_t textAlignment = 1;
+
+    // `--debug-map` side data, loaded from this object's `.dbgpre` sidecar file (never from the
+    // object format itself - see main.cpp's own --link handling), not populated by any
+    // FileFormatReader. Empty (debugSourceFile.empty()) when this object has none, which is the
+    // common case: a runtime library compiled without --debug-map simply has no sidecar.
+    // `debugSymbolNames` is a subset of `symbols` (by name) to report as a SYM record rather than
+    // every linker-visible symbol - see Backend::debugMapPreLink()'s own comment on why this list
+    // is collected separately from the full relocation symbol table. Pre-link, exactly one of
+    // `debugSourceFile` (this object's own file) or `debugFiles` (every input's file, once
+    // `merge()` has combined them) is ever populated - never both.
+    std::string debugSourceFile;
+    std::vector<std::string> debugFiles;
+    std::vector<ObjDebugLine> debugLines;
+    std::vector<std::pair<std::string, bool>> debugSymbolNames;
 };
 
 }  // namespace rcc

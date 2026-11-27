@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -60,5 +62,9 @@ std::string assembleSaturn(const std::string &asmText, bool allowExternal = fals
 // serialized COFF bytes. Used by SaturnLinkerFactory.cpp's makeSaturnLinker() for both real user
 // objects and its synthesized entry object, avoiding a serialize/deserialize round trip.
 ObjectFile assembleSaturnObject(const std::string &asmText);
+
+std::string assembleSaturnDebugMap(const std::string &asmText, const std::string &sourcePath,
+                                    const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

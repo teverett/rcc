@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -72,5 +74,10 @@ std::string assembleCP1610(const std::string &asmText);
 // Separate-compilation entry point: assembles with `org 0`, defers undefined symbols as
 // relocations. Returns a format-neutral ObjectFile; never writes real object bytes.
 ObjectFile assembleCP1610Object(const std::string &asmText);
+
+
+std::string assembleCP1610DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

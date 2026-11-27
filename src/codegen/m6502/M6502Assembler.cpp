@@ -2,9 +2,11 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <sstream>
 #include <stdexcept>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "ANTLRInputStream.h"
@@ -33,13 +35,14 @@ struct Syllable {
 
 struct Line {
     std::vector<std::string> labels;
-    enum Kind { None, Equate, Org, Db, DbLo, DbHi, Times, Instr } kind = None;
+    enum Kind { None, Equate, Org, Db, DbLo, DbHi, Times, Instr, DebugLine } kind = None;
     std::string equateName;                         // Equate
     std::vector<std::vector<Syllable>> exprList;     // Equate (1)/Org (1)/Db/DbLo/DbHi (N)/Times' inner db (1)
     std::string mnemonic;                             // Instr
     std::vector<std::vector<Syllable>> operands;      // Instr
     std::vector<Syllable> timesCount;                  // Times
     std::string innerMnemonic;                          // Times: the inner mnemonic (always "db")
+    int debugLine = 0;                                   // DebugLine
 };
 
 std::string toLower(std::string s) {
@@ -142,6 +145,22 @@ Line buildLine(RccAsmParser::LineContext *ctx) {
         for (auto *op : instr->operand()) line.exprList.push_back(buildOperand(op));
         return line;
     }
+    // "__line N" is a debug-map-only pseudo-op (see M6502Codegen.cpp's own
+    // emitSourceLine(), and Pdp7Assembler.cpp's identical "__line"
+    // interception, which this mirrors) - not a real 6502 instruction, so
+    // it's intercepted here the same way "org"/"db"/"dblo"/"dbhi" are.
+    // Emits no byte and doesn't advance `offset_`; Assembler::processLine()
+    // just records (current address, N) into debugLines_ when it sees one.
+    if (mnemonic == "__line") {
+        if (instr->operand().size() != 1) fail("__line takes exactly one bare non-negative number");
+        std::vector<Syllable> syls = buildOperand(instr->operand(0));
+        if (syls.size() != 1 || syls[0].kind != SylKind::Number || syls[0].sign != 0) {
+            fail("__line takes exactly one bare non-negative number");
+        }
+        line.kind = Line::DebugLine;
+        line.debugLine = std::stoi(syls[0].text);
+        return line;
+    }
 
     line.kind = Line::Instr;
     line.mnemonic = mnemonic;
@@ -189,12 +208,17 @@ class Assembler {
     uint32_t orgBase() const { return orgBase_; }
     const std::unordered_map<std::string, uint32_t> &labels() const { return labels_; }
     const std::vector<Relocation> &relocations() const { return relocations_; }
+    // (address, source line) pairs recorded from every "__line N"
+    // pseudo-op (see Line::DebugLine), in program order - which is also
+    // address order, same as Pdp7Assembler.cpp's own debugLines().
+    const std::vector<std::pair<uint32_t, int>> &debugLines() const { return debugLines_; }
 
    private:
     void pass(const std::vector<Line> &lines) {
         bytes_.clear();
         relocations_.clear();
         equateNames_.clear();
+        debugLines_.clear();
         offset_ = 0;
         orgBase_ = 0;
         for (const auto &line : lines) processLine(line);
@@ -238,6 +262,12 @@ class Assembler {
             }
             case Line::Instr:
                 encodeInstr(line.mnemonic, line.operands);
+                return;
+            case Line::DebugLine:
+                // No byte emitted, `offset_` untouched - this marker just
+                // attributes whatever address the NEXT real instruction
+                // lands at to a source line, same as a label would.
+                if (stage_ == 2) debugLines_.push_back({orgBase_ + offset_, line.debugLine});
                 return;
         }
     }
@@ -453,6 +483,7 @@ class Assembler {
     std::unordered_map<std::string, uint32_t> labels_;
     std::unordered_set<std::string> equateNames_;
     std::vector<Relocation> relocations_;
+    std::vector<std::pair<uint32_t, int>> debugLines_;
     uint32_t offset_ = 0;
     uint32_t orgBase_ = 0;
     int stage_ = 1;
@@ -484,6 +515,29 @@ ObjectFile buildObjectFile(const Assembler &a, uint16_t machineType) {
     return obj;
 }
 
+// Plain-text FILE/SYM/LINE debug map (see Pdp7Assembler.cpp's own
+// writeDebugMap(), which this mirrors - minus any RELATIVE-flag/base-shift
+// handling, since `labels()` already holds plain final addresses for a
+// whole-program `org <realBase>` compile). `symbols` is the exact
+// (label, isFunc) list M6502Codegen.cpp's own debugSymbols_ collects, not
+// a prefix guess over every label this assembler ever sees.
+std::string writeDebugMap(const Assembler &a, const std::string &sourcePath,
+                           const std::vector<std::pair<std::string, bool>> &symbols) {
+    std::ostringstream out;
+    out << "FILE 1 " << sourcePath << "\n";
+    std::vector<std::pair<std::string, bool>> sorted = symbols;
+    std::sort(sorted.begin(), sorted.end());
+    for (const auto &[name, isFunc] : sorted) {
+        uint32_t addr = a.labels().at(name);
+        std::string bare = name.substr(isFunc ? 3 : 2);  // strip "fn_"/"g_" - see label()
+        out << "SYM " << addr << " " << bare << " " << (isFunc ? "FUNC" : "DATA") << "\n";
+    }
+    for (const auto &[addr, line] : a.debugLines()) {
+        out << "LINE " << addr << " 1 " << line << "\n";
+    }
+    return out.str();
+}
+
 }  // namespace
 
 std::string assembleM6502(const std::string &asmText) {
@@ -499,6 +553,15 @@ ObjectFile assembleM6502Object(const std::string &asmText, uint16_t machineType)
     Assembler assembler(/*allowExternal=*/true);
     assembler.run(lines);
     return buildObjectFile(assembler, machineType);
+}
+
+std::string assembleM6502DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/allowExternal);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
 }
 
 }  // namespace rcc

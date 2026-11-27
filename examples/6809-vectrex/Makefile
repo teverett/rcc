@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6809-vectrex-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6809-vectrex-raw --dump-ir --dump-asm --out="$@" "$<"
 
 # vectrex.lib is src/rt/vectrex/'s own build product (see that directory's own Makefile) - built
 # here via a sub-make rather than recompiling vectrex.c a second time, the same pattern
@@ -23,7 +23,7 @@ $(VECTREX_LIB):
 
 # The real GCE Vectrex cartridge ROM image - see ../../src/fileformat/vectrex/VectrexFormat.h.
 $(BUILD_DIR)/main.rom: $(BUILD_DIR)/main.o $(VECTREX_LIB)
-	$(RCC) --link --platform=6809-vectrex-vectrex --out="$@" "$(BUILD_DIR)/main.o" "$(VECTREX_LIB)"
+	$(RCC) --debug-map --link --platform=6809-vectrex-vectrex --out="$@" "$(BUILD_DIR)/main.o" "$(VECTREX_LIB)"
 
 # No verified Vectrex emulator is wired into this project's CI - see docs/known-bugs.md - so this
 # only confirms the cartridge image was produced.

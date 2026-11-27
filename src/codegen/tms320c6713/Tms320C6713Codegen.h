@@ -93,11 +93,20 @@ class Tms320C6713Codegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // Only "raw" (the one format this target lists at all - see
+    // Backend::debugMap()'s own comment and assembledFormats() above).
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
     void genEpilogue();
     void genStmt(const ir::Stmt &s);
+    void emitSourceLine(int line);
     void genExpr(const ir::Expr &e);  // leaves the result in B0 (B1:B0 if wide)
 
     void genBinary(const ir::Expr &e);
@@ -209,6 +218,10 @@ class Tms320C6713Codegen : public Backend, protected TextCodegenBase {
     // line-oriented-assembly backend, not just this one.
     std::vector<std::string> trailer_;
     std::map<std::string, std::string> perFileAsm_;
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
 
     int labelCounter_ = 0;
     std::vector<std::pair<std::string, std::string>> loopLabels_;

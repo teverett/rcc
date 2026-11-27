@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -50,5 +52,10 @@ std::string assembleArm(const std::string &asmText);
 // from org 0" until that base is added). Returns the format-neutral
 // ObjectFile a codegen backend builds once per compile.
 ObjectFile assembleArmObject(const std::string &asmText);
+
+
+std::string assembleArmDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

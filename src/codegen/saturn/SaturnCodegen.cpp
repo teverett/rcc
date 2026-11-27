@@ -78,6 +78,8 @@ std::string SaturnCodegen::generate(const ir::Program &prog, bool objectMode) {
         }
         size_t fCodeStart = static_cast<size_t>(code_.tellp());
         size_t fTrailerStart = trailer_.size();
+        lastDebugLine_ = 0;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(fb.func), /*isFunc=*/true});
         genFunction(fb);
         codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
         trailerRanges.push_back({fb.func->sourceFile, fTrailerStart, trailer_.size()});
@@ -90,6 +92,7 @@ std::string SaturnCodegen::generate(const ir::Program &prog, bool objectMode) {
             err(0, "'@' fixed placement isn't supported on this backend (see docs/platforms.md's "
                    "saturn entry)");
         }
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         size_t gTrailerStart = trailer_.size();
         // A `char`/`short` element (byteWidth < 4) is one `db`/`dh` value; an `int`/pointer/
         // `long`/`long long` element (always a multiple of 4 bytes) is `byteWidth / 4`
@@ -406,6 +409,7 @@ bool SaturnCodegen::exprIsCallFree(const ir::Expr &e) const {
 // --- Statements -------------------------------------------------------------
 
 void SaturnCodegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1590,6 +1594,26 @@ __udivmod32_done:
     mov a, b
     rtn
 )ASM";
+}
+
+std::optional<std::string> SaturnCodegen::debugMap(const std::string &asmText, const std::string &format,
+                                                     const std::string &sourcePath) const {
+    if (format != "raw") return std::nullopt;
+    return assembleSaturnDebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> SaturnCodegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleSaturnDebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(), before generate()
+// runs) and `line` actually differs from the last one emitted - see Pdp7Codegen.cpp's identical
+// emitSourceLine(), which this mirrors exactly.
+void SaturnCodegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    lastDebugLine_ = line;
+    emitRaw(cat("__line ", line));
 }
 
 }  // namespace rcc

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -50,5 +52,10 @@ std::string assembleVax(const std::string &asmText);
 // this same file - also relocates against the reserved pseudo-symbol ".." (every label
 // resolves only to "offset from org 0" until that base is added).
 ObjectFile assembleVaxObject(const std::string &asmText);
+
+
+std::string assembleVaxDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

@@ -13,7 +13,7 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=z80-coleco-colecorom --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=z80-coleco-colecorom --dump-ir --dump-asm --out="$@" "$<"
 
 # coleco.lib is src/rt/coleco/'s own build product (see that directory's own
 # Makefile) - built here via a sub-make rather than recompiling coleco.c a
@@ -23,7 +23,7 @@ $(COLECO_LIB):
 	$(MAKE) -C $(COLECO_DIR)
 
 $(BUILD_DIR)/main.col: $(BUILD_DIR)/main.o $(COLECO_LIB)
-	$(RCC) --link --platform=z80-coleco-colecorom --out="$@" "$(BUILD_DIR)/main.o" "$(COLECO_LIB)"
+	$(RCC) --debug-map --link --platform=z80-coleco-colecorom --out="$@" "$(BUILD_DIR)/main.o" "$(COLECO_LIB)"
 
 # Same link, written out as `raw` instead of `colecorom` - identical bytes
 # minus colecorom's own padding up to a standard cartridge size (see

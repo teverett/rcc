@@ -2,6 +2,8 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -58,5 +60,13 @@ constexpr uint16_t kI8086RelocRel16 = 2;
 // ObjectFile directly instead of serialized COFF bytes - avoids a serialize-then-
 // deserialize round trip when the linker assembles its own synthesized entry object.
 ObjectFile assembleI8086Object(const std::string &asmText, uint16_t machineType = kI8086CoffMachine);
+
+// Assembles like assembleI8086(asmText, Bin), then formats a plain-text FILE/SYM/LINE
+// debug map against the result (see Backend::debugMap()'s own comment in
+// src/codegen/Codegen.h) - `symbols` is the exact (label, isFunc) list I8086Codegen's own
+// debugSymbols_ collects.
+std::string assembleI8086DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                   const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

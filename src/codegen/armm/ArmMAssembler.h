@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -48,5 +50,10 @@ std::string assembleArmM(const std::string &asmText);
 // correct PC-relative reference regardless of load base, so it gets a
 // relocation only when its target is undefined in this file.
 ObjectFile assembleArmMObject(const std::string &asmText);
+
+
+std::string assembleArmMDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -30,5 +32,10 @@ std::string assembleI386(const std::string &asmText);
 // absolute-address reference also gets a relocation against the reserved pseudo-symbol
 // ".." (labels resolve relative to this object's own org 0 until the linker adds its base).
 ObjectFile assembleI386Object(const std::string &asmText);
+
+
+std::string assembleI386DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

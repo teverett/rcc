@@ -13,10 +13,10 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=6809-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6809-raw --dump-ir --dump-asm --out="$@" "$<"
 
 $(BUILD_DIR)/api_test.o: api_test.c | $(BUILD_DIR)
-	$(RCC) --platform=6809-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=6809-raw --dump-ir --dump-asm --out="$@" "$<"
 
 # dragon32.lib is src/rt/dragon32/'s own build product (see that directory's own Makefile) -
 # built here via a sub-make rather than recompiling dragon32.c a second time, the same pattern
@@ -25,7 +25,7 @@ $(DRAGON32_LIB):
 	$(MAKE) -C $(DRAGON32_DIR)
 
 $(BUILD_DIR)/main.raw: $(BUILD_DIR)/main.o $(DRAGON32_LIB)
-	$(RCC) --link --platform=6809-raw --out="$@" "$(BUILD_DIR)/main.o" "$(DRAGON32_LIB)"
+	$(RCC) --debug-map --link --platform=6809-raw --out="$@" "$(BUILD_DIR)/main.o" "$(DRAGON32_LIB)"
 
 # The real Dragon/CoCo LOADM/CLOADM byte stream - see ../../src/fileformat/decb/DecbFormat.h.
 # Both machines' ROM BASIC read this same block structure from disk or cassette, and XRoar (the

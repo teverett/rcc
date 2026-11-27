@@ -20,6 +20,7 @@
 #include <optional>
 #include <sstream>
 #include <system_error>
+#include <unordered_map>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -219,6 +220,98 @@ void writeToBuildDir(const std::string &name, const std::string &content, bool b
         return;
     }
     out << content;
+}
+
+// Writes `dbg` (if present - a backend with no debugMapPreLink() override, or an object format
+// it doesn't recognize, yields nullopt) as `<objPath>.dbgpre`, the pre-link --debug-map sidecar
+// a later --link reads back (see Linker.h's own comment on how it's consumed). `objPath` is
+// wherever the matching .o actually landed - build/<name>.o when --out was omitted, --out's own
+// path otherwise - so the sidecar is always found by simply appending ".dbgpre" to the .o path.
+void writeDebugMapPreLink(const std::string &objPath, const std::optional<std::string> &dbg) {
+    if (!dbg) return;
+    std::ofstream out(objPath + ".dbgpre");
+    if (!out) {
+        std::cerr << "warning: could not write " << objPath << ".dbgpre\n";
+        return;
+    }
+    out << *dbg;
+}
+
+// Reads `<objPath>.dbgpre` (if it exists - the common case, a runtime library compiled without
+// --debug-map, simply has none) and fills `obj`'s own debug fields from it, in the exact
+// FILE/SYM/LINE shape writeDebugMapPreLink() wrote. `obj.debugLines`' own `fileId` is left at its
+// default (1, meaningless pre-link - see ObjectFile.h's own comment); TargetLinker::merge()
+// assigns the real one once every input is combined.
+void readDebugMapPreLink(const std::string &objPath, rcc::ObjectFile &obj) {
+    std::ifstream in(objPath + ".dbgpre");
+    if (!in) return;
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ls(line);
+        std::string tag;
+        ls >> tag;
+        if (tag == "FILE") {
+            int fileId;
+            std::string path;
+            ls >> fileId >> path;
+            obj.debugSourceFile = path;
+        } else if (tag == "SYM") {
+            uint32_t addr;
+            std::string name, kind;
+            ls >> addr >> name >> kind;
+            obj.debugSymbolNames.push_back({name, kind == "FUNC"});
+        } else if (tag == "LINE") {
+            uint32_t addr, fileId, lineNo;
+            ls >> addr >> fileId >> lineNo;
+            obj.debugLines.push_back({addr, lineNo});
+        }
+    }
+}
+
+// Formats `linked`'s own debugFiles/debugLines/debugSymbolNames (already combined and address-
+// shifted by TargetLinker::merge()) into the same plain-text FILE/SYM/LINE shape every whole-
+// program --debug-map produces - see docs/debug-map.md. A SYM/LINE whose own symbol got dropped
+// by `--gc-sections` is simply left out, same as it never having been compiled at all.
+std::string formatLinkedDebugMap(const rcc::ObjectFile &linked) {
+    std::unordered_map<std::string, const rcc::ObjSymbol *> byName;
+    for (const rcc::ObjSymbol &s : linked.symbols) byName[s.name] = &s;
+
+    struct SymRow {
+        uint32_t addr;
+        std::string name;
+        bool isFunc;
+    };
+    std::vector<SymRow> symRows;
+    for (const auto &nameIsFunc : linked.debugSymbolNames) {
+        // The sidecar's own SYM line already carries the bare name (each backend's
+        // writeDebugMap() strips the "fn_"/"g_" - or uppercase "FN_"/"G_" - prefix before
+        // printing it, same as a whole-program --debug-map does), but `linked.symbols` still
+        // carries the real, prefixed assembler label (needed for cross-object linking) - so the
+        // bare name is tried first, then every known prefix convention, before giving up.
+        const rcc::ObjSymbol *sym = nullptr;
+        for (const std::string &candidate : {nameIsFunc.first, (nameIsFunc.second ? "fn_" : "g_") + nameIsFunc.first,
+                                               (nameIsFunc.second ? "FN_" : "G_") + nameIsFunc.first}) {
+            auto it = byName.find(candidate);
+            if (it != byName.end()) {
+                sym = it->second;
+                break;
+            }
+        }
+        if (!sym) continue;
+        uint32_t addr = sym->isData ? sym->value : linked.base + sym->value;
+        symRows.push_back({addr, nameIsFunc.first, nameIsFunc.second});
+    }
+    std::sort(symRows.begin(), symRows.end(), [](const SymRow &a, const SymRow &b) { return a.addr < b.addr; });
+
+    std::vector<rcc::ObjDebugLine> lineRows = linked.debugLines;
+    std::sort(lineRows.begin(), lineRows.end(),
+              [](const rcc::ObjDebugLine &a, const rcc::ObjDebugLine &b) { return a.offset < b.offset; });
+
+    std::ostringstream out;
+    for (size_t i = 0; i < linked.debugFiles.size(); i++) out << "FILE " << (i + 1) << " " << linked.debugFiles[i] << "\n";
+    for (const SymRow &r : symRows) out << "SYM " << r.addr << " " << r.name << " " << (r.isFunc ? "FUNC" : "DATA") << "\n";
+    for (const rcc::ObjDebugLine &l : lineRows) out << "LINE " << (linked.base + l.offset) << " " << l.fileId << " " << l.line << "\n";
+    return out.str();
 }
 
 // Every name makeBackend()/makeLinker() accept as --target (aliases sharing
@@ -663,6 +756,7 @@ int main(int argc, char **argv) {
     bool optimize = false;
     bool dumpIr = false;
     bool dumpAsm = false;
+    bool dumpDebugMap = false;
     bool verbose = false;
     bool link = false;
     bool gcSections = false;
@@ -712,6 +806,8 @@ int main(int argc, char **argv) {
             dumpIr = true;
         } else if (arg == "--dump-asm") {
             dumpAsm = true;
+        } else if (arg == "--debug-map") {
+            dumpDebugMap = true;
         } else if (arg == "--verbose") {
             verbose = true;
         } else if (arg == "--link") {
@@ -921,10 +1017,20 @@ int main(int argc, char **argv) {
                 // objects compiled with different --format choices can
                 // still be linked together.
                 rcc::FileFormatKind kind = rcc::detectFileFormat(bytes);
-                objects.push_back(rcc::makeFileFormatReader(kind)->read(bytes));
+                rcc::ObjectFile obj = rcc::makeFileFormatReader(kind)->read(bytes);
+                if (dumpDebugMap) readDebugMapPreLink(path, obj);
+                objects.push_back(std::move(obj));
             }
             rcc::ObjectFile linked = linker->merge(objects, gcSections);
             writeResult(outPath, writer->write(linked));
+            if (dumpDebugMap && !linked.debugFiles.empty()) {
+                std::string out = outPath.empty() ? "a.out" : outPath;
+                size_t slash = out.find_last_of('/');
+                std::string stem = (slash == std::string::npos) ? out : out.substr(slash + 1);
+                size_t dot = stem.find_last_of('.');
+                if (dot != std::string::npos) stem = stem.substr(0, dot);
+                writeToBuildDir(stem + ".dbgmap", formatLinkedDebugMap(linked));
+            }
         } catch (const std::exception &e) {
             std::cerr << e.what() << "\n";
             return 1;
@@ -1130,10 +1236,15 @@ int main(int argc, char **argv) {
                         arm64->setHostedAbi(macosHosted);
                     }
                 }
+                if (dumpDebugMap) fileBackend->setDebugMapEnabled(true);
                 std::string asmText =
                     compileOneFile(srcPath, predefinedMacros, *fileBackend, allowExternal, optimize, dumpIr, dumpAsm,
                                     verbose);
                 std::string bytes = assembleOne(*fileBackend, asmText, format);
+                if (dumpDebugMap) {
+                    writeDebugMapPreLink("build/" + baseName(srcPath) + ".o",
+                                          fileBackend->debugMapPreLink(asmText, srcPath));
+                }
                 writeToBuildDir(baseName(srcPath) + ".o", bytes, /*binary=*/true);
             }
         } catch (const std::exception &e) {
@@ -1146,13 +1257,26 @@ int main(int argc, char **argv) {
     // Exactly one input file, any format, defaulting to build/<name>.o
     // when --out is omitted for an object format.
     try {
+        if (dumpDebugMap) backend->setDebugMapEnabled(true);
         std::string asmText =
             compileOneFile(srcPaths[0], predefinedMacros, *backend, allowExternal, optimize, dumpIr, dumpAsm,
                             verbose);
         std::string bytes = assembleOne(*backend, asmText, format);
+        if (dumpDebugMap && !allowExternal) {
+            if (std::optional<std::string> dbg = backend->debugMap(asmText, format, srcPaths[0])) {
+                writeToBuildDir(baseName(srcPaths[0]) + ".dbgmap", *dbg);
+            }
+        }
         if (backend->isObjectFormat(format) && outPath.empty()) {
+            if (dumpDebugMap) {
+                writeDebugMapPreLink("build/" + baseName(srcPaths[0]) + ".o",
+                                      backend->debugMapPreLink(asmText, srcPaths[0]));
+            }
             writeToBuildDir(baseName(srcPaths[0]) + ".o", bytes, /*binary=*/true);
         } else {
+            if (dumpDebugMap && allowExternal) {
+                writeDebugMapPreLink(outPath, backend->debugMapPreLink(asmText, srcPaths[0]));
+            }
             writeResult(outPath, bytes);
         }
     } catch (const std::exception &e) {

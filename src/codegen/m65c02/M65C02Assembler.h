@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -49,5 +51,10 @@ std::string assembleM65C02(const std::string &asmText);
 // address reference also gets a relocation against the reserved
 // pseudo-symbol ".." (this object's eventual linked base).
 ObjectFile assembleM65C02Object(const std::string &asmText);
+
+
+std::string assembleM65C02DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

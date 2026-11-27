@@ -11,12 +11,12 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=2a03-nes --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=2a03-nes --dump-ir --dump-asm --out="$@" "$<"
 
 # --base=$8000: NROM's own fixed PRG-ROM window (see ../../src/
 # fileformat/nes/NesRomFormat.h) - the only base --format=nes accepts.
 $(BUILD_DIR)/main.nes: $(BUILD_DIR)/main.o
-	$(RCC) --link --platform=2a03-nes --base='$$8000' --out="$@" "$(BUILD_DIR)/main.o"
+	$(RCC) --debug-map --link --platform=2a03-nes --base='$$8000' --out="$@" "$(BUILD_DIR)/main.o"
 
 # Same link, written out as `raw` instead of `nes` - identical program
 # bytes minus the iNES header/padding/vector table - so CI can load and

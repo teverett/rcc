@@ -81,6 +81,7 @@ std::string R32cCodegen::generate(const ir::Program &prog, bool objectMode) {
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
         const size_t before = trailer_.size();
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
@@ -119,6 +120,8 @@ std::string R32cCodegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> R32cCodegen::perFileAsm() const { return perFileAsm_; }
 
 void R32cCodegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     emit("push.w", "fb");
     emit("mov.w", "sp,fb");
@@ -131,6 +134,7 @@ void R32cCodegen::genFunction(const ir::FunctionBody &fn) {
 }
 
 void R32cCodegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1140,6 +1144,27 @@ std::optional<std::string> R32cCodegen::assembleInProcess(const std::string &asm
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> R32cCodegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleR32cDebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> R32cCodegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleR32cDebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void R32cCodegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

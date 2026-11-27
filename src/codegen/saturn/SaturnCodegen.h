@@ -5,6 +5,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "codegen/Codegen.h"
@@ -49,10 +50,21 @@ class SaturnCodegen : public Backend, protected TextCodegenBase {
     std::map<std::string, std::string> perFileAsm() const override;
     std::optional<std::string> assembleInProcess(const std::string &asmText,
                                                   const std::string &format) const override;
+    // Only "raw" (the one whole-program-final format this target lists -
+    // see Backend::debugMap()'s own comment); "coff" is a real relocatable
+    // object, excluded by main.cpp's own isObjectFormat() gate already, but
+    // checked here too the same way M6502Codegen.cpp's own debugMap() is.
+    std::optional<std::string> debugMap(const std::string &asmText, const std::string &format,
+                                         const std::string &sourcePath) const override;
+    void setDebugMapEnabled(bool enabled) override { debugMapEnabled_ = enabled; }
+    std::optional<std::string> debugMapPreLink(const std::string &asmText,
+
+                                                const std::string &sourcePath) const override;
 
    private:
     void genFunction(const ir::FunctionBody &fn);
     void genStmt(const ir::Stmt &s);
+    void emitSourceLine(int line);
     void genExpr(const ir::Expr &e);  // leaves the result in register `a`
 
     void genBinary(const ir::Expr &e);
@@ -167,6 +179,10 @@ class SaturnCodegen : public Backend, protected TextCodegenBase {
     // `code_` itself come from TextCodegenBase (see Codegen.h).
     std::vector<std::string> trailer_;  // "label: dw value" data lines, emitted once at the end
     std::map<std::string, std::string> perFileAsm_;
+
+    int lastDebugLine_ = 0;
+    bool debugMapEnabled_ = false;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
 
     int tempCounter_ = 0;
     int labelCounter_ = 0;

@@ -11,10 +11,10 @@ $(BUILD_DIR):
 	mkdir -p "$@"
 
 $(BUILD_DIR)/main.o: main.c | $(BUILD_DIR)
-	$(RCC) --platform=68000-raw --dump-ir --dump-asm --out="$@" "$<"
+	$(RCC) --debug-map --platform=68000-raw --dump-ir --dump-asm --out="$@" "$<"
 
 $(BUILD_DIR)/main.bin: $(BUILD_DIR)/main.o
-	$(RCC) --link --platform=68000-raw --out="$@" "$<"
+	$(RCC) --debug-map --link --platform=68000-raw --out="$@" "$<"
 
 # Runs main.bin under qemu-system-m68k (test.py) - see that script's own
 # header comment. Needs qemu-system-m68k on PATH.

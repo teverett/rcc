@@ -3,6 +3,41 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## `tests/compound_assign_inc_dec_ternary.c` fails on `i8008`
+
+Discovered 2026-11-26 while verifying `--debug-map`'s own regression
+suite was clean after porting it to `i8008` - confirmed pre-existing and
+unrelated to that work (`git show HEAD:...` on both `I8008Codegen.cpp`
+and `I8008Assembler.cpp`, i.e. the original, unmodified files, reproduces
+the identical failure). `// EXPECT: 1`; `tests/run_tests.sh
+--target=8008`'s own `check_i8008()` reports `expected 1, got` with no
+value at all (not a wrong-but-defined result the way the `avr`/`struct_nonpow2_array_stride.c`
+entry below is) - consistent with the from-scratch 8008 simulator core
+`check_i8008()` itself implements either timing out or reaching a state
+it can't report a register value from, rather than the compiled program
+computing a wrong answer. Not root-caused: which of the file's many
+checks (compound-assign operators, pre/post-increment, pointer
+arithmetic, nested ternaries) triggers it isn't isolated yet. Not in
+`tests/run_tests.sh`'s `is_known_unsupported()` skip-list.
+
+## `pdp10` `--format=coff` fails to link a program with a Global at all
+
+Discovered 2026-11-26 while writing `--debug-map`'s own cross-backend
+regression suite - confirmed pre-existing and unrelated to that work
+(`git show HEAD:...` on both `Pdp10Codegen.cpp` and `Pdp10Assembler.cpp`,
+the original unmodified files, reproduces the identical failure).
+Compiling any program with at least one defined (non-`extern`) `Global`
+under `--target=pdp10 --format=coff` fails outright with `CoffFormat:
+relocation references unknown symbol '..'`, regardless of `--debug-map`.
+Not root-caused: `src/fileformat/coff/CoffFormat.cpp`'s own relocation
+writer expects every relocation's target symbol name to already have a
+real `ObjSymbol` entry, and something about how `Pdp10Assembler.cpp`'s
+own `assemblePdp10Object()` records a Global's own base-shift relocation
+(against the reserved pseudo-symbol `..`) doesn't give it one - the exact
+mechanism isn't isolated yet. A function-only program (no Globals) compiles
+to `--format=coff` without issue. Not in `tests/run_tests.sh`'s
+`is_known_unsupported()` skip-list.
+
 ## PDP-7 leaf param binding's autoindex-register use is only safe under one caller's own current setup, not in general
 
 Affects `src/codegen/pdp7/Pdp7Codegen.cpp`'s `emitLeafParamBinding()`:

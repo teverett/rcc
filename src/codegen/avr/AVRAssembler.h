@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -83,5 +85,10 @@ std::string assembleAVR(const std::string &asmText);
 // code-space symbol - the linker resolves it to that other object's own already-absolute data
 // address.
 ObjectFile assembleAVRObject(const std::string &asmText);
+
+
+std::string assembleAVRDebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc

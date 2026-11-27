@@ -1,6 +1,7 @@
 #include "STM8Codegen.h"
 
 #include <algorithm>
+#include <tuple>
 #include <cstdint>
 #include <stdexcept>
 
@@ -554,7 +555,18 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
         for (int i = 0; i < 4; i++) declareTemp(wideScratch("b", i));
     }
 
-    for (const auto &fb : prog.functionBodies) genFunction(fb);
+    // --dump-asm wants one file per input, not one combined dump - see
+    // Pdp7Codegen.cpp's own generate() for the pattern this mirrors
+    // (tellp()-position ranges into code_, index ranges into trailer_,
+    // sliced into perFileAsm_ at the end).
+    std::vector<std::tuple<std::string, size_t, size_t>> codeRanges;
+    std::vector<std::tuple<std::string, size_t, size_t>> trailerRanges;
+
+    for (const auto &fb : prog.functionBodies) {
+        size_t fCodeStart = static_cast<size_t>(code_.tellp());
+        genFunction(fb);
+        codeRanges.push_back({fb.func->sourceFile, fCodeStart, static_cast<size_t>(code_.tellp())});
+    }
 
     for (const auto &slot : prog.slots) {
         if (slot->kind != ir::SlotKind::Global) continue;
@@ -562,6 +574,8 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
         // by name, so the assembler's undefined-symbol handling defers it
         // to a relocation.
         if (slot->isExternal) continue;
+        if (debugMapEnabled_) debugSymbols_.push_back({label(slot.get()), /*isFunc=*/false});
+        size_t gTrailerStart = trailer_.size();
         const std::string lbl = label(slot.get());
         if (slot->arraySize > 0) {
             declareArray(lbl, slot->arrayInit, slot->type);
@@ -599,6 +613,14 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
                 trailer_.push_back(line.str());
             }
         }
+        trailerRanges.push_back({slot->sourceFile, gTrailerStart, trailer_.size()});
+    }
+
+    std::string codeStr = code_.str();
+    perFileAsm_.clear();
+    for (const auto &[file, s, e] : codeRanges) perFileAsm_[file] += codeStr.substr(s, e - s);
+    for (const auto &[file, s, e] : trailerRanges) {
+        for (size_t i = s; i < e; i++) perFileAsm_[file] += trailer_[i] + "\n";
     }
 
     std::ostringstream out;
@@ -610,6 +632,8 @@ std::string STM8Codegen::generate(const ir::Program &prog, bool objectMode) {
 std::map<std::string, std::string> STM8Codegen::perFileAsm() const { return perFileAsm_; }
 
 void STM8Codegen::genFunction(const ir::FunctionBody &fn) {
+    lastDebugLine_ = 0;
+    if (debugMapEnabled_) debugSymbols_.push_back({label(fn.func), /*isFunc=*/true});
     emitLabel(label(fn.func));
     currentFunction_ = fn.func;
     genPrologue(*fn.func);
@@ -688,6 +712,7 @@ void STM8Codegen::genSlotAddress(const ir::Slot *slot) {
 }
 
 void STM8Codegen::genStmt(const ir::Stmt &s) {
+    emitSourceLine(s.line);
     switch (s.kind) {
         case ir::StmtKind::Block: {
             for (const auto &child : s.body) genStmt(*child);
@@ -1664,6 +1689,27 @@ std::optional<std::string> STM8Codegen::assembleInProcess(const std::string &asm
         return makeFileFormatWriter(*kind)->write(obj);
     }
     return std::nullopt;
+}
+
+std::optional<std::string> STM8Codegen::debugMap(const std::string &asmText, const std::string &format,
+        const std::string &sourcePath) const {
+    (void)format;
+    return assembleSTM8DebugMap(asmText, sourcePath, debugSymbols_);
+}
+
+std::optional<std::string> STM8Codegen::debugMapPreLink(const std::string &asmText,
+                                                    const std::string &sourcePath) const {
+    return assembleSTM8DebugMap(asmText, sourcePath, debugSymbols_, /*allowExternal=*/true);
+}
+
+// Only emits a marker when `debugMapEnabled_` (set via setDebugMapEnabled(),
+// before generate() runs) and `line` actually differs from the last one
+// emitted - see Pdp7Codegen.cpp's identical emitSourceLine(), which this
+// mirrors exactly.
+void STM8Codegen::emitSourceLine(int line) {
+    if (!debugMapEnabled_ || line == 0 || line == lastDebugLine_) return;
+    emitRaw(cat("__line ", line));
+    lastDebugLine_ = line;
 }
 
 }  // namespace rcc

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 #include <string>
+#include <vector>
 
 #include "fileformat/ObjectFile.h"
 
@@ -56,5 +58,10 @@ std::string assembleMCS51(const std::string &asmText);
 // xdata label emitted, so referencing it fails loudly at resolve time
 // rather than miscompiling silently.
 ObjectFile assembleMCS51Object(const std::string &asmText);
+
+
+std::string assembleMCS51DebugMap(const std::string &asmText, const std::string &sourcePath,
+                       const std::vector<std::pair<std::string, bool>> &symbols,
+                                     bool allowExternal = false);
 
 }  // namespace rcc
