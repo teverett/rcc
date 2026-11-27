@@ -83,35 +83,64 @@ pair - see `docs/using.md`.
 
   `src/rt/pcbios/` is a second, independent runtime library for this same `8086-dos`
   target/ABI, for an IBM 5160 (PC/XT)-class machine calling the BIOS directly instead of
-  going through DOS: video via `INT 10h` (`pcbios_set_mode`/`pcbios_putchar`/`pcbios_puts`/
-  `pcbios_set_cursor`/`pcbios_cursor_row`/`pcbios_cursor_col`/`pcbios_write_attr`/
-  `pcbios_clear_screen`/`pcbios_peek_char`/`pcbios_peek_attr`), keyboard via `INT 16h`
-  (`pcbios_getchar`/`pcbios_haskey`), and one 512-byte disk sector at a time via `INT 13h`
-  (`pcbios_disk_reset`/`pcbios_disk_read`/`pcbios_disk_write`/`pcbios_buf_get`/
-  `pcbios_buf_set`), plus its own `pcbios_exit` (the one DOS call this library still makes -
-  a `.com` process needs `INT 21h`/`4Ch` to hand control back to DOS regardless of which
-  runtime library it otherwise uses). Still `8086-dos`, not a separate target: rcc never
-  builds a boot sector (see this entry's own `8086`/`8088` note and
-  `docs/known-bugs.md`), so a BIOS-calling program still needs DOS (or an emulator standing
-  in for it, such as DOSBox-X) to get the CPU into real mode with the BIOS resident and the
-  program loaded at all - it just never calls back into DOS for video/keyboard/disk I/O
-  once running. Its own staging globals are named with a `pcbios_` prefix (`pcbios_rt_w`/
-  `pcbios_rt_w2`/`pcbios_rt_w3`/`pcbios_rt_disk_buf`, unlike `msdos.c`'s own bare `rt_w`/
-  `rt_w2`/`rt_w3`), so a program can link both libraries together - `examples/8086-pcxt/`
-  does exactly that, for one `dos_create()` call - without two conflicting definitions of
-  the same global. `pcbios_disk_read()`/`pcbios_disk_write()` point `INT 13h` at
-  `pcbios_rt_disk_buf` via a bare `mov bx, g_pcbios_rt_disk_buf` with no segment override -
-  this only works because a `.com` program's `ES` still equals `DS` exactly as DOS set it
-  at load, and this library never changes `ES` - and assume the disk's cylinder count fits
-  in one byte (any floppy geometry; not a 256-or-more-cylinder hard disk). `INT 13h` can
-  return status 6 ("disk changed") on the very next operation after a write or media
-  insert on real/emulated floppy hardware; the documented recovery
-  (`pcbios_disk_reset()`, then retry once) is in `pcbios.h`'s own header comment, not
-  `docs/known-bugs.md` - it's real `INT 13h` behavior, not a defect in this wrapper.
+  going through DOS. Grouped by interrupt: `INT 10h` video (`pcbios_set_mode`/
+  `pcbios_set_cursor_shape`/`pcbios_putchar`/`pcbios_puts`/`pcbios_set_cursor`/
+  `pcbios_cursor_row`/`pcbios_cursor_col`/`pcbios_write_attr`/`pcbios_write_char`/
+  `pcbios_select_active_page`/`pcbios_scroll_up`/`pcbios_scroll_down`/
+  `pcbios_clear_screen`/`pcbios_peek_char`/`pcbios_peek_attr`/`pcbios_get_video_mode`/
+  `pcbios_get_video_columns`/`pcbios_get_video_page`/`pcbios_write_pixel`/
+  `pcbios_read_pixel`/`pcbios_write_string`), `INT 11h`/`INT 12h` equipment/memory-size
+  (`pcbios_equipment`/`pcbios_memory_size_kb`), `INT 13h` disk, one 512-byte sector at a
+  time (`pcbios_disk_reset`/`pcbios_disk_read`/`pcbios_disk_write`/`pcbios_disk_verify`/
+  `pcbios_disk_changed`/`pcbios_disk_last_status`/`pcbios_disk_get_params`
+  plus its own decode-only accessors `pcbios_disk_cylinders`/`pcbios_disk_heads`/
+  `pcbios_disk_sectors_per_track`/`pcbios_disk_count`/`pcbios_buf_get`/`pcbios_buf_set`),
+  `INT 14h` serial (`pcbios_serial_init`/`pcbios_serial_send`/`pcbios_serial_receive`/
+  `pcbios_serial_receive_status`/`pcbios_serial_line_status`/`pcbios_serial_modem_status`),
+  `INT 16h` keyboard (`pcbios_getchar`/`pcbios_haskey`/`pcbios_key_shift_status`),
+  `INT 17h` printer (`pcbios_printer_putchar`/`pcbios_printer_init`/`pcbios_printer_status`),
+  `INT 1Ah` time/date (`pcbios_get_system_time`/`pcbios_time_midnight_flag`/
+  `pcbios_time_ticks_high`/`pcbios_time_ticks_low`/`pcbios_set_system_time`/
+  `pcbios_get_rtc_time`/`pcbios_rtc_hour_bcd`/`pcbios_rtc_minute_bcd`/
+  `pcbios_rtc_second_bcd`/`pcbios_rtc_dst_flag`/`pcbios_set_rtc_time`/
+  `pcbios_get_rtc_date`/`pcbios_rtc_century_bcd`/`pcbios_rtc_year_bcd`/
+  `pcbios_rtc_month_bcd`/`pcbios_rtc_day_bcd`/`pcbios_set_rtc_date`), plus its own
+  `pcbios_exit` (the one DOS call this library still makes - a `.com` process needs
+  `INT 21h`/`4Ch` to hand control back to DOS regardless of which runtime library it
+  otherwise uses). `EGA`/`VGA`-only `INT 10h` services (palette, character generator,
+  alternate select) and `INT 15h` (PC/XT-era cassette interface and AT-and-later services)
+  are out of scope - see `pcbios.h`'s own closing comment for exactly why. Still
+  `8086-dos`, not a separate target: rcc never builds a boot sector (see this entry's own
+  `8086`/`8088` note and `docs/known-bugs.md`), so a BIOS-calling program still needs DOS
+  (or an emulator standing in for it, such as DOSBox-X) to get the CPU into real mode with
+  the BIOS resident and the program loaded at all - it just never calls back into DOS for
+  video/keyboard/disk I/O once running. Its own staging globals are named with a
+  `pcbios_` prefix (`pcbios_rt_w` through `pcbios_rt_w5`, `pcbios_rt_disk_buf`,
+  `pcbios_rt_ptr`, unlike `msdos.c`'s own bare `rt_w`/`rt_w2`/`rt_w3`), so a program can
+  link both libraries together - `examples/8086-pcxt/` does exactly that, for one
+  `dos_create()` call - without two conflicting definitions of the same global.
+  `pcbios_disk_read()`/`pcbios_disk_write()` point `INT 13h` at `pcbios_rt_disk_buf` via a
+  bare `mov bx, g_pcbios_rt_disk_buf` with no segment override - this only works because a
+  `.com` program's `ES` still equals `DS` exactly as DOS set it at load, and this library
+  never changes `ES` - and assume the disk's cylinder count fits in one byte (any floppy
+  geometry; not a 256-or-more-cylinder hard disk). `INT 13h` can return status 6 ("disk
+  changed") on the very next operation after a write or media insert on real/emulated
+  floppy hardware; the documented recovery (`pcbios_disk_reset()`, then retry once) is in
+  `pcbios.h`'s own header comment, not `docs/known-bugs.md` - it's real `INT 13h`
+  behavior, not a defect in this wrapper. `pcbios_write_string()` is the one function that
+  needs `bp` as a general-purpose register (`INT 10h`/`13h`'s own `ES:BP` string pointer);
+  `bp` is this dialect's own frame pointer (`I8086Codegen.cpp`), so it's saved with `push
+  bp` and restored with `pop bp` around the call, inside the same `asm { }` block - any
+  future wrapper that needs `bp` for a BIOS call has to do the same, or every local
+  variable access for the rest of the caller's own function corrupts silently.
   `tests/run_pcbios_tests.sh` runs every function in this library for real under DOSBox-X
-  (`brew install dosbox-x`/`apt-get install dosbox-x`) - video/keyboard against a mounted
-  host directory, disk I/O against an `imgmake`-created blank floppy image mounted via
-  `imgmount` (not a boot sector or anything bootable).
+  (`brew install dosbox-x`/`apt-get install dosbox-x`) - video/keyboard/equipment/memory-
+  size/time/date against a mounted host directory, disk I/O against an
+  `imgmake`-created blank floppy image mounted via `imgmount` (not a boot sector or
+  anything bootable). One gotcha this surfaced: a test program can't be named `shift` (or
+  any other of `COMMAND.COM`'s own internal command names, like `dir`/`copy`/`type`) -
+  DOS runs its own internal command instead of ever launching a same-named external
+  `.com` at all.
 - **6502** — 6502 assembly (own dialect; `src/codegen/m6502/M6502Assembler.h`),
   a bare flat binary loaded/entered at `$0600`, no OS/I/O conventions, on
   a CPU with three 8-bit registers, no hardware multiply/divide, and

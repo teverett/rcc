@@ -1,7 +1,10 @@
 # 8086-pcxt
 
 A "hello world" for an IBM 5160 (PC/XT)-class machine, calling the BIOS directly
-(`src/rt/pcbios/`: `INT 10h` video, `INT 16h` keyboard) instead of going through MS-DOS
+(`src/rt/pcbios/`: `INT 10h` video, `INT 16h` keyboard - the library also covers
+`INT 11h`/`12h` equipment/memory size, `INT 13h` disk, `INT 14h` serial, `INT 17h`
+printer, and `INT 1Ah` time/date, none of which this particular example touches - see
+`docs/platforms.md`'s own `8086-dos` entry) instead of going through MS-DOS
 (`src/rt/msdos/`, used here only for one `dos_create()` call that leaves a `DONE.TXT`
 marker behind, proving the program ran to completion).
 
