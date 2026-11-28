@@ -141,6 +141,124 @@ pair - see `docs/using.md`.
   any other of `COMMAND.COM`'s own internal command names, like `dir`/`copy`/`type`) -
   DOS runs its own internal command instead of ever launching a same-named external
   `.com` at all.
+
+  `src/rt/abios/` is a third, independent runtime library for this same `8086-dos`
+  target/ABI: a client for IBM's real Advanced BIOS (ABIOS), the protected-mode-aware
+  interface PS/2 Model 50/60/70/80 firmware exposed and the one OS/2 used, as distinct
+  from the conventional BIOS `src/rt/pcbios/` wraps - see this project's own research into
+  IBM's "PS/2 and PC BIOS Interface Technical Reference" (May 1988) for why these are two
+  genuinely different interfaces, not two names for the same thing. Unlike `pcbios`,
+  **no emulator available to this project (DOSBox-X, QEMU) implements real ABIOS** - every
+  function here is built strictly to the manual's own documented field layouts and
+  transfer conventions, verified by compiling, linking, and disassembling the output
+  bytes against the Intel 8086 reference encoding, but never by running against real or
+  emulated ABIOS firmware. Treat it as a faithful, inspectable client skeleton, not as
+  hardware-verified code - see `src/rt/abios/abios.h`'s own opening comment for the full
+  scope and every limitation.
+
+  `abios_init()` performs ABIOS's own real-mode-only initialization protocol (`INT 15h`/
+  `04h` then `05h` to build the System Parameters Table and Initialization Table, then
+  this library builds its own Common Data Area, Device Blocks, and Function Transfer
+  Tables and far-calls each one's own Initialize Device Block and Function Transfer Table
+  Routine) for exactly 3 of ABIOS's Device IDs: ABIOS Internal Calls (mandatory - every
+  real ABIOS implementation must report it), Keyboard, and Video. Every other Device ID
+  (Diskette, Disk, Parallel Port, Asynchronous Communications, System Timer, Real-Time
+  Clock, System Services, NMI, Pointing Device, NVRAM, DMA, POS, Keyboard Security) is
+  left as a null Common Data Area entry, which the manual documents as always valid - an
+  operating system only has to initialize the devices it actually wants operational.
+  `abios_ping_keyboard()`/`abios_ping_video()` (plus their `abios_ping_device_id()`/
+  `abios_ping_secondary_device_id()`/`abios_ping_revision()` accessors) are the only
+  device-specific functions provided: Function 01h, Return Logical ID Parameters, the one
+  function the manual specifies identically for every ABIOS device. Every other
+  device-specific function needs the caller to field a real hardware interrupt through
+  the Function Transfer Table's own Interrupt Routine (Keyboard's Continuous Read chief
+  among them - ABIOS keyboard input is fundamentally interrupt-driven, not a poll/blocking
+  read like `pcbios_getchar()`), which this library doesn't attempt to hook, with no way
+  to verify the result against real or emulated hardware at all.
+
+  Two new assembler primitives in `src/codegen/x86_8086/I8086Assembler.cpp` exist only for
+  this library: `push`/`pop` of a segment register (dedicated one-byte opcodes, e.g.
+  `push ds` = `0x1E`, needed to pass a segment value on the stack without first copying it
+  through a general register), and `callf [mem]` (`CALL FAR r/m16:16`, opcode `0xFF`/3 - a
+  far indirect call through a stored real-mode far pointer, needed to call a routine
+  address only known at runtime, such as ABIOS's own Common Start Routine). A `.com`
+  program has only one segment, whose own offset 0 is the Program Segment Prefix, not any
+  of this library's own data - but ABIOS's Common Data Area Anchor Pointer is a segment
+  value alone, with offset 0 assumed. `abios_init()` resolves this by computing a
+  synthetic segment at runtime (`cs + (byte_offset_of(abios_cda_raw) rounded up to the
+  next 16-byte boundary) / 16`), landing offset 0 of that segment inside a 16-byte pad
+  built into the Common Data Area's own storage - see `abios_cda_skew`'s own comment in
+  `abios.c`. Every other far pointer this library builds (Device Block/Function Transfer
+  Table pointers, the Request Block pointer) is an ordinary offset+segment pair using the
+  program's own natural `cs`, with no alignment trick needed.
+
+  `tests/run_abios_tests.sh` covers what actually can be checked without real ABIOS
+  firmware: a clean build, a client program linking against every public function, link
+  determinism, byte-exact encoding of the two new assembler primitives against the Intel
+  reference, and that `pop cs` (not a valid 8086 instruction) is rejected.
+- **i286** — the 80286, one step up the same family `8086`/`8086-dos` already sit in
+  (not grown-up-a-generation the way `i386` is a step beyond `8086` - the 80286 is still
+  a 16-bit real-mode-compatible chip, just with a larger instruction set and an
+  additional protected mode this backend's codegen never enters). `I286Codegen`
+  (`src/codegen/x86_8086/I286Codegen.h`) is a thin subclass of `I8086Codegen`: it
+  inherits `generate()` - and the real-mode entry/exit sequence `dosAbi_` picks between -
+  completely unchanged, the same relationship `I486Codegen` has to `I386Codegen`. Every
+  instruction `--target=8086`'s own codegen ever emits is already valid 80286 machine
+  code, so there's no codegen difference at all; the only thing that differs is which
+  assembler an i286 program's generated text (or an `asm { }` block's own text) goes
+  through - `I8086Assembler.cpp`'s `assembleI286()`/`assembleI286Object()`/
+  `assembleI286DebugMap()` additionally accept the instructions genuinely new at the
+  80286 over the plain 8086: `pusha`/`popa`, `push`/`pushb` of an immediate, 2-/3-operand
+  `imul` with an immediate, a shift/rotate (`shl`/`shr`/`sar`/`rcl`/`rcr`) by an immediate
+  count other than 1, `bound`, `enter`/`leave`, `insb`/`insw`/`outsb`/`outsw`, and the
+  protected-mode/descriptor-table group `lgdt`/`sgdt`/`lidt`/`sidt`/`lldt`/`sldt`/`ltr`/
+  `str`/`lmsw`/`smsw`/`clts`/`arpl`/`verr`/`verw` - every one of which `assembleI8086()`
+  still rejects with a clear "needs --target=i286" error (see `I8086Assembler.cpp`'s own
+  `require286()`), the variant gate that keeps a plain `8086`/`8088`/`8086-dos` compile
+  from ever silently depending on one. The undocumented `loadall` opcode some 80286
+  steppings have is deliberately not implemented: it isn't in the Intel 80286
+  Programmer's Reference Manual, its opcode and register layout differ between
+  steppings, and this project only encodes documented, architectural instructions.
+
+  `--target=i286-dos` is the exact same `dosAbi=true` MS-DOS `.com` variant
+  `8086-dos` already is, reusing `I8086LinkerFactory.cpp`'s `makeI8086DosLinker()`
+  unchanged (and plain `i286` reuses `makeI8086Linker()`) - `i286`/`i286-dos` share
+  `8086`/`8086-dos`'s exact COFF machine IDs, base addresses (`kI8086BaseAddress`/
+  `kI8086DosBaseAddress`), and entry/exit stubs, since nothing about either ABI differs
+  for this chip. This also means an `i286`/`i286-dos` program links freely against a
+  plain `8086`/`8086-dos` object or library with no rebuild needed (confirmed by
+  `examples/i286-dos/`, which links against `src/rt/pcbios/pcbios.lib` and
+  `src/rt/msdos/msdos.lib` exactly as they come out of `8086-dos`'s own build, unmodified)
+  - the 80286 is a strict superset, so there's nothing a dedicated i286 runtime library
+  would need that `pcbios`/`msdos`/`abios` don't already provide. `predefinedMacros`
+  defines both `__8086__` and `__80286__` for `i286`/`i286-dos` (plus `__MSDOS__` for the
+  latter), the same "base family macro plus this part number's own" pattern `65c02`
+  (`__6502__`+`__65C02__`) already uses.
+
+  `tests/i286_assembler_test.cpp` checks every new instruction's exact encoded bytes
+  (cross-checked against the Intel 80286 Programmer's Reference Manual's own opcode
+  tables) plus that each one is rejected on plain `assembleI8086()`.
+  `tests/i286/*.c` compiles representative programs covering every integer
+  width/overflow case, control flow, calls/recursion/function pointers, and
+  pointers/arrays/structs through `--target=i286`/`i286-dos` - compile-only, not
+  execution-checked (see below). `examples/i286-dos/` is a `pcbios`/`msdos`-based
+  "hello world" like `examples/8086-pcxt/`, plus one `asm { pusha \n popa }` block
+  proving a real 80286-only instruction compiles, links, and runs under DOSBox-X.
+
+  **Execution verification is split in two.** `tests/run_tests.sh --target=i286`/
+  `i286-dos` hits the exact same wall `8086`/`8086-dos` already does - `I286Codegen`
+  inherits the same boot-sector-free flat binary, so there's still no way to get
+  `qemu-system-i386 -fda` to boot it (see `docs/known-bugs.md`'s `8086`/`i286` entry);
+  `check_i286()` exists, scaffolded exactly like `check_8086()`, but isn't wired into
+  the dispatch case for the same reason. The protected-mode/descriptor-table group's
+  CPU-level *behavior* (as opposed to its encoding) also has no verification anywhere
+  in this project: every emulator available here (`qemu-system-i386`, `dosbox-x`,
+  `bochs`) only models 386-or-later x86 internals, even in 16-bit modes, so none of them
+  reproduce a real 80286's own behavior (e.g. `LGDT`/`LIDT` only loading 24 bits of the
+  base address on real 80286 silicon) - see `docs/known-bugs.md`'s own `i286` entry.
+  The *general* (non-protected-mode) additions fare better: `examples/i286-dos/`'s own
+  `pusha`/`popa` pair genuinely executes, under DOSBox-X, as part of that example's
+  `make test`.
 - **6502** — 6502 assembly (own dialect; `src/codegen/m6502/M6502Assembler.h`),
   a bare flat binary loaded/entered at `$0600`, no OS/I/O conventions, on
   a CPU with three 8-bit registers, no hardware multiply/divide, and
@@ -881,6 +999,52 @@ pair - see `docs/using.md`.
   all. A float/double array is supported for a literal initializer, but
   compound assignment through a float/double array element or pointer
   (`arr[i] += x`, `*p += x`) is not implemented yet.
+- **i486** — `i386`'s own backend (`src/codegen/i486/I486Codegen.cpp`
+  inherits `I386Codegen` and overrides nothing about code generation
+  itself, since every i486 is already i386-instruction-set compatible),
+  plus the six instructions new at the 486 that `I386Codegen.cpp` never
+  emits on its own but an `asm { }` block may: `bswap` (byte-swap a
+  32-bit register), `xadd`/`cmpxchg` (read-modify-write register or
+  `[label]` memory forms), and the privileged `invd`/`wbinvd`/`invlpg`.
+  `--target=i386` still rejects all six (`src/codegen/i386/
+  I386Assembler.cpp`'s `assembleI486()` is a separate entry point from
+  `assembleI386()`, gated behind an `allowI486` flag the plain i386 path
+  never sets), so a program built for `i386` that uses one fails to
+  assemble exactly as a real 386 chip would reject the opcode. Formats,
+  linker, and `--list-platforms` entries (`i486-raw`, `i486-coff`, etc.)
+  are otherwise identical to `i386`'s own (see that entry above); `i486`
+  has no hosted-OS triple (`i486-linux`/`i486-windows` don't exist — use
+  `i386-linux`/`i386-windows`, since the ABI makes no 486-specific use
+  of this).
+- **i586** — `i386`'s own backend again (`src/codegen/i586/I586Codegen.cpp`
+  inherits `I386Codegen` and, like `i486`, overrides nothing about code
+  generation itself, since every i586/Pentium is already i386-instruction-set
+  compatible), plus the five instructions new at the Pentium that
+  `I386Codegen.cpp` never emits on its own but an `asm { }` block may:
+  `cpuid`, `rdtsc`, the privileged `rdmsr`/`wrmsr`, and `cmpxchg8b` (an 8-byte
+  compare-exchange against a `[label]` memory operand — no register form
+  exists for it on real hardware). `i586` also still accepts every i486-only
+  instruction (`bswap`/`xadd`/`cmpxchg`/`invd`/`wbinvd`/`invlpg`), since a
+  real Pentium is i486-compatible too; `--target=i386`/`--target=i486` both
+  still reject all five Pentium-only mnemonics (`src/codegen/i386/
+  I386Assembler.cpp`'s `assembleI586()` is a separate entry point, gated
+  behind an `allowI586` flag neither of the other two paths sets), so a
+  program built for `i386`/`i486` that uses one fails to assemble exactly as
+  a real 386/486 chip would reject the opcode. Formats, linker, and
+  `--list-platforms` entries (`i586-raw`, `i586-coff`, etc.) are otherwise
+  identical to `i386`'s own (see that entry above); `i586` has no hosted-OS
+  triple either, for the same reason `i486` doesn't.
+
+  Execution of `cpuid` and `rdtsc` is verified under `qemu-system-i386`
+  (`tests/i586/cpuid.c` checks `cpuid`'s real EDX feature-flag output;
+  `tests/i586/rdtsc.c` checks two back-to-back `rdtsc` reads never go
+  backwards). `rdmsr`/`wrmsr`/`cmpxchg8b` are encoding-verified only
+  (`tests/i586_assembler_test.cpp`, byte-exact against the Pentium's own
+  opcode tables) — `rdmsr`/`wrmsr` need a real, implemented MSR to execute
+  without faulting and `cmpxchg8b` needs a known-good memory operand shape,
+  neither of which this backend's own generated code ever sets up, so there's
+  no safe whole-program execution test for those three the way `cpuid`/`rdtsc`
+  get.
 - **armv7a** — real ARMv7-A A32 (32-bit ARM, not Thumb) assembly for an
   A-profile core such as the Cortex-A15: `r0`-`r12`, real `sp`/`lr`, a
   real hardware signed divide (`sdiv`, an optional ARMv7-A extension
@@ -1262,7 +1426,8 @@ extended).
 The same C subset compiles to every target, each predefining its own
 macro for `#ifdef`-gated code (an alias target defines both its base
 target's macro and its own): `__PDP1__`, `__PDP7__`, `__8086__` (also for
-`8088`, plus `__8088__`; also for `8086-dos`, plus `__MSDOS__`),
+`8088`, plus `__8088__`; also for `8086-dos`, plus `__MSDOS__`; also for
+`i286`/`i286-dos`, plus `__80286__`, and `__MSDOS__` again for `i286-dos`),
 `__6502__` (also for `atari2600`/`2a03`/`65c02`, plus `__ATARI2600__`/
 `__2A03__`/`__65C02__`), `__68000__` (also for `mc68328`, plus
 `__MC68328__`), `__PDP11__`, `__PDP10__`, `__8080__`, `__Z80__` (also for

@@ -261,7 +261,8 @@ struct Relocation {
 // `org` is called exactly once, at the top: one flat image, no section switching.
 class Assembler {
    public:
-    explicit Assembler(bool allowExternal) : allowExternal_(allowExternal) {}
+    explicit Assembler(bool allowExternal, bool allowI486 = false, bool allowI586 = false)
+        : allowExternal_(allowExternal), allowI486_(allowI486 || allowI586), allowI586_(allowI586) {}
 
     void run(const std::vector<Line> &lines) {
         stage_ = 1;
@@ -739,6 +740,87 @@ class Assembler {
             emitModRMMem(mem, found->second.second);
             return;
         }
+        // --- i486-only instructions, gated behind allowI486_ (assembleI486()/
+        // assembleI486Object()/assembleI486DebugMap()) so --target=i386 keeps rejecting
+        // them exactly as a real i386 chip would reject the opcode. See I386Assembler.h's
+        // own comment for the full list.
+        if (mnemonic == "bswap" || mnemonic == "xadd" || mnemonic == "cmpxchg" || mnemonic == "invd" ||
+            mnemonic == "wbinvd" || mnemonic == "invlpg") {
+            if (!allowI486_) fail("'" + mnemonic + "' is an i486 instruction - not available for --target=i386");
+            if (mnemonic == "invd" || mnemonic == "wbinvd") {
+                if (!ops.empty()) fail("'" + mnemonic + "' takes no operand");
+                emit8(0x0F);
+                emit8(mnemonic == "invd" ? 0x08 : 0x09);
+                return;
+            }
+            if (mnemonic == "bswap") {
+                // 0F C8+rd: register-only, no ModRM, and only ever the full 32-bit form (no
+                // 8/16-bit BSWAP exists on real hardware) - requireReg() alone doesn't check
+                // that, since `al`/`ax`/`cl` otherwise share a plain register's own index.
+                const Operand &reg = requireOperand(ops, 0, mnemonic);
+                if (reg.is8 || reg.is16) fail("'bswap' needs a 32-bit register");
+                uint8_t r = requireReg(reg, mnemonic);
+                emit8(0x0F);
+                emit8(static_cast<uint8_t>(0xC8 | r));
+                return;
+            }
+            if (mnemonic == "invlpg") {
+                // 0F 01 /7: invalidates the TLB entry for the page at a memory operand.
+                const Operand &mem = requireOperand(ops, 0, mnemonic);
+                if (mem.kind != Operand::Mem) fail("'invlpg' needs a memory operand");
+                emit8(0x0F);
+                emit8(0x01);
+                emitModRMMem(mem, 7);
+                return;
+            }
+            // xadd/cmpxchg r/m32,r32: 0F C1 /r and 0F B1 /r. The destination (first operand)
+            // is the r/m side, exactly like the existing "mov"/"add" dst,src convention. Only
+            // the 32-bit register forms are supported here - see "bswap"'s own comment above
+            // on why is8/is16 need an explicit check on top of requireReg().
+            const Operand &dst = requireOperand(ops, 0, mnemonic);
+            const Operand &srcOp = requireOperand(ops, 1, mnemonic);
+            if (srcOp.is8 || srcOp.is16) fail("'" + mnemonic + "' needs a 32-bit source register");
+            uint8_t src = requireReg(srcOp, mnemonic);
+            uint8_t opcode = mnemonic == "xadd" ? 0xC1 : 0xB1;
+            emit8(0x0F);
+            emit8(opcode);
+            if (dst.kind == Operand::Reg) {
+                if (dst.is8 || dst.is16) fail("'" + mnemonic + "' needs a 32-bit destination register");
+                emit8(static_cast<uint8_t>(0xC0 | (src << 3) | dst.reg));
+                return;
+            }
+            if (dst.kind == Operand::Mem && dst.memSize == Operand::None) {
+                emitModRMMem(dst, src);
+                return;
+            }
+            fail("'" + mnemonic + "': destination must be a 32-bit register or memory operand");
+        }
+        // --- i586-only instructions, gated behind allowI586_ (assembleI586()/
+        // assembleI586Object()/assembleI586DebugMap()) so --target=i386 and --target=i486
+        // keep rejecting them exactly as a real 386/486 chip would reject the opcode. See
+        // I386Assembler.h's own comment for the full list.
+        if (mnemonic == "cpuid" || mnemonic == "rdtsc" || mnemonic == "rdmsr" || mnemonic == "wrmsr" ||
+            mnemonic == "cmpxchg8b") {
+            if (!allowI586_) fail("'" + mnemonic + "' is an i586 instruction - not available for --target=" +
+                                   (allowI486_ ? "i486" : "i386"));
+            if (mnemonic == "cpuid" || mnemonic == "rdtsc" || mnemonic == "rdmsr" || mnemonic == "wrmsr") {
+                if (!ops.empty()) fail("'" + mnemonic + "' takes no operand");
+                static const std::unordered_map<std::string, uint8_t> simpleOf = {
+                    {"cpuid", 0xA2}, {"rdtsc", 0x31}, {"rdmsr", 0x32}, {"wrmsr", 0x30},
+                };
+                emit8(0x0F);
+                emit8(simpleOf.at(mnemonic));
+                return;
+            }
+            // cmpxchg8b [m64]: 0F C7 /1 - compares EDX:EAX against the 8-byte memory
+            // operand, no register form exists for this instruction.
+            const Operand &mem = requireOperand(ops, 0, mnemonic);
+            if (mem.kind != Operand::Mem) fail("'cmpxchg8b' needs a memory operand");
+            emit8(0x0F);
+            emit8(0xC7);
+            emitModRMMem(mem, 1);
+            return;
+        }
         fail("unsupported instruction '" + mnemonic + "'");
     }
 
@@ -749,6 +831,8 @@ class Assembler {
     uint32_t orgBase_ = 0;
     int stage_ = 1;
     bool allowExternal_;
+    bool allowI486_;
+    bool allowI586_;
 };
 
 // Builds the format-neutral ObjectFile from a completed object-mode Assembler.
@@ -821,6 +905,52 @@ std::string assembleI386DebugMap(const std::string &asmText, const std::string &
 ObjectFile assembleI386Object(const std::string &asmText) {
     std::vector<Line> lines = parseProgram(asmText);
     Assembler assembler(/*allowExternal=*/true);
+    assembler.run(lines);
+    return buildObjectFile(assembler);
+}
+
+std::string assembleI486(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/false, /*allowI486=*/true);
+    assembler.run(lines);
+    const auto &bytes = assembler.bytes();
+    return std::string(bytes.begin(), bytes.end());
+}
+
+std::string assembleI486DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols, bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(allowExternal, /*allowI486=*/true);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
+}
+
+ObjectFile assembleI486Object(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/true, /*allowI486=*/true);
+    assembler.run(lines);
+    return buildObjectFile(assembler);
+}
+
+std::string assembleI586(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/false, /*allowI486=*/false, /*allowI586=*/true);
+    assembler.run(lines);
+    const auto &bytes = assembler.bytes();
+    return std::string(bytes.begin(), bytes.end());
+}
+
+std::string assembleI586DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols, bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(allowExternal, /*allowI486=*/false, /*allowI586=*/true);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
+}
+
+ObjectFile assembleI586Object(const std::string &asmText) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/true, /*allowI486=*/false, /*allowI586=*/true);
     assembler.run(lines);
     return buildObjectFile(assembler);
 }

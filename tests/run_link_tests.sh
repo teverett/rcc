@@ -11,7 +11,7 @@
 # declarations": extern only means anything under real separate
 # compilation).
 #
-# Usage: tests/run_link_tests.sh [path/to/rcc] [--target=pdp7|8086|8088|i386|vax|avr|alpha]
+# Usage: tests/run_link_tests.sh [path/to/rcc] [--target=pdp7|8086|8088|i286|i286-dos|i386|i486|vax|avr|alpha]
 
 set -u
 
@@ -39,7 +39,7 @@ case "$TARGET" in
             exit 1
         fi
         ;;
-    8086|8088|i386)
+    8086|8088|i286|i286-dos|i386|i486)
         if ! command -v qemu-system-i386 >/dev/null 2>&1; then
             echo "qemu-system-i386 not found on PATH - install it (e.g. 'brew install qemu')" >&2
             exit 1
@@ -69,7 +69,7 @@ case "$TARGET" in
         # No external tool needed - see check_alpha()'s own comment.
         ;;
     *)
-        echo "unknown --target '$TARGET' for run_link_tests.sh (known: pdp7, 8086, 8088, i386, vax, avr, alpha - the targets this harness's own link flow is wired up for so far)" >&2
+        echo "unknown --target '$TARGET' for run_link_tests.sh (known: pdp7, 8086, 8088, i286, i286-dos, i386, i486, vax, avr, alpha - the targets this harness's own link flow is wired up for so far)" >&2
         exit 1
         ;;
 esac
@@ -521,7 +521,10 @@ for a in "$LINK_DIR"/*_a.c; do
         pdp7) check_pdp7 "$a" "$b" "$base" || fail=1 ;;
         8086) check_x86 "$a" "$b" "$base" coff raw 0 || fail=1 ;;
         8088) check_x86 "$a" "$b" "$base" coff raw 0 || fail=1 ;;
+        i286) check_x86 "$a" "$b" "$base" coff raw 0 || fail=1 ;;
+        i286-dos) check_x86 "$a" "$b" "$base" coff raw 0 || fail=1 ;;
         i386) check_x86 "$a" "$b" "$base" coff raw 1 || fail=1 ;;
+        i486) check_x86 "$a" "$b" "$base" coff raw 1 || fail=1 ;;
         vax) check_vax "$a" "$b" "$base" || fail=1 ;;
         avr) check_avr "$a" "$b" "$base" || fail=1 ;;
         alpha) check_alpha "$a" "$b" "$base" || fail=1 ;;

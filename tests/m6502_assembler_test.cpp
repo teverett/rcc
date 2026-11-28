@@ -81,6 +81,24 @@ void testLdxLdyAbsolute() {
     require(bytes == expected, "ldx/ldy against a label didn't encode the expected opcode+16-bit-address bytes");
 }
 
+// Absolute-addressing `sty` (real opcode $8C) - added for src/rt/apple2/'s own a2_pread(), which
+// needs to store the result PREAD leaves in Y back into a global cell (`sta`/absolute `ldy` alone
+// can't move a value out of Y). `cell` sits at $0300.
+void testStyAbsolute() {
+    std::string asmText =
+        "org 0x300\n"
+        "cell: db 0\n"
+        "sty cell\n";
+    std::string bytes = rcc::assembleM6502(asmText);
+
+    std::string expected;
+    expected.push_back(0x00);                      // cell's own `db 0`
+    expected.push_back(static_cast<char>(0x8C));    // STY absolute
+    expected.push_back(0x00);                       // low byte of $0300
+    expected.push_back(0x03);                       // high byte of $0300
+    require(bytes == expected, "sty against a label didn't encode the expected opcode+16-bit-address bytes");
+}
+
 }  // namespace
 
 int main() {
@@ -88,6 +106,7 @@ int main() {
         testLdxiHiLdyiHiAgainstLabel();
         testLdxiHiLdyiHiDistinctFromLow();
         testLdxLdyAbsolute();
+        testStyAbsolute();
     } catch (const std::exception &error) {
         std::cerr << error.what() << '\n';
         return 1;

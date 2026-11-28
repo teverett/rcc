@@ -372,13 +372,15 @@ class Lowerer {
 
     // --- GOSUB/RETURN dispatch ---------------------------------------------
 
-    // A chain of `if`/`goto` rather than a `switch` on the popped id - see
-    // docs/known-bugs.md's "The 6502 backend corrupts a local variable
-    // declared inside a block only reached via `goto`": IRBuilder
-    // desugars `switch (expr)` through a hidden local holding `expr`'s
-    // value, and that local comes back corrupted on --target=6502 inside
-    // a block (like this one) only ever reached via a non-local `goto`.
-    // `if` needs no such local, so it isn't affected.
+    // A chain of `if`/`goto` rather than a `switch` on the popped id. This
+    // avoided a 6502/65c02 backend bug (root-caused and fixed 2026-11-27 -
+    // see M6502Assembler.cpp's own `emitImmLow()` comment): a locally-
+    // defined global's address, split across separate low/high-byte
+    // immediate instructions and relocated under separate compilation,
+    // could come out exactly 0x100 low, corrupting `IRBuilder`'s own
+    // switch-desugaring hidden local on some builds. Kept as `if`/`goto`
+    // anyway rather than reverting now that the bug is fixed - it works,
+    // and switching back isn't worth the churn/regression risk on its own.
     void appendGosubDispatch(std::vector<StmtPtr> &body) {
         auto popSp = makeExprStmt(makeCompoundAssign("__basic_gosub_sp", "-", makeIntLit(1, 0), 0), 0);
 

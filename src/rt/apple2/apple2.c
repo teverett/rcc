@@ -1,8 +1,12 @@
 #include "apple2.h"
 
-// Staging cell for a ROM call's argument/result (see apple2.h's own header
-// comment for why this can't just be a local/parameter).
+// Staging cells for a ROM call's argument(s)/result (see apple2.h's own
+// header comment for why this can't just be a local/parameter). `rt_a`
+// stages the accumulator; `rt_x`/`rt_y` stage X/Y for the calls that need
+// more than one register loaded right before their own `jsr`.
 unsigned char rt_a;
+unsigned char rt_x;
+unsigned char rt_y;
 
 void a2_cout(unsigned char c) {
     // COUT reads the high bit as "normal, unshifted display text", not
@@ -231,4 +235,237 @@ int mli_call(unsigned char cmd, int paramsAddr) {
         sta g_rt_a
     }
     return rt_a;
+}
+
+void a2_plot(unsigned char x, unsigned char y) {
+    rt_y = x;
+    rt_a = y;
+    asm {
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 63488  ; PLOT, $F800
+    }
+}
+
+void a2_hline(unsigned char x1, unsigned char x2, unsigned char y) {
+    rt_y = x1;
+    rt_x = x2;
+    rt_a = y;
+    asm {
+        lda g_rt_x
+        sta 44  ; H2, $2C: right X (inclusive)
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 63513  ; HLINE, $F819
+    }
+}
+
+void a2_vline(unsigned char x, unsigned char y1, unsigned char y2) {
+    rt_y = x;
+    rt_x = y2;
+    rt_a = y1;
+    asm {
+        lda g_rt_x
+        sta 45  ; V2, $2D: bottom row (inclusive)
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 63528  ; VLINE, $F828
+    }
+}
+
+void a2_color(unsigned char c) {
+    rt_a = c;
+    asm {
+        lda g_rt_a
+        jsr 63588  ; SETCOL, $F864
+    }
+}
+
+unsigned char a2_scrn(unsigned char x, unsigned char y) {
+    rt_y = x;
+    rt_a = y;
+    asm {
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 63601  ; SCRN, $F871
+        sta g_rt_a
+    }
+    return rt_a;
+}
+
+void a2_hgr() {
+    asm {
+        jsr 62434  ; HGR, $F3E2
+    }
+}
+
+void a2_hgr2() {
+    asm {
+        jsr 62424  ; HGR2, $F3D8
+    }
+}
+
+void a2_hcolor(unsigned char c) {
+    rt_a = c;
+    asm {
+        lda g_rt_a
+        sta 228  ; HGR_COLOR, $E4 - read directly by HPOSN/HPLOT
+    }
+}
+
+void a2_hplot(int x, unsigned char y) {
+    rt_x = x & 255;
+    rt_y = (x >> 8) & 255;
+    rt_a = y;
+    asm {
+        ldx g_rt_x
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 62551  ; HPLOT (HPOSN + plot a dot), $F457
+    }
+}
+
+void a2_hlineto(int x, unsigned char y) {
+    rt_a = x & 255;
+    rt_x = (x >> 8) & 255;
+    rt_y = y;
+    asm {
+        ldx g_rt_x
+        ldy g_rt_y
+        lda g_rt_a
+        jsr 62778  ; HGLIN, $F53A
+    }
+}
+
+unsigned char a2_pread(unsigned char n) {
+    rt_x = n;
+    asm {
+        ldx g_rt_x
+        jsr 64286  ; PREAD, $FB1E
+        sty g_rt_a
+    }
+    return rt_a;
+}
+
+void a2_click() {
+    asm {
+        lda 49200  ; SPKR soft switch, $C030 - any access toggles it
+    }
+}
+
+void a2_tone(unsigned char cycles, unsigned char halfPeriod) {
+    unsigned char i;
+    i = 0;
+    while (i < cycles) {
+        a2_click();
+        a2_wait(halfPeriod);
+        i = i + 1;
+    }
+}
+
+unsigned char pd_create_params[12];
+
+int pd_create(int pathname, unsigned char access, unsigned char fileType, int auxType, unsigned char storageType) {
+    pd_create_params[0] = 7;
+    pd_create_params[1] = pathname & 255;
+    pd_create_params[2] = (pathname >> 8) & 255;
+    pd_create_params[3] = access;
+    pd_create_params[4] = fileType;
+    pd_create_params[5] = auxType & 255;
+    pd_create_params[6] = (auxType >> 8) & 255;
+    pd_create_params[7] = storageType;
+    pd_create_params[8] = 0;
+    pd_create_params[9] = 0;
+    pd_create_params[10] = 0;
+    pd_create_params[11] = 0;
+    return mli_call(192, (int)(&pd_create_params[0]));  // CREATE, $C0
+}
+
+unsigned char pd_open_params[6];
+
+int pd_open(int pathname, int buffer) {
+    pd_open_params[0] = 3;
+    pd_open_params[1] = pathname & 255;
+    pd_open_params[2] = (pathname >> 8) & 255;
+    pd_open_params[3] = buffer & 255;
+    pd_open_params[4] = (buffer >> 8) & 255;
+    pd_open_params[5] = 0;
+    return mli_call(200, (int)(&pd_open_params[0]));  // OPEN, $C8
+}
+
+unsigned char pd_open_refnum() {
+    return pd_open_params[5];
+}
+
+unsigned char pd_read_params[8];
+
+int pd_read(unsigned char refNum, int dataBuffer, int requestCount) {
+    pd_read_params[0] = 4;
+    pd_read_params[1] = refNum;
+    pd_read_params[2] = dataBuffer & 255;
+    pd_read_params[3] = (dataBuffer >> 8) & 255;
+    pd_read_params[4] = requestCount & 255;
+    pd_read_params[5] = (requestCount >> 8) & 255;
+    pd_read_params[6] = 0;
+    pd_read_params[7] = 0;
+    return mli_call(202, (int)(&pd_read_params[0]));  // READ, $CA
+}
+
+int pd_read_transcount() {
+    return pd_read_params[6] + (pd_read_params[7] * 256);
+}
+
+unsigned char pd_write_params[8];
+
+int pd_write(unsigned char refNum, int dataBuffer, int requestCount) {
+    pd_write_params[0] = 4;
+    pd_write_params[1] = refNum;
+    pd_write_params[2] = dataBuffer & 255;
+    pd_write_params[3] = (dataBuffer >> 8) & 255;
+    pd_write_params[4] = requestCount & 255;
+    pd_write_params[5] = (requestCount >> 8) & 255;
+    pd_write_params[6] = 0;
+    pd_write_params[7] = 0;
+    return mli_call(203, (int)(&pd_write_params[0]));  // WRITE, $CB
+}
+
+int pd_write_transcount() {
+    return pd_write_params[6] + (pd_write_params[7] * 256);
+}
+
+unsigned char pd_close_params[2];
+
+int pd_close(unsigned char refNum) {
+    pd_close_params[0] = 1;
+    pd_close_params[1] = refNum;
+    return mli_call(204, (int)(&pd_close_params[0]));  // CLOSE, $CC
+}
+
+unsigned char pd_info_params[18];
+
+int pd_get_file_info(int pathname) {
+    pd_info_params[0] = 10;
+    pd_info_params[1] = pathname & 255;
+    pd_info_params[2] = (pathname >> 8) & 255;
+    return mli_call(196, (int)(&pd_info_params[0]));  // GET_FILE_INFO, $C4
+}
+
+unsigned char pd_info_access() {
+    return pd_info_params[3];
+}
+
+unsigned char pd_info_file_type() {
+    return pd_info_params[4];
+}
+
+int pd_info_aux_type() {
+    return pd_info_params[5] + (pd_info_params[6] * 256);
+}
+
+unsigned char pd_info_storage_type() {
+    return pd_info_params[7];
+}
+
+int pd_info_blocks_used() {
+    return pd_info_params[8] + (pd_info_params[9] * 256);
 }

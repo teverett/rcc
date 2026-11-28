@@ -6,7 +6,7 @@
 # on every target (see ../src/Backend.h: a .c file means the same
 # thing regardless of --target).
 #
-# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|riscv32|riscv64|powerpc|cortex-m3|8086|8088|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|cp1610|cp1610-intv|8008|8051|stm32|i386|armv7a|armv8a|m32c|r32c|vex] [--optimize]
+# Usage: tests/run_tests.sh [path/to/rcc] [--target=pdp1|pdp7|pdp11|pdp10|vax|avr|alpha|saturn|tms320c6713|r10000|riscv32|riscv64|powerpc|cortex-m3|8086|8088|i286|i286-dos|6502|65c02|68000|mc68328|8080|z80|6809|6809-vectrex|tms9900|z8000|cp1610|cp1610-intv|8008|8051|stm32|i386|i486|i586|armv7a|armv8a|m32c|r32c|vex] [--optimize]
 #
 # --optimize passes rcc's own --optimize straight through to every
 # compile below, so the exact same checks also confirm the IR
@@ -126,13 +126,18 @@ case "$TARGET" in
             exit 1
         fi
         ;;
-    8086|8088)
+    8086|8088|i286|i286-dos)
         # Disabled for now: this target's --format=raw used to be a BIOS-bootable
         # 512-byte boot sector, which check_8086() ran by handing the whole image to
         # `qemu-system-i386 -fda`. Building a boot sector is out of scope for rcc, so
         # --format=raw is now a plain flat binary with no boot-sector framing at all -
         # and nothing here can get qemu to start executing a bare flat 16-bit real-mode
-        # image without one. See docs/known-bugs.md.
+        # image without one. i286/i286-dos inherit this unchanged (I286Codegen's
+        # generate() is I8086Codegen's own, unmodified - see
+        # ../src/codegen/x86_8086/I286Codegen.h's own header comment), so
+        # check_i286() below has the identical problem check_8086() does and isn't
+        # wired into the dispatch case below for the same reason. See
+        # docs/known-bugs.md.
         echo "--target=$TARGET: qemu-based testing is disabled for now (no boot-sector image to execute - see docs/known-bugs.md)" >&2
         exit 1
         ;;
@@ -312,7 +317,7 @@ case "$TARGET" in
             exit 1
         fi
         ;;
-    i386)
+    i386|i486|i586)
         # Same qemu tool as `8086` above, but a completely different
         # boot path: this backend's own `--format=raw` output is a
         # real Multiboot image (see
@@ -320,9 +325,11 @@ case "$TARGET" in
         # comment), loaded straight into 32-bit protected mode by
         # qemu's own `-kernel` loader - no floppy image, no BIOS, no
         # boot-sector/disk-I/O/mode-switch code at all, unlike `8086`'s
-        # own real-mode floppy boot; check_i386() below reads the full
-        # 32-bit `EAX`, not just its low 16 bits the way check_8086()
-        # does.
+        # own real-mode floppy boot; check_i386()/check_i486()/check_i586()
+        # below read the full 32-bit `EAX`, not just its low 16 bits the
+        # way check_8086() does. `i486`/`i586` share i386's own generate()
+        # (see I486Codegen.h/I586Codegen.h) so they boot identically, just
+        # under --target=i486/--target=i586 instead.
         if ! command -v qemu-system-i386 >/dev/null 2>&1; then
             echo "qemu-system-i386 not found on PATH - install it (e.g. 'brew install qemu')" >&2
             exit 1
@@ -417,7 +424,7 @@ case "$TARGET" in
         # docs/known-bugs.md. check_r32c() below is genuinely compile-only for the same reason.
         ;;
     *)
-        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, riscv32, riscv64, powerpc, cortex-m3, 8086, 8088, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, cp1610, cp1610-intv, 8008, 8051, stm32, i386, armv7a, armv8a, m32c, r32c, vex)" >&2
+        echo "unknown --target '$TARGET' (known: pdp7, pdp11, pdp10, vax, avr, alpha, saturn, tms320c6713, r10000, riscv32, riscv64, powerpc, cortex-m3, 8086, 8088, i286, i286-dos, 6502, 65c02, 68000, mc68328, 8080, z80, 6809, 6809-vectrex, tms9900, z8000, cp1610, cp1610-intv, 8008, 8051, stm32, i386, i486, i586, armv7a, armv8a, m32c, r32c, vex)" >&2
         exit 1
         ;;
 esac
@@ -1501,11 +1508,24 @@ check_8086() {
     return 1
 }
 
-check_i386() {
-    local src="$1" name="$2"
+# Scaffolded like check_6809() (see docs/known-bugs.md's own 6809 entry, which this
+# mirrors): i286 shares I8086Codegen::generate() unchanged (I286Codegen.h's own header
+# comment) and I8086LinkerFactory.cpp's identical flat-binary --format=raw, so this is
+# literally check_8086() under a different target name - same no-boot-sector problem,
+# same fix needed, not wired into the dispatch case below for the same reason.
+check_i286() {
+    local target="$1" src="$2" name="$3"
+    check_8086 "$target" "$src" "$name"
+}
+
+# Shared by check_i386()/check_i486()/check_i586(): identical Multiboot raw-image boot path for
+# all three (I486Codegen.cpp/I586Codegen.cpp inherit I386Codegen::generate() unchanged - see
+# their own header comments), the only difference being `--target`.
+check_i386_impl() {
+    local target="$1" src="$2" name="$3"
     local binfile="$tmpdir/$name.bin"
 
-    if ! "$RCC" --target=i386 --format=raw \
+    if ! "$RCC" --target="$target" --format=raw \
             $OPTFLAGS --dump-ir --out="$binfile" "$src" >"$tmpdir/$name.log" 2>&1; then
         echo "FAIL $name: compile error"
         sed 's/^/    /' "$tmpdir/$name.log"
@@ -1546,6 +1566,18 @@ check_i386() {
     fi
     echo "FAIL $name: expected $expect, got $eax_dec (EAX hex: $eax_hex)"
     return 1
+}
+
+check_i386() {
+    check_i386_impl i386 "$1" "$2"
+}
+
+check_i486() {
+    check_i386_impl i486 "$1" "$2"
+}
+
+check_i586() {
+    check_i386_impl i586 "$1" "$2"
 }
 
 check_armv7a() {
@@ -3078,6 +3110,10 @@ is_known_unsupported() {
         stm32:multidecl_scalar.c) return 0 ;;
         i386:multidecl_array.c) return 0 ;;
         i386:multidecl_scalar.c) return 0 ;;
+        i486:multidecl_array.c) return 0 ;;
+        i486:multidecl_scalar.c) return 0 ;;
+        i586:multidecl_array.c) return 0 ;;
+        i586:multidecl_scalar.c) return 0 ;;
         cortex-m3:multidecl_array.c) return 0 ;;
         cortex-m3:multidecl_scalar.c) return 0 ;;
         # vex has no 'long long' support at all (no carry/overflow flag to build a 64-bit
@@ -3341,6 +3377,8 @@ for src in "${all_sources[@]}"; do
         cortex-m3) check_cortex_m3 "$src" "$name" || fail=1 ;;
         8086) check_8086 8086 "$src" "$name" || fail=1 ;;
         8088) check_8086 8088 "$src" "$name" || fail=1 ;;
+        i286) check_i286 i286 "$src" "$name" || fail=1 ;;
+        i286-dos) check_i286 i286-dos "$src" "$name" || fail=1 ;;
         6502) check_6502 "$src" "$name" || fail=1 ;;
         65c02) check_65c02 "$src" "$name" || fail=1 ;;
         68000) check_68000 "$src" "$name" || fail=1 ;;
@@ -3351,6 +3389,8 @@ for src in "${all_sources[@]}"; do
         8051) check_8051 "$src" "$name" || fail=1 ;;
         stm32) check_stm32 "$src" "$name" || fail=1 ;;
         i386) check_i386 "$src" "$name" || fail=1 ;;
+        i486) check_i486 "$src" "$name" || fail=1 ;;
+        i586) check_i586 "$src" "$name" || fail=1 ;;
         armv7a) check_armv7a "$src" "$name" || fail=1 ;;
         armv8a) check_armv8a "$src" "$name" || fail=1 ;;
         vex) check_vex "$src" "$name" || fail=1 ;;

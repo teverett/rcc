@@ -60,6 +60,17 @@ read_byte() {
     od -An -tu1 "$1" | tr -d ' \n'
 }
 
+# True iff $1 is read_byte()'s own plain-digits form, not its "(missing - ...)"
+# placeholder - guards every arithmetic/`-gt` use of a read_byte() result below from
+# crashing under `set -u` (bash's arithmetic context treats a non-numeric word as a
+# variable name to expand, which errors out on the placeholder's own words).
+is_num() {
+    case "$1" in
+        ''|*[!0-9]*) return 1 ;;
+        *) return 0 ;;
+    esac
+}
+
 write_byte_helper_c='
 void write_byte(char *name, unsigned char v) {
     int h;
@@ -396,8 +407,13 @@ EOF
 run_com memsz
 got_lo="$(read_byte lo.bin)"
 got_hi="$(read_byte hi.bin)"
-kb=$((got_hi * 256 + got_lo))
-[ "$kb" -gt 0 ] && [ "$kb" -le 640 ] && ok=1 || ok=0
+if is_num "$got_lo" && is_num "$got_hi"; then
+    kb=$((got_hi * 256 + got_lo))
+    [ "$kb" -gt 0 ] && [ "$kb" -le 640 ] && ok=1 || ok=0
+else
+    kb="(missing - program crashed or never reached the write)"
+    ok=0
+fi
 check pcbios_memory_size_kb_plausible "$ok" "expected 1-640, got $kb"
 
 # pcbios_key_shift_status_idle: like pcbios_haskey_false_when_idle, nothing typed means
@@ -521,8 +537,12 @@ got_ch="$(read_byte ch.bin)"
 got_hd="$(read_byte hd.bin)"
 got_sp="$(read_byte sp.bin)"
 got_dc="$(read_byte dc.bin)"
-cyl=$((got_ch * 256 + got_cl))
-[ "$got_st" = "0" ] && [ "$cyl" -gt 0 ] && [ "$got_hd" -gt 0 ] && [ "$got_sp" -gt 0 ] && [ "$got_dc" -gt 0 ] && ok=1 || ok=0
+if is_num "$got_ch" && is_num "$got_cl"; then
+    cyl=$((got_ch * 256 + got_cl))
+else
+    cyl="(missing - program crashed or never reached the write)"
+fi
+[ "$got_st" = "0" ] && is_num "$cyl" && [ "$cyl" -gt 0 ] && [ "$got_hd" -gt 0 ] && [ "$got_sp" -gt 0 ] && [ "$got_dc" -gt 0 ] && ok=1 || ok=0
 check pcbios_disk_get_params_reports_plausible_geometry "$ok" "expected status=0 and positive cyl/heads/sectors-per-track/count, got status=$got_st cyl=$cyl heads=$got_hd spt=$got_sp count=$got_dc"
 
 got_wst="$(read_byte wst.bin)"

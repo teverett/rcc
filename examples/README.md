@@ -34,6 +34,11 @@ directory with a `Makefile` and a `README.md` of its own:
   `--platform=8086-dos-raw` but against `src/rt/pcbios/`'s `INT 10h`/`INT 13h`/`INT 16h`
   BIOS-call runtime library instead (plus one `src/rt/msdos/` call to leave a completion
   marker `test.py` checks for)
+- `i286-dos` — the same PC/XT-style "hello world" as `8086-pcxt`, compiled
+  `--target=i286-dos` instead and linked against the exact same `src/rt/pcbios/`/
+  `src/rt/msdos/` libraries (`i286-dos` shares `8086-dos`'s COFF machine ID and ABI, so
+  neither library needs rebuilding), plus one `asm { pusha \n popa }` block proving a
+  real 80286-only instruction compiles, links, and runs
 - `z80-trs80` — TRS-80 "hello world" for `z80`, linked as
   `--platform=z80-cmd` against `src/rt/trs80/`'s video-RAM runtime
   library

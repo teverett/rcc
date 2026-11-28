@@ -285,7 +285,8 @@ struct Relocation {
 // and counts them, so there's no separate "how big is this" implementation to drift.
 class Assembler {
    public:
-    explicit Assembler(bool allowExternal) : allowExternal_(allowExternal) {}
+    explicit Assembler(bool allowExternal, bool allow286 = false)
+        : allowExternal_(allowExternal), allow286_(allow286) {}
 
     // Every conditional jump starts out short; a pass that finds one out of
     // range marks it long, and passes repeat (sizes only ever grow, so this
@@ -467,6 +468,50 @@ class Assembler {
         emit8(modrm(mf.mod, static_cast<uint8_t>(regField), mf.rm));
         if (mf.hasDisp) emitExprAsWord(memOp.expr);
     }
+    // The 80286 descriptor-table group (lgdt/sgdt/lidt/sidt/lldt/sldt/ltr/str/lmsw/smsw) is
+    // 0x0F-prefixed, two opcode bytes before the ModRM - same shapes as emitModRegRM/
+    // emitMemInstr otherwise.
+    void emitModRegRM2(uint8_t opcode1, uint8_t opcode2, uint8_t mod, uint8_t reg, uint8_t rm) {
+        emit8(opcode1);
+        emit8(opcode2);
+        emit8(modrm(mod, reg, rm));
+    }
+    void emitMemInstr2(uint8_t opcode1, uint8_t opcode2, int regField, const Operand &memOp) {
+        MemForm mf = memForm(memOp);
+        emit8(opcode1);
+        emit8(opcode2);
+        emit8(modrm(mf.mod, static_cast<uint8_t>(regField), mf.rm));
+        if (mf.hasDisp) emitExprAsWord(memOp.expr);
+    }
+    // lldt/sldt/ltr/str/lmsw/smsw/verr/verw all take one r/m16 operand (register or memory)
+    // against a fixed ModRM.reg "which instruction" field within the 0x0F 0x00/0x0F 0x01 group.
+    void emitRM16Group2(uint8_t opcode1, uint8_t opcode2, uint8_t regField, const Operand &op,
+                         const char *mnemonic) {
+        if (op.kind == Operand::Reg) {
+            emitModRegRM2(opcode1, opcode2, 0b11, regField, static_cast<uint8_t>(op.reg));
+            return;
+        }
+        if (op.kind == Operand::Mem) {
+            emitMemInstr2(opcode1, opcode2, regField, op);
+            return;
+        }
+        fail(std::string("'") + mnemonic + "' needs a register or memory operand");
+    }
+    // lgdt/sgdt/lidt/sidt only ever address a 6-byte pseudo-descriptor in memory - no
+    // register form exists on real hardware either.
+    void emitMem16Group2(uint8_t opcode1, uint8_t opcode2, uint8_t regField, const Operand &op,
+                          const char *mnemonic) {
+        if (op.kind != Operand::Mem) fail(std::string("'") + mnemonic + "' needs a memory operand");
+        emitMemInstr2(opcode1, opcode2, regField, op);
+    }
+    // Every 80286-only mnemonic funnels through here first, so a plain 8086/8088/8086-dos
+    // compile fails with one consistent, clear message instead of a generic "unsupported
+    // instruction" or - worse - silently encoding a byte sequence that chip can't execute.
+    void require286(const char *mnemonic) {
+        if (!allow286_) {
+            fail(std::string("'") + mnemonic + "' is an 80286 instruction, not available for this target (use --target=i286)");
+        }
+    }
 
     // Near jmp/call (opcode + rel16) and short Jcc (opcode + rel8) are both
     // fixed-size regardless of distance; only pass 2's rel8 range is checked
@@ -547,10 +592,63 @@ class Assembler {
             return;
         }
 
+        // "push es/cs/ss/ds" - a dedicated one-byte opcode per segment register (no
+        // ModRM), needed to pass a segment value on the stack (e.g. ABIOS's own Common
+        // Data Area Anchor Pointer) without first copying it through a general register.
+        if (mnemonic == "push" && ops.size() == 1 && ops[0].kind == Operand::SegReg) {
+            emit8(static_cast<uint8_t>(0x06 + ops[0].reg * 8));
+            return;
+        }
+        if (mnemonic == "pop" && ops.size() == 1 && ops[0].kind == Operand::SegReg) {
+            if (ops[0].reg == 1) fail("'pop cs' is not a valid instruction");  // es=0,cs=1,ss=2,ds=3
+            emit8(static_cast<uint8_t>(0x07 + ops[0].reg * 8));
+            return;
+        }
+        // "push imm16" - new at the 80286 (8086 can only push a register or segment
+        // register). Opcode 0x68 iw; always the full 16-bit form, never the 0x6A
+        // sign-extended-imm8 short form (this dialect fixes an instruction's size by its
+        // syntactic form alone, same as every other mnemonic here - see this file's own
+        // top comment) - "pushb" below is the explicit byte-sized spelling instead.
+        if (mnemonic == "push" && ops.size() == 1 && ops[0].kind == Operand::Imm) {
+            require286("push imm16");
+            emit8(0x68);
+            emitExprAsWord(ops[0].expr);
+            return;
+        }
+        // "pushb imm8" - the 0x6A sign-extended-byte short form, named like "movb" above
+        // (this dialect's own convention for a byte-sized variant of a word mnemonic).
+        if (mnemonic == "pushb") {
+            require286("pushb");
+            if (ops.size() != 1 || ops[0].kind != Operand::Imm) fail("'pushb' needs one immediate operand");
+            emit8(0x6A);
+            emit8(static_cast<uint8_t>(evalExpr(ops[0].expr)));
+            return;
+        }
         if (mnemonic == "push") { requireReg(ops, 1); emit8(static_cast<uint8_t>(0x50 + ops[0].reg)); return; }
         if (mnemonic == "pop")  { requireReg(ops, 1); emit8(static_cast<uint8_t>(0x58 + ops[0].reg)); return; }
+        // "pusha"/"popa" - new at the 80286: push/pop ax,cx,dx,bx,(original)sp,bp,si,di in
+        // one instruction (no ModRM/operand of their own).
+        if (mnemonic == "pusha") { require286("pusha"); emit8(0x60); return; }
+        if (mnemonic == "popa")  { require286("popa");  emit8(0x61); return; }
         if (mnemonic == "neg")  { requireReg(ops, 1); emitModRegRM(0xF7, 0b11, 0b011, static_cast<uint8_t>(ops[0].reg)); return; }
         if (mnemonic == "not")  { requireReg(ops, 1); emitModRegRM(0xF7, 0b11, 0b010, static_cast<uint8_t>(ops[0].reg)); return; }
+        // 2-/3-operand "imul" with an immediate - new at the 80286 (plain 8086 only has
+        // the 1-operand AX-implied form below). Opcode 0x69 /r iw either way: "imul
+        // dst,imm16" is just the 3-operand form with dst used as both reg and rm fields
+        // (real x86 semantics - multiplying a register by an immediate in place).
+        if (mnemonic == "imul" && ops.size() == 2 && ops[0].kind == Operand::Reg && ops[1].kind == Operand::Imm) {
+            require286("imul (2-operand)");
+            emitModRegRM(0x69, 0b11, static_cast<uint8_t>(ops[0].reg), static_cast<uint8_t>(ops[0].reg));
+            emitExprAsWord(ops[1].expr);
+            return;
+        }
+        if (mnemonic == "imul" && ops.size() == 3 && ops[0].kind == Operand::Reg && ops[1].kind == Operand::Reg &&
+            ops[2].kind == Operand::Imm) {
+            require286("imul (3-operand)");
+            emitModRegRM(0x69, 0b11, static_cast<uint8_t>(ops[0].reg), static_cast<uint8_t>(ops[1].reg));
+            emitExprAsWord(ops[2].expr);
+            return;
+        }
         if (mnemonic == "imul") { requireReg(ops, 1); emitModRegRM(0xF7, 0b11, 0b101, static_cast<uint8_t>(ops[0].reg)); return; }
         if (mnemonic == "idiv") { requireReg(ops, 1); emitModRegRM(0xF7, 0b11, 0b111, static_cast<uint8_t>(ops[0].reg)); return; }
         if (mnemonic == "mul")  { requireReg(ops, 1); emitModRegRM(0xF7, 0b11, 0b100, static_cast<uint8_t>(ops[0].reg)); return; }  // unsigned counterparts
@@ -566,6 +664,19 @@ class Assembler {
                 return;
             }
             emitRel16(0xE8, ops[0]);
+            return;
+        }
+        // "callf [mem]" - a far indirect call (CALL FAR r/m16:16, opcode 0xFF /3) through
+        // a stored real-mode far pointer (low word = offset, high word = segment, the
+        // same layout `emitExprAsWord`-driven field stores naturally produce). Needed for
+        // calling a routine whose address a BIOS/ABIOS call returned at runtime, rather
+        // than one this program's own linker/assembler already knows (a plain `call`
+        // only ever reaches the latter).
+        if (mnemonic == "callf") {
+            if (ops.size() != 1 || ops[0].kind != Operand::Mem) {
+                fail("'callf' needs a memory operand (a stored far pointer) in this dialect");
+            }
+            emitMemInstr(0xFF, 0b011, ops[0]);
             return;
         }
         if (mnemonic == "je")   { emitRel8(0x74, ops.at(0)); return; }
@@ -705,7 +816,99 @@ class Assembler {
                 emitModRegRM(0xD3, 0b11, regField, static_cast<uint8_t>(ops[0].reg));
                 return;
             }
-            fail("'" + mnemonic + "' only supports a literal shift of 1 or a 'cl' count in this dialect");
+            // A literal count other than 1 (e.g. "shl ax, 4") - new at the 80286 (opcode
+            // 0xC1 /n ib); plain 8086 only ever shifts by exactly 1 or by 'cl' above.
+            if (ops[1].kind == Operand::Imm && ops[1].expr.size() == 1 && ops[1].expr[0].sign == 0 &&
+                ops[1].expr[0].kind == SylKind::Number) {
+                require286(mnemonic.c_str());
+                emitModRegRM(0xC1, 0b11, regField, static_cast<uint8_t>(ops[0].reg));
+                emit8(static_cast<uint8_t>(evalExpr(ops[1].expr)));
+                return;
+            }
+            fail("'" + mnemonic + "' only supports a literal shift of 1, a 'cl' count, or (on i286) a literal "
+                 "immediate count in this dialect");
+        }
+
+        // "bound reg, mem" - new at the 80286: traps if reg is outside the signed 16-bit
+        // [lowBound, highBound] pair stored at mem/mem+2. Opcode 0x62 /r, same reg<-mem
+        // ModRM shape as "mov"'s Reg<-Mem case above.
+        if (mnemonic == "bound") {
+            require286("bound");
+            if (ops.size() != 2 || ops[0].kind != Operand::Reg || ops[1].kind != Operand::Mem) {
+                fail("'bound' needs a register and a memory operand in this dialect");
+            }
+            emitMemInstr(0x62, ops[0].reg, ops[1]);
+            return;
+        }
+        // "enter frameSize, nestingLevel" / "leave" - new at the 80286, a stack-frame
+        // prologue/epilogue pair. 'enter' takes two immediates (opcode 0xC8 iw ib);
+        // 'leave' (0xC9) takes none.
+        if (mnemonic == "enter") {
+            require286("enter");
+            if (ops.size() != 2 || ops[0].kind != Operand::Imm || ops[1].kind != Operand::Imm) {
+                fail("'enter' needs two immediate operands (frame size, nesting level)");
+            }
+            emit8(0xC8);
+            emitExprAsWord(ops[0].expr);
+            emit8(static_cast<uint8_t>(evalExpr(ops[1].expr)));
+            return;
+        }
+        if (mnemonic == "leave") { require286("leave"); emit8(0xC9); return; }
+        // String I/O - new at the 80286: fixed-operand byte/word forms reading/writing
+        // the port in dx, same way "int"'s own fixed operand needs no ModRM.
+        if (mnemonic == "insb")  { require286("insb");  emit8(0x6C); return; }
+        if (mnemonic == "insw")  { require286("insw");  emit8(0x6D); return; }
+        if (mnemonic == "outsb") { require286("outsb"); emit8(0x6E); return; }
+        if (mnemonic == "outsw") { require286("outsw"); emit8(0x6F); return; }
+
+        // Protected-mode/descriptor-table group - new at the 80286, every one 0x0F-
+        // prefixed except "arpl". "loadall" (the undocumented load-every-register-
+        // including-descriptor-caches opcode some 80286 steppings have) is deliberately
+        // not implemented: it's not in the Intel 80286 Programmer's Reference Manual,
+        // its opcode and exact register layout differ between steppings, and this
+        // project only encodes documented, architectural instructions.
+        if (mnemonic == "clts") { require286("clts"); emit8(0x0F); emit8(0x06); return; }
+        if (mnemonic == "lgdt" || mnemonic == "sgdt" || mnemonic == "lidt" || mnemonic == "sidt") {
+            require286(mnemonic.c_str());
+            if (ops.size() != 1) fail("'" + mnemonic + "' needs one memory operand");
+            uint8_t regField = (mnemonic == "sgdt") ? 0b000 : (mnemonic == "sidt") ? 0b001
+                                : (mnemonic == "lgdt") ? 0b010 : 0b011;
+            emitMem16Group2(0x0F, 0x01, regField, ops[0], mnemonic.c_str());
+            return;
+        }
+        if (mnemonic == "sldt" || mnemonic == "str" || mnemonic == "lldt" || mnemonic == "ltr" ||
+            mnemonic == "verr" || mnemonic == "verw") {
+            require286(mnemonic.c_str());
+            if (ops.size() != 1) fail("'" + mnemonic + "' needs one operand");
+            uint8_t regField = (mnemonic == "sldt") ? 0b000 : (mnemonic == "str") ? 0b001
+                                : (mnemonic == "lldt") ? 0b010 : (mnemonic == "ltr") ? 0b011
+                                : (mnemonic == "verr") ? 0b100 : 0b101;
+            emitRM16Group2(0x0F, 0x00, regField, ops[0], mnemonic.c_str());
+            return;
+        }
+        if (mnemonic == "smsw" || mnemonic == "lmsw") {
+            require286(mnemonic.c_str());
+            if (ops.size() != 1) fail("'" + mnemonic + "' needs one operand");
+            emitRM16Group2(0x0F, 0x01, mnemonic == "smsw" ? 0b100 : 0b110, ops[0], mnemonic.c_str());
+            return;
+        }
+        // "arpl dst, src" - the one instruction in this group with a single-byte opcode
+        // (0x63 /r): adjusts dst's RPL up to src's if dst's is lower. dst may be a
+        // register or memory selector; src is always a register.
+        if (mnemonic == "arpl") {
+            require286("arpl");
+            if (ops.size() != 2 || ops[1].kind != Operand::Reg) {
+                fail("'arpl' needs a register/memory destination and a register source");
+            }
+            if (ops[0].kind == Operand::Reg) {
+                emitModRegRM(0x63, 0b11, static_cast<uint8_t>(ops[1].reg), static_cast<uint8_t>(ops[0].reg));
+                return;
+            }
+            if (ops[0].kind == Operand::Mem) {
+                emitMemInstr(0x63, ops[1].reg, ops[0]);
+                return;
+            }
+            fail("'arpl' needs a register/memory destination and a register source");
         }
 
         fail("unsupported instruction '" + mnemonic + "'");
@@ -716,6 +919,7 @@ class Assembler {
     std::vector<Relocation> relocations_;
     std::vector<std::pair<uint32_t, int>> debugLines_;
     bool allowExternal_;
+    bool allow286_;
     uint32_t offset_ = 0;
     uint32_t orgBase_ = 0;
     int stage_ = 1;
@@ -816,6 +1020,40 @@ std::string assembleI8086DebugMap(const std::string &asmText, const std::string 
                                      bool allowExternal) {
     std::vector<Line> lines = parseProgram(asmText);
     Assembler assembler(/*allowExternal=*/allowExternal);
+    assembler.run(lines);
+    return writeDebugMap(assembler, sourcePath, symbols);
+}
+
+std::string assembleI286(const std::string &asmText, I8086OutputFormat format, bool allowExternal,
+                          uint16_t machineType) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(allowExternal, /*allow286=*/true);
+    assembler.run(lines);
+    switch (format) {
+        case I8086OutputFormat::Bin: {
+            const auto &bytes = assembler.bytes();
+            return std::string(bytes.begin(), bytes.end());
+        }
+        case I8086OutputFormat::Coff:
+            return writeCoff(assembler, machineType);
+        case I8086OutputFormat::Elf:
+            return ElfFormatWriter().write(buildObjectFile(assembler, machineType));
+    }
+    fail("unknown output format");
+}
+
+ObjectFile assembleI286Object(const std::string &asmText, uint16_t machineType) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/true, /*allow286=*/true);
+    assembler.run(lines);
+    return buildObjectFile(assembler, machineType);
+}
+
+std::string assembleI286DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols,
+                                  bool allowExternal) {
+    std::vector<Line> lines = parseProgram(asmText);
+    Assembler assembler(/*allowExternal=*/allowExternal, /*allow286=*/true);
     assembler.run(lines);
     return writeDebugMap(assembler, sourcePath, symbols);
 }

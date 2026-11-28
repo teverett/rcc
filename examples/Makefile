@@ -1,8 +1,8 @@
 EXAMPLES_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-.PHONY: all hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-bbc 6502-atari2600 6502-2a03 6502-5200 6502-oric 8086-msdos 8086-pcxt z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 z80-msx z80-sms z80-gamegear 8080-altair 8080-imsai 6809-coco 6809-dragon32 6809-dragon64 6809-vectrex cp1610-intv tms9900-ti994a vex moarvm-hello test clean
+.PHONY: all hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-bbc 6502-atari2600 6502-2a03 6502-5200 6502-oric 8086-msdos 8086-pcxt i286-dos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 z80-msx z80-sms z80-gamegear 8080-altair 8080-imsai 6809-coco 6809-dragon32 6809-dragon64 6809-vectrex cp1610-intv tms9900-ti994a vex moarvm-hello test clean
 
-all: hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-bbc 6502-atari2600 6502-2a03 6502-5200 6502-oric 8086-msdos 8086-pcxt z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 z80-msx z80-sms z80-gamegear 8080-altair 8080-imsai 6809-coco 6809-dragon32 6809-dragon64 6809-vectrex cp1610-intv tms9900-ti994a vex moarvm-hello
+all: hosted-hello m30626fjpfp-freestanding 6502-freestanding 68000-freestanding pdp7-freestanding 6502-dos33 6502-vic20 6502-c64 6502-atari400 6502-bbc 6502-atari2600 6502-2a03 6502-5200 6502-oric 8086-msdos 8086-pcxt i286-dos z80-trs80 z80-coleco z80-zxspectrum z80-cpc z80-zx81 z80-msx z80-sms z80-gamegear 8080-altair 8080-imsai 6809-coco 6809-dragon32 6809-dragon64 6809-vectrex cp1610-intv tms9900-ti994a vex moarvm-hello
 
 hosted-hello:
 	$(MAKE) -C $(EXAMPLES_DIR)hosted-hello
@@ -51,6 +51,9 @@ pdp7-freestanding:
 
 8086-pcxt:
 	$(MAKE) -C $(EXAMPLES_DIR)8086-pcxt
+
+i286-dos:
+	$(MAKE) -C $(EXAMPLES_DIR)i286-dos
 
 z80-trs80:
 	$(MAKE) -C $(EXAMPLES_DIR)z80-trs80
@@ -136,6 +139,7 @@ test:
 	$(MAKE) -C $(EXAMPLES_DIR)8080-imsai test
 	$(MAKE) -C $(EXAMPLES_DIR)8086-msdos test
 	$(MAKE) -C $(EXAMPLES_DIR)8086-pcxt test
+	$(MAKE) -C $(EXAMPLES_DIR)i286-dos test
 	$(MAKE) -C $(EXAMPLES_DIR)6809-coco test
 	$(MAKE) -C $(EXAMPLES_DIR)6809-dragon32 test
 	$(MAKE) -C $(EXAMPLES_DIR)6809-dragon64 test
@@ -162,6 +166,7 @@ clean:
 	$(MAKE) -C $(EXAMPLES_DIR)6502-oric clean
 	$(MAKE) -C $(EXAMPLES_DIR)8086-msdos clean
 	$(MAKE) -C $(EXAMPLES_DIR)8086-pcxt clean
+	$(MAKE) -C $(EXAMPLES_DIR)i286-dos clean
 	$(MAKE) -C $(EXAMPLES_DIR)z80-trs80 clean
 	$(MAKE) -C $(EXAMPLES_DIR)z80-coleco clean
 	$(MAKE) -C $(EXAMPLES_DIR)z80-zxspectrum clean

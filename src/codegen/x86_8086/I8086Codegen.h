@@ -56,8 +56,6 @@ class I8086Codegen : public Backend, protected TextCodegenBase {
                                                 const std::string &sourcePath) const override;
 
    private:
-    bool dosAbi_;
-
     void emitPlacement(long address);
     void genFunction(const ir::FunctionBody &fn);
     void genStmt(const ir::Stmt &s);
@@ -216,8 +214,14 @@ class I8086Codegen : public Backend, protected TextCodegenBase {
 
     int lastDebugLine_ = 0;
     bool debugMapEnabled_ = false;
-    std::vector<std::pair<std::string, bool>> debugSymbols_;
     void emitSourceLine(int line);
+
+   protected:
+    // Protected (not private) so I286Codegen's name()/description() and
+    // debugMap()/debugMapPreLink() overrides can read dosAbi_/debugSymbols_ too - see
+    // I386Codegen.h's identical comment, which this mirrors.
+    bool dosAbi_;
+    std::vector<std::pair<std::string, bool>> debugSymbols_;
 };
 
 }  // namespace rcc

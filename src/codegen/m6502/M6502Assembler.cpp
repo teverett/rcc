@@ -273,15 +273,19 @@ class Assembler {
     }
 
     // In object mode (`allowExternal_`), any local address reference -
-    // not just an external symbol - needs a relocation.
+    // not just an external symbol - needs a relocation. `localName`, when
+    // given, additionally captures a found-locally symbol's own name (see
+    // emitImmLow()/emitImmHigh()'s own comment for why they, alone among
+    // this assembler's emit* helpers, need it).
     uint32_t evalExpr(const std::vector<Syllable> &syls, std::string *externalName = nullptr,
-                       bool *needsBaseShift = nullptr) {
+                       bool *needsBaseShift = nullptr, std::string *localName = nullptr) {
         uint32_t total = 0;
         for (const auto &syl : syls) {
             bool wasExternal = false, wasLocalAddress = false;
             uint32_t v = resolveSyllable(syl, &wasExternal, &wasLocalAddress);
             if (wasExternal && externalName) *externalName = syl.text;
             if (wasLocalAddress && needsBaseShift) *needsBaseShift = true;
+            if (wasLocalAddress && localName) *localName = syl.text;
             if (syl.sign == '-') {
                 total -= v;
             } else {
@@ -351,27 +355,56 @@ class Assembler {
     // `ldai`/`adci`/`andi`/`eori`/`ldyi`/`ldxi` immediate operand, and `dblo`'s data
     // byte: the LOW byte of the resolved value - equivalent to a real
     // assembler's `#<label` low-byte operator, spelled as a plain mnemonic.
+    //
+    // A locally-defined symbol (`needsBaseShift`) is relocated by NAME here,
+    // not via the generic ".." same-object shift `emitAbsOperand()` uses -
+    // deliberately, not an oversight: GenericLinker.cpp's ".." patch applies
+    // the object's own base-shift to this low byte and the matching
+    // `emitImmHigh()` call's high byte as two independent 8-bit additions,
+    // with no way to carry the low byte's overflow into the high byte (they
+    // aren't even adjacent bytes of one field - `adci`/`adci_hi` are two
+    // separate instructions). Once (local pre-link low byte + shift's own
+    // low byte) >= 256, the resulting address comes out exactly 0x100 low -
+    // confirmed by direct reproduction (src/rt/apple2/'s ProDOS wrappers hit
+    // this; see docs/known-bugs.md). Relocating by name instead reuses
+    // GenericLinker's `globalSymbols` lookup, which holds each symbol's
+    // already-fully-resolved final address (a single correct integer
+    // addition, not a byte-split one) - the same reason an actually-
+    // external reference was never affected by this bug.
     void emitImmLow(const std::vector<Syllable> &e) {
-        std::string externalName;
+        std::string externalName, localName;
         bool needsBaseShift = false;
-        uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
+        uint32_t v = evalExpr(e, &externalName, &needsBaseShift, &localName);
+        // Only a bare `label` operand (one syllable, no "+n"/"-n" adjustment)
+        // takes the by-name fix below - an adjusted expression (e.g.
+        // `Lret-1`, used elsewhere for a manually-computed return address)
+        // keeps the plain local value this function already has in `v` and
+        // the old ".." relocation, since there's no way to carry a residual
+        // adjustment through a by-name relocation here.
+        bool bareLocalLabel = needsBaseShift && e.size() == 1 && e[0].sign != '-';
         if (stage_ == 2 && allowExternal_) {
-            if (needsBaseShift) relocations_.push_back({offset_, "..", kM6502RelocAbs16Lo});
+            if (needsBaseShift && !bareLocalLabel) relocations_.push_back({offset_, "..", kM6502RelocAbs16Lo});
+            if (bareLocalLabel) externalName = localName;
             if (!externalName.empty()) relocations_.push_back({offset_, externalName, kM6502RelocAbs16Lo});
         }
-        emit8(static_cast<uint8_t>(v & 0xFF));
+        emit8(static_cast<uint8_t>(bareLocalLabel ? 0 : (v & 0xFF)));
     }
     // `ldai_hi`/`adci_hi` immediate operand and `dbhi`'s data byte: the
-    // HIGH byte of the resolved value (a real assembler's `#>label`).
+    // HIGH byte of the resolved value (a real assembler's `#>label`). See
+    // emitImmLow()'s own comment for why a local symbol is relocated by
+    // name here instead of via ".. "'s same-object shift.
     void emitImmHigh(const std::vector<Syllable> &e) {
-        std::string externalName;
+        std::string externalName, localName;
         bool needsBaseShift = false;
-        uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
+        uint32_t v = evalExpr(e, &externalName, &needsBaseShift, &localName);
+        // See emitImmLow()'s own comment on `bareLocalLabel`.
+        bool bareLocalLabel = needsBaseShift && e.size() == 1 && e[0].sign != '-';
         if (stage_ == 2 && allowExternal_) {
-            if (needsBaseShift) relocations_.push_back({offset_, "..", kM6502RelocAbs16Hi});
+            if (needsBaseShift && !bareLocalLabel) relocations_.push_back({offset_, "..", kM6502RelocAbs16Hi});
+            if (bareLocalLabel) externalName = localName;
             if (!externalName.empty()) relocations_.push_back({offset_, externalName, kM6502RelocAbs16Hi});
         }
-        emit8(static_cast<uint8_t>((v >> 8) & 0xFF));
+        emit8(static_cast<uint8_t>(bareLocalLabel ? 0 : ((v >> 8) & 0xFF)));
     }
     // `ldaind`/`staind` operand: zero-page indirect-indexed addressing is
     // only legal for an address that fits in zero page.
@@ -409,9 +442,13 @@ class Assembler {
     // from OSFIND's own return value in A - staged through an ordinary
     // global (`sta`) and loaded back with `ldy label` (also a natural
     // symmetry fix: `lda`/`sta` already had absolute addressing, `ldx`/
-    // `ldy` didn't). Not a general 6502 encoder otherwise: no X/Y-indexed
-    // modes, no absolute STX/STY/CMP/CPX/CPY, no TAX/TXA/TAY/TYA - exactly
-    // the mnemonic/operand combinations used here.
+    // `ldy` didn't). Plus absolute `sty` (real opcode $8C), for
+    // src/rt/apple2/'s own `a2_pread()`: the Monitor ROM's PREAD routine
+    // returns its result in Y (not A), so retrieving it needs a Y-to-
+    // memory store, which `sta`/absolute `ldy` alone can't do. Not a
+    // general 6502 encoder otherwise: no X/Y-indexed modes, no absolute
+    // STX/CMP/CPX/CPY, no TAX/TXA/TAY/TYA - exactly the mnemonic/operand
+    // combinations used here.
     void encodeInstr(const std::string &mnemonic, const std::vector<std::vector<Syllable>> &ops) {
         auto one = [&]() -> const std::vector<Syllable> & {
             if (ops.size() != 1) fail("'" + mnemonic + "' needs exactly one operand");
@@ -428,7 +465,7 @@ class Assembler {
         static const std::unordered_map<std::string, uint8_t> absolute = {
             {"lda", 0xAD}, {"sta", 0x8D}, {"adc", 0x6D}, {"sbc", 0xED}, {"and", 0x2D}, {"ora", 0x0D}, {"eor", 0x4D},
             {"asl", 0x0E}, {"lsr", 0x4E}, {"rol", 0x2E}, {"ror", 0x6E}, {"inc", 0xEE}, {"dec", 0xCE},
-            {"ldx", 0xAE}, {"ldy", 0xAC},
+            {"ldx", 0xAE}, {"ldy", 0xAC}, {"sty", 0x8C},
             {"jmp", 0x4C}, {"jsr", 0x20},
             // Real opcode $6C, JMP indirect: operand is the address of a
             // two-byte cell holding the jump target.

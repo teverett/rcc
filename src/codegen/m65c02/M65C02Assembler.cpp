@@ -273,13 +273,14 @@ class Assembler {
     }
 
     uint32_t evalExpr(const std::vector<Syllable> &syls, std::string *externalName = nullptr,
-                       bool *needsBaseShift = nullptr) {
+                       bool *needsBaseShift = nullptr, std::string *localName = nullptr) {
         uint32_t total = 0;
         for (const auto &syl : syls) {
             bool wasExternal = false, wasLocalAddress = false;
             uint32_t v = resolveSyllable(syl, &wasExternal, &wasLocalAddress);
             if (wasExternal && externalName) *externalName = syl.text;
             if (wasLocalAddress && needsBaseShift) *needsBaseShift = true;
+            if (wasLocalAddress && localName) *localName = syl.text;
             if (syl.sign == '-') {
                 total -= v;
             } else {
@@ -347,26 +348,50 @@ class Assembler {
 
     // The LOW byte of e's resolved value - equivalent to a real assembler's
     // #<label low-byte operator, just spelled as a plain mnemonic.
+    //
+    // A bare locally-defined-label operand (`bareLocalLabel`) is relocated
+    // by NAME here, not via the generic ".." same-object shift
+    // `emitAbsOperand()` uses above - deliberately: GenericLinker.cpp's ".."
+    // patch applies the object's own base-shift to this low byte and the
+    // matching emitImmHigh() call's high byte as two independent 8-bit
+    // additions, with no way to carry the low byte's overflow into the high
+    // byte (they aren't even adjacent bytes of one field - the low/high
+    // halves come from two separate instructions). Once (local pre-link low
+    // byte + the shift's own low byte) >= 256, the resulting address comes
+    // out exactly 0x100 low - see docs/known-bugs.md and
+    // M6502Assembler.cpp's identical fix (the same bug, same mechanism, in
+    // the sibling backend). Relocating by name instead reuses
+    // GenericLinker's `globalSymbols` lookup, which holds each symbol's
+    // already-fully-resolved final address (one correct integer addition,
+    // not a byte-split one). An expression with more than the bare label
+    // (e.g. `Lret-1`, used for a manually-computed return address) keeps
+    // the old ".." path, since there's no residual adjustment to carry
+    // through a by-name relocation here.
     void emitImmLow(const std::vector<Syllable> &e) {
-        std::string externalName;
+        std::string externalName, localName;
         bool needsBaseShift = false;
-        uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
+        uint32_t v = evalExpr(e, &externalName, &needsBaseShift, &localName);
+        bool bareLocalLabel = needsBaseShift && e.size() == 1 && e[0].sign != '-';
         if (stage_ == 2 && allowExternal_) {
-            if (needsBaseShift) relocations_.push_back({offset_, "..", kM65C02RelocAbsLo8});
+            if (needsBaseShift && !bareLocalLabel) relocations_.push_back({offset_, "..", kM65C02RelocAbsLo8});
+            if (bareLocalLabel) externalName = localName;
             if (!externalName.empty()) relocations_.push_back({offset_, externalName, kM65C02RelocAbsLo8});
         }
-        emit8(static_cast<uint8_t>(v & 0xFF));
+        emit8(static_cast<uint8_t>(bareLocalLabel ? 0 : (v & 0xFF)));
     }
-    // The HIGH byte of e's resolved value (a real assembler's #>label).
+    // The HIGH byte of e's resolved value (a real assembler's #>label). See
+    // emitImmLow()'s own comment on `bareLocalLabel`.
     void emitImmHigh(const std::vector<Syllable> &e) {
-        std::string externalName;
+        std::string externalName, localName;
         bool needsBaseShift = false;
-        uint32_t v = evalExpr(e, &externalName, &needsBaseShift);
+        uint32_t v = evalExpr(e, &externalName, &needsBaseShift, &localName);
+        bool bareLocalLabel = needsBaseShift && e.size() == 1 && e[0].sign != '-';
         if (stage_ == 2 && allowExternal_) {
-            if (needsBaseShift) relocations_.push_back({offset_, "..", kM65C02RelocAbsHi8});
+            if (needsBaseShift && !bareLocalLabel) relocations_.push_back({offset_, "..", kM65C02RelocAbsHi8});
+            if (bareLocalLabel) externalName = localName;
             if (!externalName.empty()) relocations_.push_back({offset_, externalName, kM65C02RelocAbsHi8});
         }
-        emit8(static_cast<uint8_t>((v >> 8) & 0xFF));
+        emit8(static_cast<uint8_t>(bareLocalLabel ? 0 : ((v >> 8) & 0xFF)));
     }
     // A single-byte zero-page address operand: ldaind/staind's own operand
     // (zero-page indirect-indexed addressing is only legal for an address
@@ -400,10 +425,15 @@ class Assembler {
     // bbs0-7/wai/stp) real WDC 65C02 instructions no C-level construct maps
     // to, plus `ldxi` (immediate-only LDX, same reason and same opcode as
     // M6502Assembler.cpp's own - CIO IOCB-number selection in
-    // src/rt/atari400/) - these are never emitted by M65C02Codegen.cpp
-    // itself, only reachable by a user's own `asm { }` block (see
-    // docs/language.md's "Inline asm" - exactly the escape hatch that
-    // comment describes).
+    // src/rt/atari400/) and absolute `ldx`/`ldy`/`sty` (real opcodes $AE/
+    // $AC/$8C, same reason and same opcodes as M6502Assembler.cpp's own -
+    // src/rt/apple2/'s a2_hplot()/a2_hlineto()/a2_pread() need a dynamic
+    // byte in X or Y, and apple2.c is compiled for both `--target=6502`
+    // and `--target=65c02` - see tests/run_apple2_format_tests.sh's own
+    // `for target in 6502 65c02` loop) - these are never emitted by
+    // M65C02Codegen.cpp itself, only reachable by a user's own `asm { }`
+    // block (see docs/language.md's "Inline asm" - exactly the escape
+    // hatch that comment describes).
     void encodeInstr(const std::string &mnemonic, const std::vector<std::vector<Syllable>> &ops) {
         auto one = [&]() -> const std::vector<Syllable> & {
             if (ops.size() != 1) fail("'" + mnemonic + "' needs exactly one operand");
@@ -425,6 +455,7 @@ class Assembler {
         static const std::unordered_map<std::string, uint8_t> absolute = {
             {"lda", 0xAD}, {"sta", 0x8D}, {"adc", 0x6D}, {"sbc", 0xED}, {"and", 0x2D}, {"ora", 0x0D}, {"eor", 0x4D},
             {"asl", 0x0E}, {"lsr", 0x4E}, {"rol", 0x2E}, {"ror", 0x6E}, {"inc", 0xEE}, {"dec", 0xCE},
+            {"ldx", 0xAE}, {"ldy", 0xAC}, {"sty", 0x8C},
             {"jmp", 0x4C}, {"jsr", 0x20},
             {"jmpi", 0x6C},  // JMP indirect ($6C): operand is the address of a two-byte jump-target cell
         };

@@ -108,4 +108,29 @@ print(f"PASS apple2_base_8192_{target} (aux_type={aux_type} result={val})")
 PY
 done
 
+# a2_hgr()/a2_hgr2() are each a single, parameterless `jsr` - checked at
+# the byte level (JSR opcode $20 + the ROM entry point's own address,
+# low byte first) rather than with a simulator, since there's no register
+# staging to observe.
+cat >hgr_main.c <<'EOF'
+extern void a2_hgr();
+extern void a2_hgr2();
+int main() {
+    a2_hgr();
+    a2_hgr2();
+    return 0;
+}
+EOF
+"$RCC" --target=6502 --format=coff hgr_main.c >/dev/null
+"$RCC" --target=6502 --format=coff "$ROOT_DIR/src/rt/apple2/apple2.c" >/dev/null
+"$RCC" --link --target=6502 --format=raw --out=hgr.flat build/hgr_main.o build/apple2.o
+
+python3 - "$PWD" <<'PY' || fail=1
+import sys
+data = open(sys.argv[1] + "/hgr.flat", "rb").read()
+assert bytes([0x20, 0xE2, 0xF3]) in data, "a2_hgr: expected 'jsr $F3E2' bytes (20 E2 F3) not found"
+assert bytes([0x20, 0xD8, 0xF3]) in data, "a2_hgr2: expected 'jsr $F3D8' bytes (20 D8 F3) not found"
+print("PASS apple2_hgr_hgr2_jsr_targets")
+PY
+
 exit $fail

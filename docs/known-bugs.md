@@ -3,6 +3,60 @@
 Defects that are understood but not yet fixed. Each entry gives the
 affected code, the trigger, and the wrong behavior.
 
+## `tests/run_pcbios_tests.sh` fails every test under CI's Linux `dosbox-x`, but all pass locally under a current Homebrew `dosbox-x` on macOS
+
+Discovered 2026-11-27 from a GitHub Actions `platformtests.yml` run on `1cb55b8` (the
+"upgrade PC bios" commit): every one of `tests/run_pcbios_tests.sh`'s 17 checks FAILed with
+`(missing - program crashed or never reached the write)` (the script's own `read_byte()`
+placeholder for "the test program's `.com` never wrote the file it was supposed to"), while
+`examples/8086-pcxt`'s own `test.py`-based check - built from the exact same `pcbios.c`/`msdos.c`,
+run immediately before it in the same job, via the same `dosbox-x -c ... -fastlaunch -nogui
+-nomenu` invocation shape - PASSed. Running `tests/run_pcbios_tests.sh build/bin/rcc` locally on
+macOS (Homebrew `dosbox-x` 2026.10.01) passes all 17 checks cleanly against the identical
+committed `pcbios.c`/`msdos.c`/`run_pcbios_tests.sh` sources, so this isn't reproduced locally.
+
+Not root-caused. The one concrete difference between the passing `test.py` program and every
+failing `run_pcbios_tests.sh` program is that every `run_pcbios_tests.sh` test's own
+`write_byte_helper_c` round-trips through `dos_create()`+`dos_buf_set()`+`dos_write()`+
+`dos_close()`, while `test.py`'s `main.c` only calls `dos_create()` (no `dos_write()`) - so
+`msdos.c`'s `dos_write()` (or something specific to the combination of a BIOS call from
+`pcbios.c` immediately followed by an `INT 21h/40h` write) failing silently under whichever
+`dosbox-x` build/version `platformtests.yml`'s `apt-get install dosbox-x` resolves to on that
+runner, without reproducing under a newer/different `dosbox-x` build, is the leading theory - not
+confirmed. `platformtests.yml` pins no `dosbox-x` version, so which exact build CI exercises
+isn't nailed down yet either. Fixing this for real needs either the exact CI `dosbox-x` version
+reproduced locally (or its stderr captured instead of discarded, in `tests/run_pcbios_tests.sh`'s
+own `run_com()`) to see what actually happens on that build, or confirmation this is a
+`dosbox-x`-version-specific defect worth pinning around.
+
+Ubuntu's `noble` (24.04, what `ubuntu-latest` resolves to) carries exactly one `dosbox-x` build,
+`2024.03.01+dfsg-1build2` - there's no older version left in the live archive to pin `apt-get
+install dosbox-x=...` to for comparison (`jammy`/22.04 never packaged `dosbox-x` at all), and no
+newer one without adding a mismatched later release's repo or a PPA.
+
+`./tests/run_pcbios_tests.sh build/bin/rcc` is commented out of `platformtests.yml`'s own Linux
+"Run example tests needing a target simulator" step in the meantime, so CI stays green rather
+than reporting this as a `pcbios.c`/`msdos.c` regression - re-add it once this is root-caused.
+
+## `i8008`'s linker drops a carry between a locally-defined symbol's low/high address bytes
+
+Found 2026-11-27 by inspection (not yet reproduced with a failing test), while root-causing and
+fixing the identical defect in `M6502Assembler.cpp`/`M65C02Assembler.cpp` (see that fix's own
+comment on `emitImmLow()`/`emitImmHigh()` for the full mechanism). `I8008Assembler.cpp`'s own
+`emitImmLow()`/`emitImmHigh()` (around line 305/316) use the exact same shape: a locally-defined
+symbol's address, split across two separate low/high-byte-immediate instructions, relocated via
+`".."` same-object base-shift, patched by `I8008LinkerFactory.cpp`'s own `patchAbs16Lo`/
+`patchAbs16Hi` as two independent 8-bit additions with no carry between them. Whenever (the
+symbol's own pre-link low byte + the object's own base-shift's low byte) >= 256, the resulting
+address will come out exactly 0x100 low, under separate compilation (`--format=coff` + `--link`)
+only - the same condition confirmed on 6502/65c02's identical code shape.
+
+Not fixed; not yet confirmed to be reachable by i8008 in practice (would need a program with a
+locally-defined global addressed this way, compiled as a separate object, with the address
+happening to cross the byte boundary described above) or demonstrated with a failing test -
+flagging the shared defect here so it isn't rediscovered independently. The 6502/65c02 fix (see
+`M6502Assembler.cpp`'s `emitImmLow()` comment) is a direct template for fixing this here too.
+
 ## `tests/compound_assign_inc_dec_ternary.c` fails on `i8008`
 
 Discovered 2026-11-26 while verifying `--debug-map`'s own regression
@@ -321,10 +375,15 @@ codegen's own byte-composed load/store. Not yet fixed; both tests are
 skip-listed for `r10000` in `tests/run_tests.sh`'s `is_known_unsupported()`
 rather than left as an unexplained failure.
 
-## `tests/run_tests.sh --target=8086`/`8088` has no working test execution
+## `tests/run_tests.sh --target=8086`/`8088`/`i286`/`i286-dos` has no working test execution
 
-Affects `tests/run_tests.sh`'s `8086|8088)` prerequisites case,
-`check_8086()`, and `tests/qemu_wait.py`'s `--8086-image` handling.
+Affects `tests/run_tests.sh`'s `8086|8088|i286|i286-dos)` prerequisites case,
+`check_8086()`/`check_i286()`, and `tests/qemu_wait.py`'s `--8086-image` handling.
+`i286`/`i286-dos` share the exact same cause as `8086`/`8088`: `I286Codegen`
+inherits `I8086Codegen::generate()` and `I8086LinkerFactory.cpp`'s entry stub
+completely unchanged (same flat binary, same base address, same missing boot
+framing), so `check_i286()` is just `check_8086()` under a different target name
+and hits the identical wall.
 
 `I8086LinkerFactory.cpp`'s entry stub and `I8086Codegen::generate()`'s
 single-file entry sequence emit a plain flat binary loaded/entered at
@@ -635,10 +694,13 @@ resolve `$arg` to an absolute path (e.g. `RCC="$(cd "$(dirname "$arg")"
 way `ROOT_DIR`/`SCRIPT_DIR` already resolve themselves a few lines
 above.
 
-## `tests/multidecl_array.c`/`tests/multidecl_scalar.c` fail on `--target=stm32`/`i386`/`cortex-m3`
+## `tests/multidecl_array.c`/`tests/multidecl_scalar.c` fail on `--target=stm32`/`i386`/`i486`/`i586`/`cortex-m3`
 
-Affects `src/codegen/stm32/STM32Codegen.cpp`, `src/codegen/i386/I386Codegen.cpp`, and
-`src/codegen/armm/ArmMCodegen.cpp` (`cortex-m3`), discovered running `make test` after merging
+Affects `src/codegen/stm32/STM32Codegen.cpp`, `src/codegen/i386/I386Codegen.cpp` (and
+`src/codegen/i486/I486Codegen.cpp`/`src/codegen/i586/I586Codegen.cpp`, which both inherit
+`I386Codegen::generate()` unchanged, so they reproduce the identical failure), and
+`src/codegen/armm/ArmMCodegen.cpp` (`cortex-m3`),
+discovered running `make test` after merging
 in the comma-separated-declarator-list feature (`grammar/c/CParser.g4`/`src/ast/BuildAst.cpp`/
 `src/ir/IRBuilder.cpp` - see these two tests' own header comments). Every other target exercised
 (`6502`-family, `pdp1`/`pdp7`, `68000`, `mc68328`, `8080`, `z80`, `8051`, `r32c`/`m32c`,
@@ -750,51 +812,6 @@ requiring a deref/index/member/plain-ident) moved into `BuildAst.cpp`, replacing
 shape-specific alternatives - not yet done; worked around in `atari5200.c`'s own
 hardware-register macros by never emitting the parenthesized shape.
 
-## The 6502 backend corrupts a call made right after a `goto`-skipped local reads a global array
-
-Discovered while building the BASIC frontend's Apple ][ example/runtime
-(`examples/basic-6502-dos33/`, `src/rt/apple2/basic_apple2.c`): `GOSUB`/`RETURN`'s original
-dispatch lowering used a `switch` statement (desugared by `IRBuilder` into a hidden local holding
-the switched-on value), and the runtime call immediately following the `switch`'s own matching
-`goto` received a corrupted pointer argument on `--target=6502` - e.g. a string literal address
-passed to a print call came out pointing at unrelated memory, producing garbage text instead of
-the right string. An `int` argument to a call in the same position looked fine, which is what
-made this easy to miss at first (the bug is argument-content corruption at one specific call
-site, not a structural control-flow bug - the `goto`s and comparisons themselves all land and
-evaluate correctly).
-
-Root cause is still open. What's been ruled out by direct reproduction (`--target=6502`,
-`--format=raw`, via a two-global `int stack[N]; int sp;` test with no BASIC involved):
-- Needs **all** of: a local variable, assigned from a global-array read with a variable index
-  (`tmp = stack[sp];`, not a literal index or a literal value), inside a block only reached via a
-  forward `goto` that skips over other code first - removing any one of those three (the local
-  itself, the array read, or the `goto`-skip) makes the bug disappear.
-- Needs **separate compilation**: the exact same source, `#include`-combined into one file and
-  compiled directly to `--format=raw` (no object files, no `--link`), runs correctly every time.
-  Only compiling it as its own `--format=coff` object and linking it against another
-  separately-compiled object (e.g. `apple2.lib`) reproduces it - independent of `--base`/link
-  address, so it isn't a base-address-dependent relocation bug in the obvious sense.
-- Not a control-flow bug: `--dump-ir`/tracing confirms every `goto` lands on the right label and
-  every `if` evaluates the right comparison. Not simply "any local after a `goto`": a local
-  initialized from a literal (`tmp = 1;`) in the exact same `goto`-skipped position works fine.
-  Not a general multi-call sequencing bug: an arbitrary sequence of plain calls with no local
-  variables and no `goto` at all (`print_str(...); print_int(...); print_str(...); ...`) works
-  fine, including many calls in a row.
-- Inspected and ruled out as the direct cause: `src/ir/IRBuilder.cpp`'s `assignFrameOffsets`
-  (frame-slot assignment walks the actual built tree correctly, including through this exact
-  shape); `M6502Codegen.cpp`'s `genFunction`/`genEpilogue` (the software frame pointer/stack
-  bump-allocator convention is self-consistent and call-balanced by inspection); 6502 label
-  numbering (`newLabel()`/`irLabel()` share one counter, but resolve per-object in
-  `M6502Assembler.cpp`, so can't collide across separately-linked objects); `GenericLinker.cpp`'s
-  `".."` base-shift relocation (takes a trivial, address-independent path for a single-function
-  object, which is what the repro uses).
-
-Not fixed. Worked around in `BasicFrontend.cpp`: `GOSUB`/`RETURN`'s dispatch no longer uses
-`switch` (which needed the hidden local) or any other local of its own, so it doesn't hit this -
-see that file's `appendGosubDispatch` for the `if`/`goto` chain used instead. Revisit with a
-from-scratch 6502-only minimal repro (no runtime library, hand-written globals) and a
-relocation-table dump of the linked object if this needs root-causing for real.
-
 ## `tests/local_cse_convert.c` fails on `powerpc` even without `--optimize`
 
 Discovered 2026-11-20 while independently re-verifying `tests/run_tests.sh --target=powerpc`
@@ -885,3 +902,38 @@ checks the real pointer stride directly for exactly this reason). Likely the sam
 non-power-of-two (`sizeof(struct Three) == 3`) element-stride index-scaling issue other targets
 have hit, but not yet confirmed to be the identical root cause - not root-caused for `avr`
 specifically. Not in `tests/run_tests.sh`'s `is_known_unsupported()` skip-list yet.
+
+## A C variable literally named `local` fails to compile on every target
+
+Discovered 2026-11-27 while writing `tests/i286/pointers_structs.c`. Any program
+with a variable, parameter, or array named `local` (e.g. `int local = 5;`) fails
+on every target with `internal error: rcc's own generated IR does not parse
+against grammar/rccir/RccIRLexer.g4 + grammar/rccir/RccIRParser.g4 (... mismatched
+input 'local' expecting IDENT)`, even without `--dump-ir` - rcc always round-trips
+its own generated IR text through that grammar as an internal consistency check.
+`local` is a reserved keyword in `grammar/rccir/RccIRParser.g4` (a `Local` slot's
+own textual IR form), so `IRPrinter.cpp` prints an identifier named `local`
+indistinguishably from that keyword, and the grammar then refuses to parse it
+back as a plain `IDENT`. Not root-caused further or fixed (out of scope for the
+i286 work that found it); `tests/i286/pointers_structs.c` avoids it by naming its
+array `localArr` instead.
+
+## `i286`'s protected-mode instructions have no CPU-execution test, only encoding tests
+
+`tests/i286_assembler_test.cpp` checks every instruction `I8086Assembler.cpp`'s
+`allow286_` path adds (`pusha`/`popa`, `push`/`pushb` of an immediate, 2-/3-operand
+`imul`, shift-by-immediate-count, `bound`, `enter`/`leave`, `insb`/`insw`/`outsb`/
+`outsw`, and the full `lgdt`/`sgdt`/`lidt`/`sidt`/`lldt`/`sldt`/`ltr`/`str`/`lmsw`/
+`smsw`/`clts`/`arpl`/`verr`/`verw` descriptor-table group) byte-for-byte against the
+Intel 80286 Programmer's Reference Manual's own opcode tables, but none of it is
+verified by actually running on a CPU. Every emulator available in this environment
+(`qemu-system-i386`, `dosbox-x`, `bochs`) only models 386-or-later x86 internals -
+even when told to run in 16-bit real/protected mode, none of them reproduce genuine
+80286-specific behavior (e.g. a real 80286 only loads 24 bits of `LGDT`/`LIDT`'s base
+address and ignores the rest; a 386-or-later core loads all 32). There's no real
+80286 model in any tool on `PATH` to test against. The general (non-protected-mode)
+instructions this backend adds (`pusha`/`popa`/`bound`/`enter`/`leave`/etc.) behave
+identically on any 386-or-later core in real mode, so those are at least
+encoding-correct and would run correctly on real hardware too; only the
+protected-mode group's CPU-level *behavior* (as opposed to its encoding) is
+unverifiable here.

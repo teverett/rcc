@@ -222,6 +222,9 @@ jobs:
       # image to run it under - see docs/known-bugs.md's own entry on
       # this), so `make test`'s own recipe hard-fails there; every
       # target after it in that same recipe passes cleanly on its own.
+      # `i286`/`i286-dos` share that exact same gap (I286Codegen inherits
+      # I8086Codegen::generate() unchanged) and are skipped here for the
+      # identical reason - see that same known-bugs.md entry.
       # `shell: bash -el {0}`: rcc isn't bundled with its own copy of
       # the conda-forge antlr4 runtime yet (that happens below), so it
       # still needs the conda environment active to resolve it at
@@ -229,7 +232,7 @@ jobs:
       - name: Run rcc's own test suite against every simulator-backed target
         shell: bash -el {0}
         run: |
-          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
+          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 i486 i586 vex; do
             echo "::group::--target=$target"
             ./tests/run_tests.sh build/bin/rcc --target="$target"
             echo "::endgroup::"
@@ -242,7 +245,7 @@ jobs:
       - name: Run rcc's own test suite against every simulator-backed target, with --optimize
         shell: bash -el {0}
         run: |
-          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 vex; do
+          for target in pdp1 pdp7 6502 65c02 68000 mc68328 8080 z80 8051 stm32 i386 i486 i586 vex; do
             echo "::group::--target=$target --optimize"
             ./tests/run_tests.sh build/bin/rcc --target="$target" --optimize
             echo "::endgroup::"

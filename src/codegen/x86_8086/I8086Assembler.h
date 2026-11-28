@@ -69,4 +69,19 @@ std::string assembleI8086DebugMap(const std::string &asmText, const std::string 
                                    const std::vector<std::pair<std::string, bool>> &symbols,
                                      bool allowExternal = false);
 
+// Same narrow dialect as assembleI8086()/assembleI8086Object()/assembleI8086DebugMap(), plus
+// the instructions the 80286 adds over the plain 8086: `pusha`/`popa`, `push`/`pushb` of an
+// immediate, 2- and 3-operand `imul` with an immediate, a shift/rotate (`shl`/`shr`/`sar`/
+// `rcl`/`rcr`) by an immediate count other than 1, `bound`, `enter`/`leave`, `insb`/`insw`/
+// `outsb`/`outsw`, and the protected-mode/descriptor-table group (`lgdt`/`sgdt`/`lidt`/`sidt`/
+// `lldt`/`sldt`/`ltr`/`str`/`lmsw`/`smsw`/`clts`/`arpl`/`verr`/`verw`). assembleI8086()'s own
+// three entry points still reject every one of those with a clear "needs --target=i286" error,
+// so a plain 8086/8088/8086-dos program can never silently depend on one.
+std::string assembleI286(const std::string &asmText, I8086OutputFormat format = I8086OutputFormat::Bin,
+                          bool allowExternal = false, uint16_t machineType = kI8086CoffMachine);
+ObjectFile assembleI286Object(const std::string &asmText, uint16_t machineType = kI8086CoffMachine);
+std::string assembleI286DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols,
+                                  bool allowExternal = false);
+
 }  // namespace rcc

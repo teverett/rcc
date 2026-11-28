@@ -118,12 +118,28 @@ cp1610-intv-elf    General Instrument CP1610 - ELF relocatable object
 cp1610-intv-intvbin    General Instrument CP1610 - Mattel Intellivision cartridge ROM image (plain .bin, $5000-based)
 cp1610-intv-raw    General Instrument CP1610 - flat binary image, no container
 cp1610-raw    General Instrument CP1610 - flat binary image, no container
+i286-aout    Intel 80286 (real mode) - a.out relocatable object
+i286-coff    Intel 80286 (real mode) - COFF relocatable object
+i286-dos-aout    Intel 80286 (MS-DOS .com) - a.out relocatable object
+i286-dos-coff    Intel 80286 (MS-DOS .com) - COFF relocatable object
+i286-dos-elf    Intel 80286 (MS-DOS .com) - ELF relocatable object
+i286-dos-raw    Intel 80286 (MS-DOS .com) - flat binary image, no container
+i286-elf    Intel 80286 (real mode) - ELF relocatable object
+i286-raw    Intel 80286 (real mode) - flat binary image, no container
 i386-aout    Intel 386 - a.out relocatable object
 i386-coff    Intel 386 - COFF relocatable object
 i386-elf    Intel 386 - ELF relocatable object
 i386-linux    Intel 386
 i386-raw    Intel 386 - flat binary image, no container
 i386-windows    Intel 386
+i486-aout    Intel 486 - a.out relocatable object
+i486-coff    Intel 486 - COFF relocatable object
+i486-elf    Intel 486 - ELF relocatable object
+i486-raw    Intel 486 - flat binary image, no container
+i586-aout    Intel Pentium (i586) - a.out relocatable object
+i586-coff    Intel Pentium (i586) - COFF relocatable object
+i586-elf    Intel Pentium (i586) - ELF relocatable object
+i586-raw    Intel Pentium (i586) - flat binary image, no container
 m16c-aout    Renesas M16C - a.out relocatable object
 m16c-coff    Renesas M16C - COFF relocatable object
 m16c-elf    Renesas M16C - ELF relocatable object

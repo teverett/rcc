@@ -38,4 +38,27 @@ std::string assembleI386DebugMap(const std::string &asmText, const std::string &
                        const std::vector<std::pair<std::string, bool>> &symbols,
                                      bool allowExternal = false);
 
+// Same narrow dialect as assembleI386()/assembleI386Object()/assembleI386DebugMap(), plus the
+// six i486-only instructions I386Codegen.cpp never emits itself but an asm{} block may use:
+// bswap, xadd, cmpxchg, invd, wbinvd, invlpg. assembleI386()'s own three entry points still
+// reject those mnemonics, so a program built with --target=i386 that uses one fails to
+// assemble exactly as a real i386 chip would reject the opcode.
+std::string assembleI486(const std::string &asmText);
+ObjectFile assembleI486Object(const std::string &asmText);
+std::string assembleI486DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols,
+                                  bool allowExternal = false);
+
+// Same dialect as assembleI486()/assembleI486Object()/assembleI486DebugMap() (so every
+// i486-only instruction still assembles), plus the five i586-only instructions I386Codegen.cpp
+// never emits itself but an asm{} block may use: cpuid, rdtsc, rdmsr, wrmsr, cmpxchg8b.
+// assembleI386()/assembleI486()'s own entry points still reject those mnemonics, so a program
+// built with --target=i386 or --target=i486 that uses one fails to assemble exactly as a real
+// 386/486 chip would reject the opcode.
+std::string assembleI586(const std::string &asmText);
+ObjectFile assembleI586Object(const std::string &asmText);
+std::string assembleI586DebugMap(const std::string &asmText, const std::string &sourcePath,
+                                  const std::vector<std::pair<std::string, bool>> &symbols,
+                                  bool allowExternal = false);
+
 }  // namespace rcc

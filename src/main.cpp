@@ -57,6 +57,7 @@
 #include "codegen/vex/VexCodegen.h"
 #include "codegen/pdp7/Pdp7Codegen.h"
 #include "codegen/x86_8086/I8086Codegen.h"
+#include "codegen/x86_8086/I286Codegen.h"
 #include "codegen/m6502/M6502Codegen.h"
 #include "codegen/m65c02/M65C02Codegen.h"
 #include "codegen/m68k/M68kCodegen.h"
@@ -77,6 +78,8 @@
 #include "codegen/stm8/STM8Codegen.h"
 #include "codegen/stm32/STM32Codegen.h"
 #include "codegen/i386/I386Codegen.h"
+#include "codegen/i486/I486Codegen.h"
+#include "codegen/i586/I586Codegen.h"
 #include "codegen/pic16/PIC16Codegen.h"
 #include "codegen/pic18/PIC18Codegen.h"
 #include "codegen/mips/MipsCodegen.h"
@@ -319,8 +322,8 @@ std::string formatLinkedDebugMap(const rcc::ObjectFile &linked) {
 // independently valid on the command line). Used both for "unknown
 // --target" error messages and for --list-platforms.
 const std::vector<std::string> kTargetNames = {
-    "pdp1", "pdp7", "8086", "8088", "8086-dos", "6502", "65c02", "atari2600", "2a03", "5200", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "z80-msx", "6809", "6809-vectrex", "8008",
-    "stm8", "stm32", "i386", "m16c", "m30626fjpfp", "m32c", "r32c", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
+    "pdp1", "pdp7", "8086", "8088", "8086-dos", "i286", "i286-dos", "6502", "65c02", "atari2600", "2a03", "5200", "68000", "mc68328", "pdp11", "pdp10", "8080", "z80", "z80-coleco", "z80-msx", "6809", "6809-vectrex", "8008",
+    "stm8", "stm32", "i386", "i486", "i586", "m16c", "m30626fjpfp", "m32c", "r32c", "pic16", "pic18", "r10000", "r4000", "cortex-m3",
     "cortex-m4", "cortex-m7", "8051", "8052", "8031", "8032", "armv7a", "armv8a", "powerpc", "sparc",
     "vax", "avr", "alpha", "saturn", "tms320c6713", "tms9900", "z8000", "cp1610", "cp1610-intv", "parrotvm", "vex", "moarvm",
     "riscv32", "riscv64",
@@ -378,6 +381,8 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "pdp7") return std::make_unique<rcc::Pdp7Codegen>();
     if (target == "8086" || target == "8088") return std::make_unique<rcc::I8086Codegen>();
     if (target == "8086-dos") return std::make_unique<rcc::I8086Codegen>(/*dosAbi=*/true);
+    if (target == "i286") return std::make_unique<rcc::I286Codegen>();
+    if (target == "i286-dos") return std::make_unique<rcc::I286Codegen>(/*dosAbi=*/true);
     if (target == "6502") return std::make_unique<rcc::M6502Codegen>();
     if (target == "atari2600") return std::make_unique<rcc::M6502Codegen>(rcc::M6502Codegen::Variant::Atari2600);
     if (target == "2a03") return std::make_unique<rcc::M6502Codegen>(rcc::M6502Codegen::Variant::Nes2A03);
@@ -395,6 +400,8 @@ std::unique_ptr<rcc::Backend> makeBackend(const std::string &target) {
     if (target == "stm8") return std::make_unique<rcc::STM8Codegen>();
     if (target == "stm32") return std::make_unique<rcc::STM32Codegen>();
     if (target == "i386") return std::make_unique<rcc::I386Codegen>();
+    if (target == "i486") return std::make_unique<rcc::I486Codegen>();
+    if (target == "i586") return std::make_unique<rcc::I586Codegen>();
     if (target == "m16c" || target == "m30626fjpfp") return std::make_unique<rcc::M16cCodegen>();
     if (target == "m32c") return std::make_unique<rcc::M32cCodegen>();
     if (target == "r32c") return std::make_unique<rcc::R32cCodegen>();
@@ -432,6 +439,12 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     }
     if (target == "8086" || target == "8088") return rcc::makeI8086Linker();
     if (target == "8086-dos") return rcc::makeI8086DosLinker();
+    // i286/i286-dos reuse the plain 8086/8086-dos linkers unchanged: the 80286 entry/exit
+    // sequence and base address are identical to 8086's own (I8086Codegen::generate() only
+    // ever branches on dosAbi_, never on which assembler variant the caller picked), so
+    // there's nothing a dedicated i286 linker would do differently.
+    if (target == "i286") return rcc::makeI8086Linker();
+    if (target == "i286-dos") return rcc::makeI8086DosLinker();
     if (target == "z80") return baseAddressWords ? rcc::makeZ80Linker(*baseAddressWords) : rcc::makeZ80Linker();
     if (target == "z80-coleco") return rcc::makeColecoLinker();
     if (target == "z80-msx") return rcc::makeMsxLinker();
@@ -466,7 +479,7 @@ std::unique_ptr<rcc::TargetLinker> makeLinker(const std::string &target,
     if (target == "m16c" || target == "m30626fjpfp") return rcc::makeM16cLinker();
     if (target == "m32c") return rcc::makeM32cLinker();
     if (target == "r32c") return rcc::makeR32cLinker();
-    if (target == "i386") return rcc::makeI386Linker();
+    if (target == "i386" || target == "i486" || target == "i586") return rcc::makeI386Linker();
     if (target == "armv7a") return rcc::makeArmLinker();
     if (target == "armv8a") return rcc::makeArm64Linker();
     if (target == "cortex-m3" || target == "cortex-m4" || target == "cortex-m7") return rcc::makeArmMLinker();
@@ -1096,6 +1109,13 @@ int main(int argc, char **argv) {
     } else if (target == "8086-dos") {
         predefinedMacros["__8086__"] = "1";
         predefinedMacros["__MSDOS__"] = "1";
+    } else if (target == "i286") {
+        predefinedMacros["__8086__"] = "1";
+        predefinedMacros["__80286__"] = "1";
+    } else if (target == "i286-dos") {
+        predefinedMacros["__8086__"] = "1";
+        predefinedMacros["__80286__"] = "1";
+        predefinedMacros["__MSDOS__"] = "1";
     } else if (target == "6502") {
         predefinedMacros["__6502__"] = "1";
     } else if (target == "atari2600") {
@@ -1148,6 +1168,13 @@ int main(int argc, char **argv) {
         predefinedMacros["__STM32__"] = "1";
     } else if (target == "i386") {
         predefinedMacros["__I386__"] = "1";
+    } else if (target == "i486") {
+        predefinedMacros["__I386__"] = "1";
+        predefinedMacros["__I486__"] = "1";
+    } else if (target == "i586") {
+        predefinedMacros["__I386__"] = "1";
+        predefinedMacros["__I486__"] = "1";
+        predefinedMacros["__I586__"] = "1";
     } else if (target == "m16c" || target == "m30626fjpfp") {
         predefinedMacros["__M16C__"] = "1";
         if (target == "m30626fjpfp") predefinedMacros["__M30626FJPFP__"] = "1";

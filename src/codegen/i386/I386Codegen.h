@@ -239,12 +239,20 @@ class I386Codegen : public Backend, protected TextCodegenBase {
     std::vector<std::pair<std::string, std::string>> loopLabels_;
     std::map<int, std::string> irLabels_;  // see irLabel()
 
+    void emitSourceLine(int line);
+
+   protected:
+    // So I486Codegen's own assembleInProcess() override can apply the same
+    // windowsAbi_ -> COFF machine-type override I386Codegen::assembleInProcess() does.
+    bool windowsAbi() const { return windowsAbi_; }
+
     // Debug-map-only - see Pdp7Codegen.h's own comment on the identical
-    // members there, which this mirrors exactly.
+    // members there, which this mirrors exactly. Protected (not private) so
+    // I486Codegen's debugMap()/debugMapPreLink() overrides can read
+    // debugSymbols_ too.
     int lastDebugLine_ = 0;
     bool debugMapEnabled_ = false;
     std::vector<std::pair<std::string, bool>> debugSymbols_;
-    void emitSourceLine(int line);
 };
 
 }  // namespace rcc
